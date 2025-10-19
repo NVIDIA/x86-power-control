@@ -71,7 +71,105 @@
             "LineName": "SIO_S5",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "PDBMainPowerEnable",
+            "LineName": "MAIN_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDBMainPowerOk",
+            "LineName": "MAIN_PWR_OK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "USBPowerEnable",
+            "LineName": "USB_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerPG",
+            "LineName": "B0_M0_RUN_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board1RunPowerPG",
+            "LineName": "B1_M0_RUN_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerEnable",
+            "LineName": "B0_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board1RunPowerEnable",
+            "LineName": "B1_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0PreSystemReset",
+            "LineName": "B0_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1PreSystemReset",
+            "LineName": "B1_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "CpuResetIndicator",
+            "LineName": "CPU_RST_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownForce",
+            "LineName": "B0_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownForce",
+            "LineName": "B1_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownRequest",
+            "LineName": "B0_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownRequest",
+            "LineName": "B1_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownOk",
+            "LineName": "B0_M0_CPU_SHDN_OK_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownOk",
+            "LineName": "B1_M0_CPU_SHDN_OK_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
         }
+
+
     ],
     "timing_configs": {
         "PowerPulseMs": 200,

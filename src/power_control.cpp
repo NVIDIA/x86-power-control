@@ -42,7 +42,30 @@ PersistentState appState;
 PowerRestoreController powerRestore(io);
 
 static std::string node = "0";
-static const std::string appName = "power-control";
+static const std::string appName = "power-control";\
+
+enum class PowerAction {
+    NONE,
+    POWER_ON,
+    FORCE_OFF,
+    GRACE_OFF,
+    POWER_CYCLE,
+    SYSTEM_RESET,
+};
+
+struct BoardPresence {
+    bool c2_pdb = false;
+    bool nvl144_pdb = false;
+    bool board0 = false;
+    bool board1 = false;
+};
+
+struct ActionContext {
+    PowerAction current_action = PowerAction::NONE;
+    std::string target_state = "HostOff";
+    std::string fault_state = "HostOff";
+    BoardPresence presence;
+};
 
 enum class DbusConfigType
 {
@@ -91,6 +114,22 @@ static ConfigData idButtonConfig;
 static ConfigData nmiButtonConfig;
 static ConfigData slotPowerConfig;
 static ConfigData hpmStbyEnConfig;
+static ConfigData pdbMainPowerEnableConfig;
+static ConfigData pdbMainPowerOkConfig;
+static ConfigData usbPowerEnableConfig;
+static ConfigData board0RunPowerPGConfig;
+static ConfigData board1RunPowerPGConfig;
+static ConfigData board0RunPowerEnableConfig;
+static ConfigData board1RunPowerEnableConfig;
+static ConfigData board0PreSystemResetConfig;
+static ConfigData board1PreSystemResetConfig;
+static ConfigData cpuResetIndicatorConfig;
+static ConfigData board0CpuShutdownForceConfig;
+static ConfigData board1CpuShutdownForceConfig;
+static ConfigData board0CpuShutdownRequestConfig;
+static ConfigData board1CpuShutdownRequestConfig;
+static ConfigData board0CpuShutdownOkConfig;
+static ConfigData board1CpuShutdownOkConfig;
 
 // map for storing list of gpio parameters whose config are to be read from x86
 // power control json config
@@ -108,7 +147,22 @@ boost::container::flat_map<std::string, ConfigData*> powerSignalMap = {
     {"IdButton", &idButtonConfig},
     {"NMIButton", &nmiButtonConfig},
     {"SlotPower", &slotPowerConfig},
-    {"HpmStbyEn", &hpmStbyEnConfig}};
+    {"PDBMainPowerEnable", &pdbMainPowerEnableConfig},
+    {"PDBMainPowerOk", &pdbMainPowerOkConfig},
+    {"USBPowerEnable", &usbPowerEnableConfig},
+    {"Board0RunPowerPG", &board0RunPowerPGConfig},
+    {"Board1RunPowerPG", &board1RunPowerPGConfig},
+    {"Board0RunPowerEnable", &board0RunPowerEnableConfig},
+    {"Board1RunPowerEnable", &board1RunPowerEnableConfig},
+    {"Board0PreSystemReset", &board0PreSystemResetConfig},
+    {"Board1PreSystemReset", &board1PreSystemResetConfig},
+    {"CpuResetIndicator", &cpuResetIndicatorConfig},
+    {"Board0CpuShutdownForce", &board0CpuShutdownForceConfig},
+    {"Board1CpuShutdownForce", &board1CpuShutdownForceConfig},
+    {"Board0CpuShutdownRequest", &board0CpuShutdownRequestConfig},
+    {"Board1CpuShutdownRequest", &board1CpuShutdownRequestConfig},
+    {"Board0CpuShutdownOk", &board0CpuShutdownOkConfig},
+    {"Board1CpuShutdownOk", &board1CpuShutdownOkConfig}};
 
 static std::string hostDbusName = "xyz.openbmc_project.State.Host";
 static std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
@@ -202,6 +256,30 @@ static gpiod::line postCompleteLine;
 static boost::asio::posix::stream_descriptor postCompleteEvent(io);
 static gpiod::line nmiOutLine;
 static gpiod::line slotPowerLine;
+
+// New GPIO Lines for PDB and HPM Board control
+static gpiod::line pdbMainPowerEnableLine;
+static gpiod::line pdbMainPowerOkLine;
+static boost::asio::posix::stream_descriptor pdbMainPowerOkEvent(io);
+static gpiod::line usbPowerEnableLine;
+static gpiod::line board0RunPowerPGLine;
+static boost::asio::posix::stream_descriptor board0RunPowerPGEvent(io);
+static gpiod::line board1RunPowerPGLine;
+static boost::asio::posix::stream_descriptor board1RunPowerPGEvent(io);
+static gpiod::line board0RunPowerEnableLine;
+static gpiod::line board1RunPowerEnableLine;
+static gpiod::line board0PreSystemResetLine;
+static gpiod::line board1PreSystemResetLine;
+static gpiod::line cpuResetIndicatorLine;
+static boost::asio::posix::stream_descriptor cpuResetIndicatorEvent(io);
+static gpiod::line board0CpuShutdownForceLine;
+static gpiod::line board1CpuShutdownForceLine;
+static gpiod::line board0CpuShutdownRequestLine;
+static gpiod::line board1CpuShutdownRequestLine;
+static gpiod::line board0CpuShutdownOkLine;
+static boost::asio::posix::stream_descriptor board0CpuShutdownOkEvent(io);
+static gpiod::line board1CpuShutdownOkLine;
+static boost::asio::posix::stream_descriptor board1CpuShutdownOkEvent(io);
 
 static constexpr uint8_t beepPowerFail = 8;
 
@@ -348,6 +426,18 @@ enum class Event
     gracefulPowerOffRequest,
     gracefulPowerCycleRequest,
     warmResetDetected,
+    pdbMainPowerOkAssert,
+    pdbMainPowerOkDeAssert,
+    board0RunPowerPGAssert,
+    board0RunPowerPGDeAssert,
+    board1RunPowerPGAssert,
+    board1RunPowerPGDeAssert,
+    cpuResetIndicatorAssert,
+    cpuResetIndicatorDeAssert,
+    board0CpuShutdownOkAssert,
+    board0CpuShutdownOkDeAssert,
+    board1CpuShutdownOkAssert,
+    board1CpuShutdownOkDeAssert,
 };
 static std::string getEventName(Event event)
 {
@@ -421,6 +511,42 @@ static std::string getEventName(Event event)
             break;
         case Event::warmResetDetected:
             return "warm reset detected";
+            break;
+        case Event::pdbMainPowerOkAssert:
+            return "PDB main power OK assert";
+            break;
+        case Event::pdbMainPowerOkDeAssert:
+            return "PDB main power OK de-assert";
+            break;
+        case Event::board0RunPowerPGAssert:
+            return "Board 0 run power PG assert";
+            break;
+        case Event::board0RunPowerPGDeAssert:
+            return "Board 0 run power PG de-assert";
+            break;
+        case Event::board1RunPowerPGAssert:
+            return "Board 1 run power PG assert";
+            break;
+        case Event::board1RunPowerPGDeAssert:
+            return "Board 1 run power PG de-assert";
+            break;
+        case Event::cpuResetIndicatorAssert:
+            return "CPU reset indicator assert";
+            break;
+        case Event::cpuResetIndicatorDeAssert:
+            return "CPU reset indicator de-assert";
+            break;
+        case Event::board0CpuShutdownOkAssert:
+            return "Board 0 CPU shutdown OK assert";
+            break;
+        case Event::board0CpuShutdownOkDeAssert:
+            return "Board 0 CPU shutdown OK de-assert";
+            break;
+        case Event::board1CpuShutdownOkAssert:
+            return "Board 1 CPU shutdown OK assert";
+            break;
+        case Event::board1CpuShutdownOkDeAssert:
+            return "Board 1 CPU shutdown OK de-assert";
             break;
         default:
             return "unknown event: " + std::to_string(static_cast<int>(event));
@@ -2333,6 +2459,54 @@ static void postCompleteHandler(bool state)
     }
 }
 
+static void pdbMainPowerOkHandler(bool state)
+{
+    Event powerControlEvent = (state == pdbMainPowerOkConfig.polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
+static void board0RunPowerPGHandler(bool state)
+{
+    Event powerControlEvent = (state == board0RunPowerPGConfig.polarity)
+                                  ? Event::board0RunPowerPGAssert
+                                  : Event::board0RunPowerPGDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
+static void board1RunPowerPGHandler(bool state)
+{
+    Event powerControlEvent = (state == board1RunPowerPGConfig.polarity)
+                                  ? Event::board1RunPowerPGAssert
+                                  : Event::board1RunPowerPGDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
+static void cpuResetIndicatorHandler(bool state)
+{
+    Event powerControlEvent = (state == cpuResetIndicatorConfig.polarity)
+                                  ? Event::cpuResetIndicatorAssert
+                                  : Event::cpuResetIndicatorDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
+static void board0CpuShutdownOkHandler(bool state)
+{
+    Event powerControlEvent = (state == board0CpuShutdownOkConfig.polarity)
+                                  ? Event::board0CpuShutdownOkAssert
+                                  : Event::board0CpuShutdownOkDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
+static void board1CpuShutdownOkHandler(bool state)
+{
+    Event powerControlEvent = (state == board1CpuShutdownOkConfig.polarity)
+                                  ? Event::board1CpuShutdownOkAssert
+                                  : Event::board1CpuShutdownOkDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
 static int loadConfigValues()
 {
     const std::string configFilePath =
@@ -2949,6 +3123,74 @@ int main(int argc, char* argv[])
         lg2::error(
             "postComplete name should be configured from json config file");
         return -1;
+    }
+
+    // Request PDB_MAIN_POWER_OK GPIO events
+    if (pdbMainPowerOkConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(pdbMainPowerOkConfig.lineName,
+                               pdbMainPowerOkHandler, pdbMainPowerOkLine,
+                               pdbMainPowerOkEvent))
+        {
+            return -1;
+        }
+    }
+
+    // Request BOARD0_RUN_POWER_PG GPIO events
+    if (board0RunPowerPGConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board0RunPowerPGConfig.lineName,
+                               board0RunPowerPGHandler, board0RunPowerPGLine,
+                               board0RunPowerPGEvent))
+        {
+            return -1;
+        }
+    }
+
+    // Request BOARD1_RUN_POWER_PG GPIO events
+    if (board1RunPowerPGConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board1RunPowerPGConfig.lineName,
+                               board1RunPowerPGHandler, board1RunPowerPGLine,
+                               board1RunPowerPGEvent))
+        {
+            return -1;
+        }
+    }
+
+    // Request CPU_RESET_INDICATOR GPIO events
+    if (cpuResetIndicatorConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(cpuResetIndicatorConfig.lineName,
+                               cpuResetIndicatorHandler, cpuResetIndicatorLine,
+                               cpuResetIndicatorEvent))
+        {
+            return -1;
+        }
+    }
+
+    // Request BOARD0_CPU_SHUTDOWN_OK GPIO events
+    if (board0CpuShutdownOkConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board0CpuShutdownOkConfig.lineName,
+                               board0CpuShutdownOkHandler,
+                               board0CpuShutdownOkLine,
+                               board0CpuShutdownOkEvent))
+        {
+            return -1;
+        }
+    }
+
+    // Request BOARD1_CPU_SHUTDOWN_OK GPIO events
+    if (board1CpuShutdownOkConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board1CpuShutdownOkConfig.lineName,
+                               board1CpuShutdownOkHandler,
+                               board1CpuShutdownOkLine,
+                               board1CpuShutdownOkEvent))
+        {
+            return -1;
+        }
     }
 
     // initialize NMI_OUT GPIO.
