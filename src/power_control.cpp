@@ -41,7 +41,6 @@ static boost::asio::io_context io;
 std::shared_ptr<sdbusplus::asio::connection> conn;
 PersistentState appState;
 PowerRestoreController powerRestore(io);
-static Context powerContext;
 
 static std::string node = "0";
 static const std::string appName = "power-control";\
@@ -63,10 +62,12 @@ struct BoardPresence {
 };
 
 struct Context {
-    PowerAction current_action = PowerAction::NONE;
+    PowerAction action = PowerAction::NONE;
     std::string target_state = "HostOff";
     BoardPresence presence;
 };
+
+static Context powerContext;
 
 enum class DbusConfigType
 {
@@ -223,9 +224,10 @@ boost::container::flat_map<std::string, int> TimerMap = {
     {"SlotPowerCycleMs", 200},
     {"DbusGetPropertyRetry", 1000}};
 
-static bool nmiEnabled = true;
-static bool nmiWhenPoweredOff = true;
-static bool sioEnabled = true;
+// Changed from default true to false
+static bool nmiEnabled = false;
+static bool nmiWhenPoweredOff = false;
+static bool sioEnabled = false;
 
 // Timers
 // Time holding GPIOs asserted
@@ -654,6 +656,32 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event);
 static void powerStateWaitForHPMPowerGoodDeAssert(const Event event);
 static void powerStateWaitForCPUResetAssert(const Event event);
 static void powerStateWaitForCPUResetDeAssert(const Event event);
+
+// Function forward declarations
+static int loadConfigValues();
+static void detectBoardPresence();
+static int getProperty(const ConfigData& configData);
+static void nmiSourcePropertyMonitor(void);
+static void nmiReset(void);
+static sdbusplus::bus::match_t dbusGPIOMatcher(const ConfigData& cfg, std::function<void(bool)>& onMatch);
+
+// GPIO handler forward declarations
+static void psPowerOKHandler(bool state);
+static void sioPowerGoodHandler(bool state);
+static void sioOnControlHandler(bool state);
+static void sioS5Handler(bool state);
+static void powerButtonHandler(bool state);
+static void resetButtonHandler(bool state);
+static void nmiButtonHandler(bool state);
+static void idButtonHandler(bool state);
+static void postCompleteHandler(bool state);
+static void nvl144pdbMainPowerOkHandler(bool state);
+static void c2pdbPSUPowerOkHandler(bool state);
+static void board0RunPowerPGHandler(bool state);
+static void board1RunPowerPGHandler(bool state);
+static void cpuResetIndicatorHandler(bool state);
+static void board0CpuShutdownOkHandler(bool state);
+static void board1CpuShutdownOkHandler(bool state);
 
 static std::function<void(const Event)> getPowerStateHandler(PowerState state)
 {
@@ -1757,13 +1785,18 @@ static void psPowerOKWatchdogTimerStart()
 static void pdbMainPowerOkWatchdogTimerStart(int timeoutMs = -1)
 {
     // Use provided timeout or default from TimerMap
-    if(powerContext.presence.nvl144_pdb)
+    int timeout = 0;
+    if (timeoutMs > 0)
     {
-        int timeout = TimerMap["NVL144PdbMainPowerOkWatchdogMs"];
+        timeout = timeoutMs;
+    }
+    else if(powerContext.presence.nvl144_pdb)
+    {
+        timeout = TimerMap["NVL144PdbMainPowerOkWatchdogMs"];
     }
     else if(powerContext.presence.c2_pdb)
     {
-        int timeout = TimerMap["C2PdbPSUPowerOkWatchdogMs"];
+        timeout = TimerMap["C2PdbPSUPowerOkWatchdogMs"];
     }
     else
     {
@@ -2318,7 +2351,7 @@ static void powerStateOff(const Event event)
                         setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
 
                         // start the C2 PDB Main Power Ok Watchdog Timer (uses timeout configured from config/power-config-host0.json)
-                        c2pdbPSUPowerOkWatchdogTimerStart();
+                        pdbMainPowerOkWatchdogTimerStart();
                         setPowerState(PowerState::waitForPDBMainPowerOk);
                     }
                     
@@ -2593,12 +2626,13 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                 hpmPowerGoodWatchdogTimerStart();
                 setPowerState(PowerState::waitForHPMPowerGoodAssert);
             }
-        case Event::pdbMainPowerOkWatchdogTimerExpired
+            break;
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
             if(powerContext.action == PowerAction::POWER_ON)
             {
                 lg2::info("PDB Main Power OK watchdog timer expired. PDB Main Power Sequence Failed. Host Main Power On sequence failed. Conducting Cleanup Sequence: De-asserting PDB Main Power Enable Line. Setting Host Power State to Off.");
                 setPowerState(PowerState::off);
-                powerAction = PowerAction::NONE;
+                powerContext.action = PowerAction::NONE;
 
                 if(powerContext.presence.nvl144_pdb)
                 {
@@ -2607,6 +2641,7 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                 else if(powerContext.presence.c2_pdb)
                 {
                     setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
+                }
             }
             break;
         default:
@@ -2641,7 +2676,7 @@ static void powerStateWaitForPDBMainPowerOff(const Event event)
                     
                }
                setPowerState(PowerState::off);
-               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+               powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
             }
             break;
         case Event::c2pdbPSUPowerOkDeAssert:
@@ -2661,7 +2696,7 @@ static void powerStateWaitForPDBMainPowerOff(const Event event)
                     setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
                }
                setPowerState(PowerState::off);
-               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+               powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
             }
             break;
         case Event::pdbMainPowerOkWatchdogTimerExpired:
@@ -2679,7 +2714,7 @@ static void powerStateWaitForPDBMainPowerOff(const Event event)
                     setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
                }
                setPowerState(PowerState::off);
-               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+               powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
             }
             break;
         default:
@@ -2815,14 +2850,14 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
                         setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
                         setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
                         setPowerState(PowerState::off);
-                        powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+                        powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
                     }
                     if(powerContext.presence.board1)
                     {
                         setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
                         setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
                         setPowerState(PowerState::off);
-                        powerAction = PowerAction::NONE;
+                        powerContext.action = PowerAction::NONE;
                     }
                 }
             }
@@ -2854,7 +2889,7 @@ static void powerStateWaitForCPUResetAssert(const Event event)
     logEvent(__FUNCTION__, event);
     switch (event)
     {
-        case Event::cpuResetIndicatorAssert
+        case Event::cpuResetIndicatorAssert:
             cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
             break;
         case Event::cpuResetWatchdogTimerExpired:
@@ -2876,7 +2911,7 @@ static void powerStateWaitForCPUResetDeAssert(const Event event)
             {
                 lg2::info("CPU Reset De-asserted. CPUs are not out of reset. Powered On Host Successfully. Setting Host Power State to On.");
                 setPowerState(PowerState::on);
-                powerAction = PowerAction::NONE; // Clear the power action as Host reached the On state
+                powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the On state
             }
             break;
         case Event::cpuResetWatchdogTimerExpired:
@@ -2891,7 +2926,7 @@ static void powerStateWaitForCPUResetDeAssert(const Event event)
                 setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
             }   
             setPowerState(PowerState::off);
-            powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+            powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
             break;
         default:
             lg2::info("No action taken.");
@@ -3283,13 +3318,13 @@ static void detectBoardPresence()
     
     // Log detected board presence
     lg2::info("Board presence detection:");
-    lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH", C2_PDB_IOX_PATH,
+    lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH", std::string(C2_PDB_IOX_PATH),
               "PRESENT", powerContext.presence.c2_pdb);
-    lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH", NVL144_PDB_IOX_PATH,
+    lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH", std::string(NVL144_PDB_IOX_PATH),
               "PRESENT", powerContext.presence.nvl144_pdb);
-    lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH", BOARD0_IOX_PATH,
+    lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH", std::string(BOARD0_IOX_PATH),
               "PRESENT", powerContext.presence.board0);
-    lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH", BOARD1_IOX_PATH,
+    lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH", std::string(BOARD1_IOX_PATH),
               "PRESENT", powerContext.presence.board1);
 }
 
@@ -3734,24 +3769,24 @@ int main(int argc, char* argv[])
     detectBoardPresence();
 
     // Request PS_PWROK GPIO events
-    if (powerOkConfig.type == ConfigType::GPIO)
-    {
-        if (!requestGPIOEvents(powerOkConfig.lineName, psPowerOKHandler,
-                               psPowerOKLine, psPowerOKEvent))
-        {
-            return -1;
-        }
-    }
-    else if (powerOkConfig.type == ConfigType::DBUS)
-    {
-        static sdbusplus::bus::match_t powerOkEventMonitor =
-            power_control::dbusGPIOMatcher(powerOkConfig, psPowerOKHandler);
-    }
-    else
-    {
-        lg2::error("PowerOk name should be configured from json config file");
-        return -1;
-    }
+    // if (powerOkConfig.type == ConfigType::GPIO)
+    // {
+    //     if (!requestGPIOEvents(powerOkConfig.lineName, psPowerOKHandler,
+    //                            psPowerOKLine, psPowerOKEvent))
+    //     {
+    //         return -1;
+    //     }
+    // }
+    // else if (powerOkConfig.type == ConfigType::DBUS)
+    // {
+    //     static sdbusplus::bus::match_t powerOkEventMonitor =
+    //         power_control::dbusGPIOMatcher(powerOkConfig, psPowerOKHandler);
+    // }
+    // else
+    // {
+    //     lg2::error("PowerOk name should be configured from json config file");
+    //     return -1;
+    // }
 
     if (sioEnabled == true)
     {
@@ -3823,66 +3858,66 @@ int main(int argc, char* argv[])
     }
 
     // Request POWER_BUTTON GPIO events
-    if (powerButtonConfig.type == ConfigType::GPIO)
-    {
-        if (!requestGPIOEvents(powerButtonConfig.lineName, powerButtonHandler,
-                               powerButtonLine, powerButtonEvent))
-        {
-            return -1;
-        }
-    }
-    else if (powerButtonConfig.type == ConfigType::DBUS)
-    {
-        static sdbusplus::bus::match_t powerButtonEventMonitor =
-            power_control::dbusGPIOMatcher(powerButtonConfig,
-                                           powerButtonHandler);
-    }
+    // if (powerButtonConfig.type == ConfigType::GPIO)
+    // {
+    //     if (!requestGPIOEvents(powerButtonConfig.lineName, powerButtonHandler,
+    //                            powerButtonLine, powerButtonEvent))
+    //     {
+    //         return -1;
+    //     }
+    // }
+    // else if (powerButtonConfig.type == ConfigType::DBUS)
+    // {
+    //     static sdbusplus::bus::match_t powerButtonEventMonitor =
+    //         dbusGPIOMatcher(powerButtonConfig,
+    //                                        powerButtonHandler);
+    // }
 
     // Request RESET_BUTTON GPIO events
-    if (resetButtonConfig.type == ConfigType::GPIO)
-    {
-        if (!requestGPIOEvents(resetButtonConfig.lineName, resetButtonHandler,
-                               resetButtonLine, resetButtonEvent))
-        {
-            return -1;
-        }
-    }
-    else if (resetButtonConfig.type == ConfigType::DBUS)
-    {
-        static sdbusplus::bus::match_t resetButtonEventMonitor =
-            power_control::dbusGPIOMatcher(resetButtonConfig,
-                                           resetButtonHandler);
-    }
+    // if (resetButtonConfig.type == ConfigType::GPIO)
+    // {
+    //     if (!requestGPIOEvents(resetButtonConfig.lineName, resetButtonHandler,
+    //                            resetButtonLine, resetButtonEvent))
+    //     {
+    //         return -1;
+    //     }
+    // }
+    // else if (resetButtonConfig.type == ConfigType::DBUS)
+    // {
+    //     static sdbusplus::bus::match_t resetButtonEventMonitor =
+    //         power_control::dbusGPIOMatcher(resetButtonConfig,
+    //                                        resetButtonHandler);
+    // }
 
     // Request NMI_BUTTON GPIO events
-    if (nmiButtonConfig.type == ConfigType::GPIO)
-    {
-        if (!nmiButtonConfig.lineName.empty())
-        {
-            requestGPIOEvents(nmiButtonConfig.lineName, nmiButtonHandler,
-                              nmiButtonLine, nmiButtonEvent);
-        }
-    }
-    else if (nmiButtonConfig.type == ConfigType::DBUS)
-    {
-        static sdbusplus::bus::match_t nmiButtonEventMonitor =
-            power_control::dbusGPIOMatcher(nmiButtonConfig, nmiButtonHandler);
-    }
+    // if (nmiButtonConfig.type == ConfigType::GPIO)
+    // {
+    //     if (!nmiButtonConfig.lineName.empty())
+    //     {
+    //         requestGPIOEvents(nmiButtonConfig.lineName, nmiButtonHandler,
+    //                           nmiButtonLine, nmiButtonEvent);
+    //     }
+    // }
+    // else if (nmiButtonConfig.type == ConfigType::DBUS)
+    // {
+    //     static sdbusplus::bus::match_t nmiButtonEventMonitor =
+    //         power_control::dbusGPIOMatcher(nmiButtonConfig, nmiButtonHandler);
+    // }
 
     // Request ID_BUTTON GPIO events
-    if (idButtonConfig.type == ConfigType::GPIO)
-    {
-        if (!idButtonConfig.lineName.empty())
-        {
-            requestGPIOEvents(idButtonConfig.lineName, idButtonHandler,
-                              idButtonLine, idButtonEvent);
-        }
-    }
-    else if (idButtonConfig.type == ConfigType::DBUS)
-    {
-        static sdbusplus::bus::match_t idButtonEventMonitor =
-            power_control::dbusGPIOMatcher(idButtonConfig, idButtonHandler);
-    }
+    // if (idButtonConfig.type == ConfigType::GPIO)
+    // {
+    //     if (!idButtonConfig.lineName.empty())
+    //     {
+    //         requestGPIOEvents(idButtonConfig.lineName, idButtonHandler,
+    //                           idButtonLine, idButtonEvent);
+    //     }
+    // }
+    // else if (idButtonConfig.type == ConfigType::DBUS)
+    // {
+    //     static sdbusplus::bus::match_t idButtonEventMonitor =
+    //         dbusGPIOMatcher(idButtonConfig, idButtonHandler);
+    // }
 
 #ifdef USE_PLT_RST
     sdbusplus::bus::match_t pltRstMatch(
