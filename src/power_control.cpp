@@ -65,7 +65,6 @@ struct BoardPresence {
 struct Context {
     PowerAction current_action = PowerAction::NONE;
     std::string target_state = "HostOff";
-    std::string fault_state = "HostOff";
     BoardPresence presence;
 };
 
@@ -217,6 +216,7 @@ boost::container::flat_map<std::string, int> TimerMap = {
     {"NVL144PdbMainPowerOkWatchdogMs", 10000},
     {"C2PdbPSUPowerOkWatchdogMs", 10000},
     {"HpmPowerGoodWatchdogMs", 15000},
+    {"CpuResetWatchdogMs", 10000},
     {"GracefulPowerOffS", (5 * 60)},
     {"WarmResetCheckMs", 500},
     {"PowerOffSaveMs", 7000},
@@ -242,6 +242,8 @@ static boost::asio::steady_timer psPowerOKWatchdogTimer(io);
 static boost::asio::steady_timer pdbMainPowerOkWatchdogTimer(io);
 // Time HPM board power good assertion/de-assertion in HPM Power sequencing
 static boost::asio::steady_timer hpmPowerGoodWatchdogTimer(io);
+// Time CPU reset assertion on power-on
+static boost::asio::steady_timer cpuResetWatchdogTimer(io);
 // Time SIO power good assertion on power-on
 static boost::asio::steady_timer sioPowerGoodWatchdogTimer(io);
 // Time power-off state save for power loss tracking
@@ -475,6 +477,7 @@ enum class Event
     psPowerOKWatchdogTimerExpired,
     pdbMainPowerOkWatchdogTimerExpired,
     hpmPowerGoodWatchdogTimerExpired,
+    cpuResetWatchdogTimerExpired,
     sioPowerGoodWatchdogTimerExpired,
     gracefulPowerOffTimerExpired,
     powerOnRequest,
@@ -550,6 +553,9 @@ static std::string getEventName(Event event)
             break;
         case Event::hpmPowerGoodWatchdogTimerExpired:
             return "HPM power good watchdog timer expired";
+            break;
+        case Event::cpuResetWatchdogTimerExpired:
+            return "CPU reset watchdog timer expired";
             break;
         case Event::sioPowerGoodWatchdogTimerExpired:
             return "SIO power good watchdog timer expired";
@@ -1788,6 +1794,34 @@ static void pdbMainPowerOkWatchdogTimerStart(int timeoutMs = -1)
     });
 }
 
+static void cpuResetWatchdogTimerStart(int timeoutMs = -1)
+{
+    // Use provided timeout or default from TimerMap
+    int timeout = (timeoutMs == -1) ? TimerMap["CpuResetWatchdogMs"] : timeoutMs;
+    
+    lg2::info("CPU reset watchdog timer started with {TIMEOUT_MS}ms timeout",
+              "TIMEOUT_MS", timeout);
+    cpuResetWatchdogTimer.expires_after(
+        std::chrono::milliseconds(timeout));
+    cpuResetWatchdogTimer.async_wait([](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error(
+                    "CPU reset watchdog async_wait failed: {ERROR_MSG}",
+                    "ERROR_MSG", ec.message());
+            }
+            lg2::info("CPU reset watchdog timer canceled");
+            return;
+        }
+        lg2::info("CPU reset watchdog timer expired");
+        sendPowerControlEvent(Event::cpuResetWatchdogTimerExpired);
+    });
+}
+
 static void hpmPowerGoodWatchdogTimerStart(int timeoutMs = -1)
 {
     // Use provided timeout or default from TimerMap
@@ -2177,7 +2211,6 @@ static void powerStateOff(const Event event)
             detectBoardPresence();
             powerContext.action = PowerAction::POWER_ON;
             powerContext.target_state = "HostPowerOn";
-            powerContext.fault_state = "HostPowerOff";
             // Check if all present boards already have their power rails on
             // For each board: if not present OR (present AND power is good)
             // This ensures we only check get_value() on boards that are present
@@ -2502,6 +2535,7 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
             if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.nvl144_pdb) // Host Main Power On sequence
             {
                 // HPM Board Power Sequencing - Begin
+                pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
                 lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset and Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
                 
                 // Assert Board 0 and/or Board 1 Pre System Reset
@@ -2532,6 +2566,9 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
         case Event::c2pdbPSUPowerOkAssert: // C2 PDB
             if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.c2_pdb)
             {
+                pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
+                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset and Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
+
                 // Assert Board 0 and/or Board 1 Pre System Reset
                 if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
                 {
@@ -2578,12 +2615,72 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
     }
 }
 
+// To-Do: See if there is refactoring possible to consolidate the nvl144pdbMainPowerOkDeAssert, c2pdbPSUPowerOkDeAssert, and pdbMainPowerOkWatchdogTimerExpired
+// events for Host Power On Action since they conduct the same actions.
 static void powerStateWaitForPDBMainPowerOff(const Event event)
 {
     logEvent(__FUNCTION__, event);
     switch (event)
     {
-        case Event::pdbMainPowerOkDeAssert:
+        case Event::nvl144pdbMainPowerOkDeAssert:
+            pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+               lg2::info("PDB Main Power OK De-asserted. NVL144 PDB Main Power Rail Powered Down Successfully. Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");  
+
+               if(powerContext.presence.board0)
+               {
+                    setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                    setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+                    
+               }
+               if(powerContext.presence.board1)
+               {
+                    setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                    setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+                    
+               }
+               setPowerState(PowerState::off);
+               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+            }
+            break;
+        case Event::c2pdbPSUPowerOkDeAssert:
+            pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+               lg2::info("PDB PSU Power OK De-asserted. C2 PDB Main Power Rail Powered Down Successfully. Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
+
+               if(powerContext.presence.board0)
+               {
+                    setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                    setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+               }
+               if(powerContext.presence.board1)
+               {
+                    setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                    setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+               }
+               setPowerState(PowerState::off);
+               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+            }
+            break;
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+               lg2::error("Failed to Power Down PDB Main Power Rail. PDB & HPM power domain inconsistency. Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
+               if(powerContext.presence.board0)
+               {
+                    setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                    setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+               }
+               if(powerContext.presence.board1)
+               {
+                    setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                    setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+               }
+               setPowerState(PowerState::off);
+               powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
+            }
             break;
         default:
             lg2::info("No action taken.");
@@ -2602,8 +2699,9 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
                 // If Board 1 is not present, proceed with just Board 0
                 if (!powerContext.presence.board1)
                 {
-                    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines.");
-                    
+                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
+                    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
+            
                     if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
                     {
                         setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
@@ -2611,12 +2709,13 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
         
                     // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                     cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetAssert);
+                    setPowerState(PowerState::waitForCPUResetDeAssert);
                 }
                 // If Board 1 is present and its Run Power Good is asserted, de-assert both Board 0 and Board 1 Pre System Reset Lines and start the CPU Reset Watchdog Timer
                 else if(powerContext.presence.board1 && board1RunPowerPGLine.get_value() == board1RunPowerPGConfig.polarity)
                 {
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines.");
+                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
+                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
 
                     if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
                     {
@@ -2629,9 +2728,9 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
         
                     // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                     cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetAssert);
+                    setPowerState(PowerState::waitForCPUResetDeAssert);
                 }
-                // If Board 1 is present but not powered on yet, wait
+                // If Board 1 is present but not powered on yet, wait and let hpmPowerGoodWatchdogTimer continue...
                 else
                 {
                     lg2::info("HPM Board 0 Run Power Good Asserted. Waiting for Board 1 Run Power Good Assertion...");
@@ -2645,7 +2744,8 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
                 // If Board 0 is not present, proceed with just Board 1
                 if (!powerContext.presence.board0)
                 {
-                    lg2::info("HPM Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines.");
+                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
+                    lg2::info("HPM Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
                     
                     if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
                     {
@@ -2654,12 +2754,13 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
         
                     // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                     cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetAssert);
+                    setPowerState(PowerState::waitForCPUResetDeAssert);
                 }
                 // If Board 0 is present and its Run Power Good is asserted, de-assert both Board 0 and Board 1 Pre System Reset Lines and start the CPU Reset Watchdog Timer
                 else if(powerContext.presence.board0 && board0RunPowerPGLine.get_value() == board0RunPowerPGConfig.polarity)
                 {
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines.");
+                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
+                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
 
                     if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
                     {
@@ -2672,9 +2773,9 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
         
                     // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                     cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetAssert);
+                    setPowerState(PowerState::waitForCPUResetDeAssert);
                 }
-                // If Board 0 is present but not powered on yet, wait...
+                // If Board 0 is present but not powered on yet, wait and let hpmPowerGoodWatchdogTimer continue...
                 else
                 {
                     lg2::info("HPM Board 1 Run Power Good Asserted. Waiting for Board 0 Run Power Good Assertion...");
@@ -2685,13 +2786,13 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
         case Event::hpmPowerGoodWatchdogTimerExpired:
             if(powerContext.action == PowerAction::POWER_ON)
             {
-                lg2::error("HPM Main Power On Fault detected.");
+                lg2::error("HPM Main Power On Fault detected. Main Power On sequence failed.");
 
                 if(powerContext.presence.nvl144_pdb)
                 {
                     lg2::info("Powering down PDB Main Power Rail to establish HPM/PDB consistency. De-asserting NVL144 PDB Main Power Enable.");
                     setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
-                    startPDBMainPowerOkWatchdogTimer();
+                    pdbMainPowerOkWatchdogTimerStart();
                     setPowerState(PowerState::waitForPDBMainPowerOff);
                 }
                 else if(powerContext.presence.c2_pdb)
@@ -2702,7 +2803,7 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
                     setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
                     setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
                     setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
-                    startPDBMainPowerOkWatchdogTimer();
+                    pdbMainPowerOkWatchdogTimerStart();
                     setPowerState(PowerState::waitForPDBMainPowerOff);
                     
                 }
@@ -2714,7 +2815,7 @@ static void powerStateWaitForHPMPowerGoodAssert(const Event event)
                         setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
                         setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
                         setPowerState(PowerState::off);
-                        powerAction = PowerAction::NONE;
+                        powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
                     }
                     if(powerContext.presence.board1)
                     {
@@ -2753,9 +2854,10 @@ static void powerStateWaitForCPUResetAssert(const Event event)
     logEvent(__FUNCTION__, event);
     switch (event)
     {
-        case Event::cpuResetIndicatorAssert:
+        case Event::cpuResetIndicatorAssert
+            cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
             break;
-        case Event::cpuResetIndicatorDeAssert:
+        case Event::cpuResetWatchdogTimerExpired:
             break;
         default:
             lg2::info("No action taken.");
@@ -2769,8 +2871,27 @@ static void powerStateWaitForCPUResetDeAssert(const Event event)
     switch (event)
     {
         case Event::cpuResetIndicatorDeAssert:
+            cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+                lg2::info("CPU Reset De-asserted. CPUs are not out of reset. Powered On Host Successfully. Setting Host Power State to On.");
+                setPowerState(PowerState::on);
+                powerAction = PowerAction::NONE; // Clear the power action as Host reached the On state
+            }
             break;
-        case Event::cpuResetIndicatorAssert:
+        case Event::cpuResetWatchdogTimerExpired:
+            lg2::error("CPU Reset Watchdog Timer Expired. CPUs are not out of reset. Host Power On sequence failed. Conducting Cleanup Sequence: De-asserting HPM Board Run Power Enable. Setting Host Power State to Off.");
+            
+            if(powerContext.presence.board0)
+            {
+                setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+            }
+            if(powerContext.presence.board1)
+            {
+                setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+            }   
+            setPowerState(PowerState::off);
+            powerAction = PowerAction::NONE; // Clear the power action as Host reached the Off state
             break;
         default:
             lg2::info("No action taken.");

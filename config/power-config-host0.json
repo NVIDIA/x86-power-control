@@ -217,6 +217,7 @@
         "NVL144PdbMainPowerOkWatchdogMs": 10000,
         "C2PdbPSUPowerOkWatchdogMs": 10000,
         "HpmPowerGoodWatchdogMs": 15000,
+        "CpuResetWatchdogMs": 10000,
         "GracefulPowerOffS": 300,
         "WarmResetCheckMs": 500,
         "PowerOffSaveMs": 7000,
