@@ -2498,8 +2498,38 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
     switch (event)
     {
         case Event::nvl144pdbMainPowerOkAssert: // NVL144 PDB
-            // Conduct intial HPM Board Power Sequecing
-            if(powerContext.action == PowerAction::POWER_ON)
+            if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.nvl144_pdb) // Host Main Power On sequence
+            {
+                // HPM Board Power Sequencing - Begin
+                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset and Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
+                
+                // Assert Board 0 and/or Board 1 Pre System Reset
+                if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
+                {
+                    setGPIOOutput(board0PreSystemResetConfig.lineName, board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                }
+                if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
+                {
+                    setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                }
+
+                // Assert Board 0 and/or Board 1 Run Power Enable
+                if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
+                {
+                    setGPIOOutput(board0RunPowerEnableConfig.lineName, board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+                }
+                if(powerContext.presence.board1 && !board1RunPowerEnableConfig.lineName.empty())
+                {
+                    setGPIOOutput(board1RunPowerEnableConfig.lineName, board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+                }
+
+                // Start the HPM Power Good Watchdog Timer (uses timeout configured from config/power-config-host0.json)
+                hpmPowerGoodWatchdogTimerStart();
+                setPowerState(PowerState::waitForHPMPowerGoodAssert);
+            }
+            break;
+        case Event::c2pdbPSUPowerOkAssert: // C2 PDB
+            if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.c2_pdb)
             {
                 // Assert Board 0 and/or Board 1 Pre System Reset
                 if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
@@ -2523,21 +2553,23 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
 
                 // Start the HPM Power Good Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                 hpmPowerGoodWatchdogTimerStart();
-
                 setPowerState(PowerState::waitForHPMPowerGoodAssert);
             }
-            break;
-        case Event::c2pdbPSUPowerOkAssert: // C2 PDB
+        case Event::pdbMainPowerOkWatchdogTimerExpired
             if(powerContext.action == PowerAction::POWER_ON)
             {
-                // Assert Board 0 and/or Board 1 Pre System Reset
-                if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
+                lg2::info("PDB Main Power OK watchdog timer expired. PDB Main Power Sequence Failed. Host Main Power On sequence failed. Conducting Cleanup Sequence: De-asserting PDB Main Power Enable Line. Setting Host Power State to Off.");
+                setPowerState(PowerState::off);
+
+                if(powerContext.presence.nvl144_pdb)
                 {
-                    setGPIOOutput(board0PreSystemResetConfig.lineName, board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                    setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
                 }
+                else if(powerContext.presence.c2_pdb)
+                {
+                    setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
             }
-        case Event::pdbMainPowerOkWatchdogTimerExpired
-            // PBB failed to power on
+            break;
         default:
             lg2::info("No action taken.");
             break;
