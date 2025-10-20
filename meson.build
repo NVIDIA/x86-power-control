@@ -36,6 +36,30 @@ if get_option('button-passthrough').allowed()
     cpp_args += '-DUSE_BUTTON_PASSTHROUGH'
 endif
 
+# Configure IOX paths
+conf_data = configuration_data()
+conf_data.set_quoted(
+    'C2_PDB_IOX_PATH',
+    get_option('c2-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'NVL144_PDB_IOX_PATH',
+    get_option('nvl144-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD0_IOX_PATH',
+    get_option('board0-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD1_IOX_PATH',
+    get_option('board1-iox-path'),
+)
+
+configure_file(
+    output: 'config.h',
+    configuration: conf_data,
+)
+
 deps = [
     dependency('libgpiodcxx', default_options: ['bindings=cxx']),
     dependency('libsystemd'),

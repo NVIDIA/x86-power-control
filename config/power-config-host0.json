@@ -73,14 +73,50 @@
             "Polarity": "ActiveLow"
         },
         {
-            "Name": "PDBMainPowerEnable",
+            "Name": "NVL144PDBMainPowerEnable",
             "LineName": "MAIN_PWR_EN-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
-            "Name": "PDBMainPowerOk",
+            "Name": "NVL144PDBMainPowerOk",
             "LineName": "MAIN_PWR_OK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDBPSUPowerEnable",
+            "LineName": "PDB_PS_ON_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "C2PDBPSUPowerOk",
+            "LineName": "PDB_PSU_PWOK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDB_12V_HPMEnable",
+            "LineName": "PDB_P12V_HPM_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDB_12V_GPU1Enable",
+            "LineName": "PDB_P12V_GPU1_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDB_12V_GPU2Enable",
+            "LineName": "PDB_P12V_GPU2_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDB_12V_AICEnable",
+            "LineName": "PDB_P12V_AIC_EN-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
@@ -178,6 +214,9 @@
         "PowerCycleMs": 5000,
         "SioPowerGoodWatchdogMs": 1000,
         "PsPowerOKWatchdogMs": 8000,
+        "NVL144PdbMainPowerOkWatchdogMs": 10000,
+        "C2PdbPSUPowerOkWatchdogMs": 10000,
+        "HpmPowerGoodWatchdogMs": 15000,
         "GracefulPowerOffS": 300,
         "WarmResetCheckMs": 500,
         "PowerOffSaveMs": 7000,
