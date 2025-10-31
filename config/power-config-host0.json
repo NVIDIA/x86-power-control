@@ -2,73 +2,73 @@
     "gpio_configs": [
         {
             "Name": "IdButton",
-            "LineName": "ID_BUTTON",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "NMIButton",
-            "LineName": "NMI_BUTTON",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "NMIOut",
-            "LineName": "NMI_OUT",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
             "Name": "PostComplete",
-            "LineName": "POST_COMPLETE",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "PowerButton",
-            "LineName": "POWER_BUTTON",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "PowerOk",
-            "LineName": "PS_PWROK",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
             "Name": "PowerOut",
-            "LineName": "POWER_OUT",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "ResetButton",
-            "LineName": "RESET_BUTTON",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "ResetOut",
-            "LineName": "RESET_OUT",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "SioOnControl",
-            "LineName": "SIO_ONCONTROL",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
         {
             "Name": "SioPowerGood",
-            "LineName": "SIO_POWER_GOOD",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
             "Name": "SIOS5",
-            "LineName": "SIO_S5",
+            "LineName": "",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
@@ -204,8 +204,6 @@
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         }
-
-
     ],
     "timing_configs": {
         "PowerPulseMs": 200,
@@ -214,11 +212,11 @@
         "PowerCycleMs": 5000,
         "SioPowerGoodWatchdogMs": 1000,
         "PsPowerOKWatchdogMs": 8000,
-        "NVL144PdbMainPowerOkWatchdogMs": 10000,
-        "C2PdbPSUPowerOkWatchdogMs": 10000,
-        "HpmPowerGoodWatchdogMs": 15000,
-        "CpuResetWatchdogMs": 10000,
-        "CpuShutdownOkWatchdogMs": 10000,
+        "NVL144PdbMainPowerOkWatchdogMs": 1000,
+        "C2PdbPSUPowerOkWatchdogMs": 1000,
+        "HpmPowerGoodWatchdogMs": 10000,
+        "CpuResetWatchdogMs": 200,
+        "CpuShutdownOkWatchdogMs": 20000,
         "GracefulPowerOffS": 300,
         "WarmResetCheckMs": 500,
         "PowerOffSaveMs": 7000,

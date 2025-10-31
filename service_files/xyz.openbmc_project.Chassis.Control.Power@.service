@@ -2,6 +2,14 @@
 Description=Intel Power Control for the Host %i
 ConditionPathExists=/usr/share/x86-power-control/power-config-host%i.json
 
+# Provides functionality of old PSM services (dependencies of default.target)
+Provides=xyz.openbmc_project.State.Chassis@%i.service
+Provides=xyz.openbmc_project.State.Host@%i.service
+
+# Old PSM services
+Conflicts=xyz.openbmc_project.State.Chassis@%i.service
+Conflicts=xyz.openbmc_project.State.Host@%i.service
+
 [Service]
 Restart=always
 RestartSec=3
