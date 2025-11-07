@@ -39,6 +39,10 @@ endif
 # Configure IOX paths
 conf_data = configuration_data()
 conf_data.set_quoted(
+    'GB300_PDB_IOX_PATH',
+    get_option('gb300-pdb-iox-path'),
+)
+conf_data.set_quoted(
     'C2_PDB_IOX_PATH',
     get_option('c2-pdb-iox-path'),
 )

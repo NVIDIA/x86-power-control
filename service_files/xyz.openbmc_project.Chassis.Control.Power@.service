@@ -1,5 +1,5 @@
 [Unit]
-Description=Intel Power Control for the Host %i
+Description=VR Power Control for the Host %i
 ConditionPathExists=/usr/share/x86-power-control/power-config-host%i.json
 
 # Provides functionality of old PSM services (dependencies of default.target)

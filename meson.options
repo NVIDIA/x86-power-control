@@ -28,6 +28,13 @@ option(
     value: 'disabled',
     description: 'Directly couple through power and reset buttons',
 )
+
+option(
+    'gb300-pdb-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/9-0075',
+    description: 'GB300 PDB IOX PCA953x driver bound path',
+)
 option(
     'c2-pdb-iox-path',
     type: 'string',

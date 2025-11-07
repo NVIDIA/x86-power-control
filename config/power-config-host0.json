@@ -85,6 +85,30 @@
             "Polarity": "ActiveHigh"
         },
         {
+            "Name": "E1SPowerEnable",
+            "LineName": "E1S_PWR_EN",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "BMCSSDReset",
+            "LineName": "BMC_SSD0_RST_L",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "GB300PDBMainPowerEnable",
+            "LineName": "PDB_12V_EN_N_R-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "GB300PDBMainPowerOk",
+            "LineName": "PDB_12V_PG_R-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
             "Name": "C2PDBPSUPowerEnable",
             "LineName": "PDB_PS_ON_L-O",
             "Type": "GPIO",
@@ -117,6 +141,12 @@
         {
             "Name": "C2PDB_12V_AICEnable",
             "LineName": "PDB_P12V_AIC_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "C2PDB_Type",
+            "LineName": "PDB_TYPE-I",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
@@ -213,6 +243,7 @@
         "SioPowerGoodWatchdogMs": 1000,
         "PsPowerOKWatchdogMs": 8000,
         "NVL144PdbMainPowerOkWatchdogMs": 1000,
+        "GB300PdbMainPowerOkWatchdogMs": 1000,
         "C2PdbPSUPowerOkWatchdogMs": 1000,
         "HpmPowerGoodWatchdogMs": 10000,
         "CpuResetWatchdogMs": 200,

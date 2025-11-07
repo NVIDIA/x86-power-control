@@ -34,6 +34,17 @@
 #include <optional>
 #include <regex>
 #include <string_view>
+#include <chrono>
+
+// For input event monitoring - PDB IOX interrupt lines are not connected to BMC/SMM
+#include <fcntl.h>
+#include <unistd.h>
+#include <linux/input.h>
+#include <cerrno>
+#include <cstring>
+
+//  For starting cpu boot services
+#include <sdbusplus/bus.hpp>
 
 namespace power_control
 {
@@ -56,7 +67,9 @@ enum class PowerAction {
 };
 
 struct BoardPresence {
+    bool gb300_pdb = false;
     bool c2_pdb = false;
+    bool c2_pdb_mcu = false;
     bool nvl144_pdb = false;
     bool board0 = false;
     bool board1 = false;
@@ -119,12 +132,17 @@ static ConfigData slotPowerConfig;
 static ConfigData hpmStbyEnConfig;
 static ConfigData nvl144pdbMainPowerEnableConfig;
 static ConfigData nvl144pdbMainPowerOkConfig;
+static ConfigData e1sPowerEnableConfig;
+static ConfigData bmcSSDResetConfig;
+static ConfigData gb300pdbMainPowerEnableConfig;
+static ConfigData gb300pdbMainPowerOkConfig;
 static ConfigData c2pdbPSUPowerEnableConfig;
 static ConfigData c2pdbPSUPowerOkConfig;
 static ConfigData c2pdb_12V_HPMEnableConfig;
 static ConfigData c2pdb_12V_GPU1EnableConfig;
 static ConfigData c2pdb_12V_GPU2EnableConfig;
 static ConfigData c2pdb_12V_AICEnableConfig;
+static ConfigData c2pdbTypeConfig;
 static ConfigData usbPowerEnableConfig;
 static ConfigData board0RunPowerPGConfig;
 static ConfigData board1RunPowerPGConfig;
@@ -139,7 +157,6 @@ static ConfigData board0CpuShutdownRequestConfig;
 static ConfigData board1CpuShutdownRequestConfig;
 static ConfigData board0CpuShutdownOkConfig;
 static ConfigData board1CpuShutdownOkConfig;
-
 // map for storing list of gpio parameters whose config are to be read from x86
 // power control json config
 boost::container::flat_map<std::string, ConfigData*> powerSignalMap = {
@@ -158,12 +175,17 @@ boost::container::flat_map<std::string, ConfigData*> powerSignalMap = {
     {"SlotPower", &slotPowerConfig},
     {"NVL144PDBMainPowerEnable", &nvl144pdbMainPowerEnableConfig},
     {"NVL144PDBMainPowerOk", &nvl144pdbMainPowerOkConfig},
+    {"E1SPowerEnable", &e1sPowerEnableConfig},
+    {"BMCSSDReset", &bmcSSDResetConfig},
+    {"GB300PDBMainPowerEnable", &gb300pdbMainPowerEnableConfig},
+    {"GB300PDBMainPowerOk", &gb300pdbMainPowerOkConfig},
     {"C2PDBPSUPowerEnable", &c2pdbPSUPowerEnableConfig},
     {"C2PDBPSUPowerOk", &c2pdbPSUPowerOkConfig},
     {"C2PDB_12V_HPMEnable", &c2pdb_12V_HPMEnableConfig},
     {"C2PDB_12V_GPU1Enable", &c2pdb_12V_GPU1EnableConfig},
     {"C2PDB_12V_GPU2Enable", &c2pdb_12V_GPU2EnableConfig},
     {"C2PDB_12V_AICEnable", &c2pdb_12V_AICEnableConfig},
+    {"C2PDB_Type", &c2pdbTypeConfig},
     {"USBPowerEnable", &usbPowerEnableConfig},
     {"Board0RunPowerPG", &board0RunPowerPGConfig},
     {"Board1RunPowerPG", &board1RunPowerPGConfig},
@@ -177,7 +199,7 @@ boost::container::flat_map<std::string, ConfigData*> powerSignalMap = {
     {"Board0CpuShutdownRequest", &board0CpuShutdownRequestConfig},
     {"Board1CpuShutdownRequest", &board1CpuShutdownRequestConfig},
     {"Board0CpuShutdownOk", &board0CpuShutdownOkConfig},
-    {"Board1CpuShutdownOk", &board1CpuShutdownOkConfig}};
+    {"Board1CpuShutdownOk", &board1CpuShutdownOkConfig},
 
 static std::string hostDbusName = "xyz.openbmc_project.State.Host";
 static std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
@@ -216,6 +238,7 @@ boost::container::flat_map<std::string, int> TimerMap = {
     {"SioPowerGoodWatchdogMs", 1000},
     {"PsPowerOKWatchdogMs", 8000},
     {"NVL144PdbMainPowerOkWatchdogMs", 10000},
+    {"GB300PdbMainPowerOkWatchdogMs", 10000},
     {"C2PdbPSUPowerOkWatchdogMs", 10000},
     {"HpmPowerGoodWatchdogMs", 15000},
     {"CpuResetWatchdogMs", 10000},
@@ -291,7 +314,18 @@ static gpiod::line slotPowerLine;
 static gpiod::line nvl144pdbMainPowerEnableLine;
 static gpiod::line nvl144pdbMainPowerOkLine;
 static boost::asio::posix::stream_descriptor nvl144pdbMainPowerOkEvent(io);
+static gpiod::line e1sPowerEnableLine;
+static gpiod::line bmcSSDResetLine;
 // -- end -- NVL144 PDB
+// GB300 PDB -- start--
+static gpiod::line gb300pdbMainPowerEnableLine;
+static gpiod::line gb300pdbMainPowerOkLine;
+// GB300 PDB Main Power OK uses input event monitoring instead of libgpiod
+// due to missing interrupt line to BMC
+static boost::asio::posix::stream_descriptor gb300pdbMainPowerOkEvent(io);
+// Track GB300 PDB Main Power OK state locally since gpio_keys_polled has exclusive control
+static int gb300pdbMainPowerOkState = -1; // -1 = unknown, 0 = low, 1 = high
+// -- end -- GB300 PDB
 // C2 PDB -- start--
 static gpiod::line c2pdbPSUPowerEnableLine;
 static gpiod::line c2pdbPSUPowerOkLine;
@@ -300,6 +334,7 @@ static gpiod::line c2pdb_12V_HPMEnableLine;
 static gpiod::line c2pdb_12V_GPU1EnableLine;
 static gpiod::line c2pdb_12V_GPU2EnableLine;
 static gpiod::line c2pdb_12V_AICEnableLine;
+static gpiod::line c2pdbTypeLine;
 // -- end -- C2 PDB
 static gpiod::line usbPowerEnableLine;
 static gpiod::line board0RunPowerPGLine;
@@ -500,6 +535,8 @@ enum class Event
     warmResetDetected,
     nvl144pdbMainPowerOkAssert,
     nvl144pdbMainPowerOkDeAssert,
+    gb300pdbMainPowerOkAssert,
+    gb300pdbMainPowerOkDeAssert,
     c2pdbPSUPowerOkAssert,
     c2pdbPSUPowerOkDeAssert,
     board0RunPowerPGAssert,
@@ -604,6 +641,12 @@ static std::string getEventName(Event event)
         case Event::nvl144pdbMainPowerOkDeAssert:
             return "NVL144 PDB main power OK de-assert";
             break;
+        case Event::gb300pdbMainPowerOkAssert:
+            return "GB300 PDB main power OK assert";
+            break;
+        case Event::gb300pdbMainPowerOkDeAssert:
+            return "GB300 PDB main power OK de-assert";
+            break;
         case Event::c2pdbPSUPowerOkAssert:
             return "C2 PDB main power OK assert";
             break;
@@ -689,13 +732,13 @@ static void nmiButtonHandler(bool state);
 static void idButtonHandler(bool state);
 static void postCompleteHandler(bool state);
 static void nvl144pdbMainPowerOkHandler(bool state);
+static void gb300pdbMainPowerOkHandler(bool state);
 static void c2pdbPSUPowerOkHandler(bool state);
 static void board0RunPowerPGHandler(bool state);
 static void board1RunPowerPGHandler(bool state);
 static void cpuResetIndicatorHandler(bool state);
 static void board0CpuShutdownOkHandler(bool state);
 static void board1CpuShutdownOkHandler(bool state);
-
 static std::function<void(const Event)> getPowerStateHandler(PowerState state)
 {
     switch (state)
@@ -1587,7 +1630,132 @@ static bool setGPIOOutput(const std::string& name, const int value,
     
 }
 
+// Helper function to find the correct input event device by name
+static std::string findInputEventDevice(const std::string& deviceName)
+{
+    // Search through /dev/input/eventX devices to find the one matching our name
+    for (int i = 0; i < 32; i++)
+    {
+        std::string eventPath = "/dev/input/event" + std::to_string(i);
+        std::string namePath = "/sys/class/input/event" + std::to_string(i) + "/device/name";
+        
+        std::ifstream nameFile(namePath);
+        if (nameFile.is_open())
+        {
+            std::string name;
+            std::getline(nameFile, name);
+            if (name == deviceName)
+            {
+                lg2::info("Found input device {DEVICE_NAME} at {EVENT_PATH}",
+                         "DEVICE_NAME", deviceName, "EVENT_PATH", eventPath);
+                return eventPath;
+            }
+        }
+    }
+    return "";
+}
 
+// Helper function to monitor Linux input events (for gpio_keys_polled driver)
+static void waitForInputEvent(
+    const std::string& name, const std::function<void(bool)>& eventHandler,
+    uint16_t keyCode, boost::asio::posix::stream_descriptor& event,
+    int* stateTracker = nullptr)
+{
+    event.async_wait(
+        boost::asio::posix::stream_descriptor::wait_read,
+        [name, eventHandler, keyCode, &event, stateTracker](const boost::system::error_code ec) {
+            if (ec)
+            {
+                lg2::error("{INPUT_NAME} fd handler error: {ERROR_MSG}",
+                           "INPUT_NAME", name, "ERROR_MSG", ec.message());
+                return;
+            }
+            
+            struct input_event inputEvent;
+            ssize_t bytesRead = read(event.native_handle(), &inputEvent, sizeof(inputEvent));
+            
+            if (bytesRead != sizeof(inputEvent))
+            {
+                if (bytesRead < 0)
+                {
+                    lg2::error("{INPUT_NAME} read error: {ERROR}",
+                               "INPUT_NAME", name, "ERROR", strerror(errno));
+                }
+                else
+                {
+                    lg2::error("{INPUT_NAME} read error: incomplete event (got {BYTES} bytes)",
+                               "INPUT_NAME", name, "BYTES", bytesRead);
+                }
+                waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
+                return;
+            }
+            
+            // We only care about EV_KEY events with our specific key code
+            if (inputEvent.type == EV_KEY && inputEvent.code == keyCode)
+            {
+                lg2::info("{INPUT_NAME} event: code={KEY_CODE:#x} value={VALUE}",
+                         "INPUT_NAME", name, "KEY_CODE", inputEvent.code, 
+                         "VALUE", inputEvent.value);
+                
+                // Update state tracker if provided
+                if (stateTracker != nullptr)
+                {
+                    *stateTracker = inputEvent.value;
+                }
+                
+                // Value 1 = pressed (high), 0 = released (low)
+                eventHandler(inputEvent.value == 1);
+            }
+            
+            // Continue waiting for next event
+            waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
+        });
+}
+
+// Request monitoring of Linux input events (for gpio_keys_polled driver)
+static bool requestInputEvents(
+    const std::string& deviceName, const std::string& signalName,
+    uint16_t keyCode, const std::function<void(bool)>& handler,
+    boost::asio::posix::stream_descriptor& eventDescriptor,
+    int* stateTracker = nullptr)
+{
+    // Find the input device
+    std::string eventPath = findInputEventDevice(deviceName);
+    if (eventPath.empty())
+    {
+        lg2::error("Failed to find input device {DEVICE_NAME}",
+                   "DEVICE_NAME", deviceName);
+        return false;
+    }
+    
+    // Open the event device
+    int fd = open(eventPath.c_str(), O_RDONLY | O_NONBLOCK);
+    if (fd < 0)
+    {
+        lg2::error("Failed to open {EVENT_PATH}: {ERROR}",
+                   "EVENT_PATH", eventPath, "ERROR", strerror(errno));
+        return false;
+    }
+    
+    // Assign to the stream descriptor
+    eventDescriptor.assign(fd);
+    
+    // Start waiting for events
+    waitForInputEvent(signalName, handler, keyCode, eventDescriptor, stateTracker);
+    
+    lg2::info("Successfully set up input event monitoring for {SIGNAL_NAME} on {EVENT_PATH} with key code {KEY_CODE:#x}",
+             "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE", keyCode);
+    
+    return true;
+}
+
+// Helper function to read GB300 PDB Main Power OK state from cached value
+// Since gpio_keys_polled has exclusive control, we can't request the GPIO directly
+// Instead, we track the state based on input events
+static int getGB300PdbMainPowerOkValue()
+{
+    return gb300pdbMainPowerOkState;
+}
 
 static int setMaskedGPIOOutputForMs(gpiod::line& maskedGPIOLine,
                                     const std::string& name, const int value,
@@ -1861,6 +2029,10 @@ static void pdbMainPowerOkWatchdogTimerStart(int timeoutMs = -1)
     else if(powerContext.presence.c2_pdb)
     {
         timeout = TimerMap["C2PdbPSUPowerOkWatchdogMs"];
+    }
+    else if(powerContext.presence.gb300_pdb)
+    {
+        timeout = TimerMap["GB300PdbMainPowerOkWatchdogMs"];
     }
     else
     {
@@ -2177,6 +2349,22 @@ static void sioPowerGoodWatchdogTimerStart()
 static void powerStateOn(const Event event)
 {
     logEvent(__FUNCTION__, event);
+
+    detectBoardPresence();
+    // Check if no boards or no PDB present - error condition
+    if (!powerContext.presence.board0)
+    {
+        lg2::error("No Board 0 present. Rejecting power request.");
+        return;  // Return without taking action
+    }
+    else if (!powerContext.presence.nvl144_pdb && 
+             !powerContext.presence.c2_pdb && 
+             !powerContext.presence.gb300_pdb)
+    {
+        lg2::error("No PDB present. Rejecting power request.");
+        return;
+    }
+
     switch (event)
     {
         case Event::psPowerOKDeAssert:
@@ -2223,16 +2411,10 @@ static void powerStateOn(const Event event)
             powerContext.action = PowerAction::FORCE_OFF;
             powerContext.target_state = "HostPowerOff";
 
-            // Check if no boards or no PDB present - error condition
-            if ((!powerContext.presence.board0 && !powerContext.presence.board1))
-            {
-                lg2::error("Force off requested but no boards present. Cannot proceed with force off.");
-                // TODO: Handle error appropriately - set error state or fault condition
-            }
             // Check if all present boards already have their power rails off
             // For each board: if not present OR (present AND power is de-asserted)
             // This ensures we only check get_value() on boards that are present
-            else if ((!powerContext.presence.nvl144_pdb || (nvl144pdbMainPowerOkLine.get_value() == !nvl144pdbMainPowerOkConfig.polarity)) &&
+            if ((!powerContext.presence.nvl144_pdb || (nvl144pdbMainPowerOkLine.get_value() == !nvl144pdbMainPowerOkConfig.polarity)) &&
                      (!powerContext.presence.c2_pdb || (c2pdbPSUPowerOkLine.get_value() == !c2pdbPSUPowerOkConfig.polarity)) &&
                      (!powerContext.presence.board0 || (board0RunPowerPGLine.get_value() == !board0RunPowerPGConfig.polarity)) &&
                      (!powerContext.presence.board1 || (board1RunPowerPGLine.get_value() == !board1RunPowerPGConfig.polarity)))
@@ -2244,50 +2426,48 @@ static void powerStateOn(const Event event)
             }
             else // Main Power Rails are not Off, commence Force Off sequence
             {
-                if (powerContext.presence.nvl144_pdb)
+                // if (powerContext.presence.nvl144_pdb)
+                // {
+                //     // NVL144 PDB Main Power OK is de-asserted
+                //     if (nvl144pdbMainPowerOkLine.get_value() == !nvl144pdbMainPowerOkConfig.polarity)
+                //     {
+                //         lg2::info("NVL144 PDB Main Power OK is already de-asserted. Ensuring PDB Main Power Enable is de-asserted. Asserting Board 0's CPU Shutdown Request Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
+
+                //         // De-assert NVL144 PDB Main Power Enable
+                //         setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+
+                //         // Begin HPM Board Power Sequencing. 
+                //         // Assert Board 0's CPU Shutdown Request Line (for 1P & 2P configs), start CPU Shutdown OK watchdog timer, and wait for CPU Shutdown OK Assertion Events
+                //         if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
+                //         {
+                //             setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
+                //         }
+
+                //         cpuShutdownOkWatchdogTimerStart(100); // 100ms timeout for force off sequence
+                //         setPowerState(PowerState::waitForCPUShutdownOk);
+                //     }
+                //     else // NVL144 PDB Main Power OK is asserted
+                //     {
+                //         lg2::info("De-asserting NVL144 PDB Main Power Enable. Waiting for PDB Main Power OK De-assertion Event...");
+
+                //         // De-assert NVL144 PDB Main Power Enable, start PDB Main Power OK watchdog timer, and wait for PDB Main Power OK De-assertion Event
+                //         setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+                //         pdbMainPowerOkWatchdogTimerStart();
+                //         setPowerState(PowerState::waitForPDBMainPowerOff);
+                //     }
+                // }
+               
+                lg2::info("Commencing HPM Board Power Sequencing. Asserting Board 0's CPU Shutdown Request Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
+
+                // Begin HPM Board Power Sequencing. 
+                // Assert Board 0's CPU Shutdown Request Line (for 1P & 2P configs), start CPU Shutdown OK watchdog timer, and wait for CPU Shutdown OK Assertion Events
+                if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
                 {
-                    // NVL144 PDB Main Power OK is de-asserted
-                    if (nvl144pdbMainPowerOkLine.get_value() == !nvl144pdbMainPowerOkConfig.polarity)
-                    {
-                        lg2::info("NVL144 PDB Main Power OK is already de-asserted. Ensuring PDB Main Power Enable is de-asserted. Asserting Board 0's CPU Shutdown Request Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
-
-                        // De-assert NVL144 PDB Main Power Enable
-                        setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
-
-                        // Begin HPM Board Power Sequencing. 
-                        // Assert Board 0's CPU Shutdown Request Line (for 1P & 2P configs), start CPU Shutdown OK watchdog timer, and wait for CPU Shutdown OK Assertion Events
-                        if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                        {
-                            setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                        }
-
-                        cpuShutdownOkWatchdogTimerStart(100); // 100ms timeout for force off sequence
-                        setPowerState(PowerState::waitForCPUShutdownOk);
-                    }
-                    else // NVL144 PDB Main Power OK is asserted
-                    {
-                        lg2::info("De-asserting NVL144 PDB Main Power Enable. Waiting for PDB Main Power OK De-assertion Event...");
-
-                        // De-assert NVL144 PDB Main Power Enable, start PDB Main Power OK watchdog timer, and wait for PDB Main Power OK De-assertion Event
-                        setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
-                        pdbMainPowerOkWatchdogTimerStart();
-                        setPowerState(PowerState::waitForPDBMainPowerOff);
-                    }
+                    setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
                 }
-                else // C2 PDB or No PDB Sequence Start
-                {
-                    lg2::info("Commencing HPM Board Power Sequencing. Asserting Board 0's CPU Shutdown Request Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
 
-                    // Begin HPM Board Power Sequencing. 
-                    // Assert Board 0's CPU Shutdown Request Line (for 1P & 2P configs), start CPU Shutdown OK watchdog timer, and wait for CPU Shutdown OK Assertion Events
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
-
-                    cpuShutdownOkWatchdogTimerStart(100);
-                    setPowerState(PowerState::waitForCPUShutdownOk);
-                }
+                cpuShutdownOkWatchdogTimerStart(100);
+                setPowerState(PowerState::waitForCPUShutdownOk);
             }
             break;
         case Event::gracefulPowerOffRequest:
@@ -2479,7 +2659,7 @@ static void powerStateOff(const Event event)
                     // NVL144 PDB Main Power OK is already asserted
                     if (nvl144pdbMainPowerOkLine.get_value() == nvl144pdbMainPowerOkConfig.polarity)
                     {
-                        lg2::info("NVL144 PDB Main Power OK is already asserted. Ensuring PDB Main Power Enable is asserted. Commencing HPM Board Power Sequencing.");
+                        lg2::info("NVL144 PDB Main Power OK is already asserted. Ensuring PDB Main Power Enable is asserted. Commencing HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, asserting E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
 
                         if (!nvl144pdbMainPowerEnableConfig.lineName.empty())
                         {
@@ -2494,7 +2674,21 @@ static void powerStateOff(const Event event)
                         {
                             setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
                         }
-
+                        // Assert E1S Power Enable
+                        if(e1sPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(e1sPowerEnableConfig.lineName, e1sPowerEnableConfig.polarity, e1sPowerEnableLine);
+                        }
+                        // De-assert BMC SDD Reset
+                        if(bmcSSDResetConfig.lineName.empty())
+                        {
+                            setGPIOOutput(bmcSSDResetConfig.lineName, !bmcSSDResetConfig.polarity, bmcSSDResetLine);
+                        }
+                        // Assert SMM USB Power Enable
+                        if(usbPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
+                        }
                         // Assert Board 0 and/or Board 1 Run Power Enable
                         if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
                         {
@@ -2520,8 +2714,8 @@ static void powerStateOff(const Event event)
                         setPowerState(PowerState::waitForPDBMainPowerOk);
                     }
                 }
-                // C2 PDB Sequence Start
-                else if(powerContext.presence.c2_pdb)
+                // C2 Non-Intelligent PDB Sequence Start
+                else if(powerContext.presence.c2_pdb && !powerContext.presence.c2_pdb_mcu)
                 {
                     // C2 PDB Main Power OK is already asserted
                     if(c2pdbPSUPowerOkLine.get_value() == c2pdbPSUPowerOkConfig.polarity)
@@ -2544,7 +2738,11 @@ static void powerStateOff(const Event event)
                         {
                             setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
                         }
-
+                        // Assert SMM USB Power Enable
+                        if(usbPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
+                        }
                         // Assert Board 0 and/or Board 1 Run Power Enable
                         if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
                         {
@@ -2561,6 +2759,7 @@ static void powerStateOff(const Event event)
                     }
                     else // C2 PDB Main Power OK is not asserted, commence C2 PDB Main Power On sequence
                     {
+
                         // Assert C2 PDB Main Power Enable
                         setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
 
@@ -2570,7 +2769,70 @@ static void powerStateOff(const Event event)
                     }
                     
                 }
+                else if (powerContext.presence.c2_pdb && powerContext.presence.c2_pdb_mcu)
+                {
+                    // C2 PDB Main Power OK is already asserted
+                    if(c2pdbPSUPowerOkLine.get_value() == c2pdbPSUPowerOkConfig.polarity)
+                    {
+                        
+                    }
+                }
                 // No PDB present - HPM Board sequence Start
+                else if(powerContext.presence.gb300_pdb)
+                {
+
+                    // NVL144 PDB Main Power OK is already asserted
+                    // if (gb300pdbMainPowerOkLine.get_value() == gb300pdbMainPowerOkConfig.polarity)
+                    // GB300 PDB Main Power OK is already asserted
+                    int gb300PwrOkValue = getGB300PdbMainPowerOkValue();
+                    if (gb300PwrOkValue >= 0 && gb300PwrOkValue == gb300pdbMainPowerOkConfig.polarity)
+                    {
+                        lg2::info("GB300 PDB Main Power OK is already asserted. Ensuring PDB Main Power Enable is asserted. Commencing HPM Board Power Sequencing.");
+
+                        if (!gb300pdbMainPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+                        }
+                        // Begin HPM Sequencing. Assert Board 0 and/or Board 1 Pre System Reset
+                        if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
+                        {
+                            setGPIOOutput(board0PreSystemResetConfig.lineName, board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                        }
+                        if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
+                        {
+                            setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                        }
+
+                        // Assert SMM USB Power Enable
+                        if(usbPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
+                        }
+        
+                        // Assert Board 0 and/or Board 1 Run Power Enable
+                        if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(board0RunPowerEnableConfig.lineName, board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+                        }
+                        if(powerContext.presence.board1 && !board1RunPowerEnableConfig.lineName.empty())
+                        {
+                            setGPIOOutput(board1RunPowerEnableConfig.lineName, board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+                        }
+
+                        // Start the HPM Power Good Watchdog Timer (uses timeout configured from config/power-config-host0.json)
+                        hpmPowerGoodWatchdogTimerStart();
+                        setPowerState(PowerState::waitForHPMPowerGoodAssert);
+                    }
+                    else
+                    {
+                        // Assert GB300 PDB Main Power Enable
+                        setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+
+                        // start the GB300 PDB Main Power Ok Watchdog Timer (uses timeout configured from config/power-config-host0.json)
+                        pdbMainPowerOkWatchdogTimerStart();
+                        setPowerState(PowerState::waitForPDBMainPowerOk);
+                    }
+                }
                 else
                 {
                     // Start HPM Board Power Sequencing. Assert Board 0 and/or Board 1 Pre System Reset
@@ -2820,7 +3082,7 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
             {
                 // HPM Board Power Sequencing - Begin
                 pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
-                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset and Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
+                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, asserting E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
                 
                 // Assert Board 0 and/or Board 1 Pre System Reset
                 if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
@@ -2830,6 +3092,23 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                 if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
                 {
                     setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                }
+
+                // Assert E1S Power Enable
+                if(e1sPowerEnableConfig.lineName.empty())
+                {
+                    setGPIOOutput(e1sPowerEnableConfig.lineName, e1sPowerEnableConfig.polarity, e1sPowerEnableLine);
+                }
+
+                // De-assert BMC SDD Reset
+                if(bmcSSDResetConfig.lineName.empty())
+                {
+                    setGPIOOutput(bmcSSDResetConfig.lineName, !bmcSSDResetConfig.polarity, bmcSSDResetLine);
+                }
+
+                if(usbPowerEnableConfig.lineName.empty())
+                {
+                    setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
                 }
 
                 // Assert Board 0 and/or Board 1 Run Power Enable
@@ -2851,7 +3130,7 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
             if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.c2_pdb)
             {
                 pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
-                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset and Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
+                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, USB Power Enable, and HPM Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
 
                 // Assert Board 0 and/or Board 1 Pre System Reset
                 if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
@@ -2863,6 +3142,12 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                     setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
                 }
 
+                // Assert USB Power Enable
+                if(usbPowerEnableConfig.lineName.empty())
+                {
+                    setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
+                }
+
                 // Assert Board 0 and/or Board 1 Run Power Enable
                 if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
                 {
@@ -2872,6 +3157,44 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                 {
                     setGPIOOutput(board1RunPowerEnableConfig.lineName, board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
                 }
+
+                // Start the HPM Power Good Watchdog Timer (uses timeout configured from config/power-config-host0.json)
+                hpmPowerGoodWatchdogTimerStart();
+                setPowerState(PowerState::waitForHPMPowerGoodAssert);
+            }
+            break;
+        case Event::gb300pdbMainPowerOkAssert:
+            if(powerContext.action == PowerAction::POWER_ON && powerContext.presence.gb300_pdb)
+            {
+                pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
+                lg2::info("Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, USB Power Enable, and HPM Run Power Enable Lines. Waiting For HPM Board Power Good Assertion Event...");
+                
+
+                 // Assert Board 0 and/or Board 1 Pre System Reset
+                 if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
+                 {
+                     setGPIOOutput(board0PreSystemResetConfig.lineName, board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+                 }
+                 if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
+                 {
+                     setGPIOOutput(board1PreSystemResetConfig.lineName, board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+                 }
+
+                 // Assert USB Power Enable
+                 if(usbPowerEnableConfig.lineName.empty())
+                 {
+                     setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine);
+                 }
+ 
+                 // Assert Board 0 and/or Board 1 Run Power Enable
+                 if(powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
+                 {
+                     setGPIOOutput(board0RunPowerEnableConfig.lineName, board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+                 }
+                 if(powerContext.presence.board1 && !board1RunPowerEnableConfig.lineName.empty())
+                 {
+                     setGPIOOutput(board1RunPowerEnableConfig.lineName, board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+                 }
 
                 // Start the HPM Power Good Watchdog Timer (uses timeout configured from config/power-config-host0.json)
                 hpmPowerGoodWatchdogTimerStart();
@@ -2893,6 +3216,10 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
                 {
                     setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
                 }
+                else if(powerContext.presence.gb300_pdb)
+                {
+                    setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, !gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+                }
             }
             break;
         default:
@@ -2901,428 +3228,415 @@ static void powerStateWaitForPDBMainPowerOk(const Event event)
     }
 }
 
-// To-Do: See if there is refactoring possible to consolidate the nvl144pdbMainPowerOkDeAssert, c2pdbPSUPowerOkDeAssert, and pdbMainPowerOkWatchdogTimerExpired
-// events for Host Power On Action since they conduct the same actions.
+// Helper function: De-assert board run power enable lines (used for power-on fault cleanup)
+static void deassertBoardRunPowerEnables()
+{
+    if (powerContext.presence.board0 && !board0RunPowerEnableConfig.lineName.empty())
+    {
+        setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
+    }
+    
+    if (powerContext.presence.board1 && !board1RunPowerEnableConfig.lineName.empty())
+    {
+        setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
+    }
+}
+
+// Helper function: De-assert board pre-system reset lines (common cleanup operation)
+static void deassertBoardPreSystemResets()
+{
+    if (powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
+    {
+        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+    }
+    
+    if (powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
+    {
+        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+    }
+}
+
+// Helper function: Complete power-on fault cleanup sequence
+static void completePowerOnFaultCleanup()
+{
+    lg2::info("PDB Main Power Rail powered down. Conducting HPM Main Power On Fault cleanup: De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
+    deassertBoardPreSystemResets();
+    deassertBoardRunPowerEnables();
+    setPowerState(PowerState::off);
+    powerContext.action = PowerAction::NONE;
+}
+
+// Helper function: Complete force-off cleanup sequence
+// Forward declaration for functions defined later
+static void forceOffCleanUpSequence();
+static void completeForcefulShutdownSequence();
+
+static void completeForceOffCleanup()
+{
+    lg2::info("PDB Main Power Rail powered down. Host Forceful Shutdown sequence completed successfully. Conducting Cleanup Sequence: De-asserting Pre System Reset & CPU Shutdown Force Lines. Setting Host Power State to Off.");
+    completeForcefulShutdownSequence(); // Reuses existing helper that de-asserts board control GPIOs and transitions to off
+}
+
+// Helper function: Get PDB name string for logging
+static const char* getPDBName()
+{
+    if (powerContext.presence.nvl144_pdb) return "NVL144 PDB";
+    if (powerContext.presence.gb300_pdb) return "GB300 PDB";
+    if (powerContext.presence.c2_pdb) return "C2 PDB";
+    return "PDB";
+}
+
+// Refactored function with consolidated logic
 static void powerStateWaitForPDBMainPowerOff(const Event event)
 {
     logEvent(__FUNCTION__, event);
-    switch (event)
+    
+    // Handle PDB power OK de-assertion events (success cases)
+    if (event == Event::nvl144pdbMainPowerOkDeAssert || 
+        event == Event::gb300pdbMainPowerOkDeAssert || 
+        event == Event::c2pdbPSUPowerOkDeAssert)
     {
-        case Event::nvl144pdbMainPowerOkDeAssert:
-            pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
-            if(powerContext.action == PowerAction::POWER_ON)
+        pdbMainPowerOkWatchdogTimer.cancel();
+        
+        if (powerContext.action == PowerAction::POWER_ON)
+        {
+            completePowerOnFaultCleanup();
+        }
+        else if (powerContext.action == PowerAction::FORCE_OFF)
+        {
+            completeForceOffCleanup();
+        }
+        return;
+    }
+    
+    // Handle watchdog timer expiration (timeout/failure cases)
+    if (event == Event::pdbMainPowerOkWatchdogTimerExpired)
+    {
+            if (powerContext.action == PowerAction::POWER_ON)
             {
-                // NVL144 PDB Main Power Rail Powered Down Successfully
-                // Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Set Host Power State to Off.
-               lg2::info("PDB Main Power OK De-asserted. NVL144 PDB Main Power Rail Powered Down Successfully! Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");  
-
-               if(powerContext.presence.board0)
-               {
-                    setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
-                    
-               }
-               if(powerContext.presence.board1)
-               {
-                    setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
-                    
-               }
-               setPowerState(PowerState::off);
-               powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
+                lg2::error("Failed to Power Down {PDB_NAME} Main Power Rail. PDB & HPM power domain inconsistency.", "PDB_NAME", getPDBName());
+                completePowerOnFaultCleanup();
             }
-            else if(powerContext.action == PowerAction::FORCE_OFF)
+            else if (powerContext.action == PowerAction::FORCE_OFF)
             {
-                // NVL144 PDB Main Power Rail Powered Down Successfully.
-                // Commencing HPM Main Power Off sequence. Asserting Board 0's CPU Shutdown Request Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...
-                lg2::info("PDB Main Power OK De-asserted. NVL144 PDB Main Power Rail Powered Down Successfully. Commencing HPM Main Power Off sequence. Asserting Board 0's CPU Shutdown Force Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
-                
-                // Assert Board 0's CPU Shutdown Force Line (for 1P & 2P configs), start CPU Shutdown OK watchdog timer, and wait for CPU Shutdown OK Assertion Events
-                if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                {
-                    setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                }
-
-                cpuShutdownOkWatchdogTimerStart(100);
-                setPowerState(PowerState::waitForCPUShutdownOk);
+                lg2::error("Failed to Power Down {PDB_NAME} Main Power Rail. Host Forceful Shutdown sequence failed.", "PDB_NAME", getPDBName());
+                completeForceOffCleanup();
             }
-            break;
-        case Event::c2pdbPSUPowerOkDeAssert:
-            pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
-            if(powerContext.action == PowerAction::POWER_ON)
-            {
-                // C2 PDB Main Power Rail Powered Down Successfully.
-                // Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Set Host Power State to Off.
-               lg2::info("PDB PSU Power OK De-asserted. C2 PDB Main Power Rail Powered Down Successfully. Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
+        return;
+    }
+    
+    // Default case
+    lg2::info("No action taken.");
+}
 
-               if(powerContext.presence.board0)
-               {
-                    setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
-               }
-               if(powerContext.presence.board1)
-               {
-                    setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
-               }
-               setPowerState(PowerState::off);
-               powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-            }
-            else if(powerContext.action == PowerAction::FORCE_OFF)
-            {
-                // C2 PDB Main Power Rail Powered Down Successfully. Setting Host Power State to Off.
-                lg2::info("PDB PSU Power OK De-asserted. C2 PDB Main Power Rail Powered Down Successfully. Main Power Off sequence completed successfully. Setting Host Power State to Off.");
-                setPowerState(PowerState::off);
-                powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
+// Helper function: Check if all required boards are powered on
+static bool areAllRequiredBoardsPoweredOn()
+{
+    bool board0On = !powerContext.presence.board0 || 
+                    (board0RunPowerPGLine.get_value() == board0RunPowerPGConfig.polarity);
+    bool board1On = !powerContext.presence.board1 || 
+                    (board1RunPowerPGLine.get_value() == board1RunPowerPGConfig.polarity);
+    return board0On && board1On;
+}
 
-                // To-Do: Confirm that this is correct for C2 PDB
-            }
-            break;
-        case Event::pdbMainPowerOkWatchdogTimerExpired:
-            if(powerContext.action == PowerAction::POWER_ON)
-            {
-                // Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Set Host Power State to Off.
-                lg2::error("Failed to Power Down PDB Main Power Rail. PDB & HPM power domain inconsistency. Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
-                if(powerContext.presence.board0)
-                {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                        setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
-                }
-                if(powerContext.presence.board1)
-                {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                        setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
-                }
-                setPowerState(PowerState::off);
-                powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-            }
-            else if(powerContext.action == PowerAction::FORCE_OFF)
-            {
-                if(powerContext.presence.nvl144_pdb)
-                {
-                    // Ensuring de-assertion of NVL144 PDB Main Power Enable. Set Host Power State to Off.
-                    lg2::info("PDB Main Power OK watchdog timer expired. Ensuring de-assertion of NVL144 PDB Main Power Enable. Commencing HPM Main Power Off sequence. Asserting Board 0's CPU Shutdown Force Line. Waiting for Board 0 & Board 1 CPU Shutdown OK Assertion Events...");
-                    setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+// Helper function: Transition to CPU reset de-assert wait state
+static void transitionToCPUResetWait()
+{
+    hpmPowerGoodWatchdogTimer.cancel();
+    
+    // Log appropriate message based on board configuration
+    if (powerContext.presence.board0 && powerContext.presence.board1)
+    {
+        lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
+    }
+    else if (powerContext.presence.board0)
+    {
+        lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
+    }
+    
+    deassertBoardPreSystemResets();
+    cpuResetWatchdogTimerStart();
+    setPowerState(PowerState::waitForCPUResetDeAssert);
+}
 
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
+// Helper function: Power down NVL144 PDB for power-on fault recovery
+static void powerDownNVL144PDBForFaultRecovery()
+{
+    lg2::info("Powering down {PDB_NAME} Main Power Rail to establish HPM/PDB consistency. De-asserting Main Power Enable.", "PDB_NAME", getPDBName());
+    setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+    pdbMainPowerOkWatchdogTimerStart();
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+}
 
-                    cpuShutdownOkWatchdogTimerStart(100);
-                    setPowerState(PowerState::waitForCPUShutdownOk);
-                }
-                else if(powerContext.presence.c2_pdb)
-                {
-                    // Ensuring de-assertion of C2 PDB 12V Rails and PSU Power Enable. Set Host Power State to Off.
-                    lg2::info("PDB Main Power OK watchdog timer expired. Ensuring de-assertion of C2 PDB 12V Rails and PSU Power Enable. Main Power Off sequence failed. Setting Host Power State to Off.");
-                    setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine);
-                    setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine);
-                    setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
-                    setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
-                    setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
-                    setPowerState(PowerState::off);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-                }
-            }
-            break;
-        default:
-            lg2::info("No action taken.");
-            break;
+// Helper function: Power down GB300 PDB for power-on fault recovery
+static void powerDownGB300PDBForFaultRecovery()
+{
+    lg2::info("Powering down {PDB_NAME} Main Power Rail to establish HPM/PDB consistency. De-asserting Main Power Enable.", "PDB_NAME", getPDBName());
+    setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, !gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+    pdbMainPowerOkWatchdogTimerStart();
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+}
+
+// Helper function: Power down C2 PDB for power-on fault recovery
+static void powerDownC2PDBForFaultRecovery()
+{
+    lg2::info("Powering down {PDB_NAME} Main Power Rail to establish HPM/PDB consistency. De-asserting 12V Rails and PSU Power Enable.", "PDB_NAME", getPDBName());
+    setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine);
+    setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine);
+    setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
+    setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
+    setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
+    pdbMainPowerOkWatchdogTimerStart();
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+}
+
+// Helper function: Handle power-on fault by powering down PDB
+static void handlePowerOnFault()
+{
+    lg2::error("HPM Main Power On Fault detected. Main Power On sequence failed. Conducting HPM/{PDB_NAME} reconciliation sequence.", "PDB_NAME", getPDBName());
+    
+    if (powerContext.presence.nvl144_pdb)
+    {
+        powerDownNVL144PDBForFaultRecovery();
+    }
+    else if (powerContext.presence.gb300_pdb)
+    {
+        powerDownGB300PDBForFaultRecovery();
+    }
+    else if (powerContext.presence.c2_pdb)
+    {
+        powerDownC2PDBForFaultRecovery();
     }
 }
 
+// Refactored function with consolidated logic
 static void powerStateWaitForHPMPowerGoodAssert(const Event event)
 {
     logEvent(__FUNCTION__, event);
-    switch (event)
+    
+    // Only process during POWER_ON action
+    if (powerContext.action != PowerAction::POWER_ON)
     {
-        case Event::board0RunPowerPGAssert:
-            if(powerContext.action == PowerAction::POWER_ON)
+        lg2::info("No action taken.");
+        return;
+    }
+    
+    // Handle board power good assertion events
+    if (event == Event::board0RunPowerPGAssert || event == Event::board1RunPowerPGAssert)
+    {
+        // Check if all required boards are now powered on
+        if (areAllRequiredBoardsPoweredOn())
+        {
+            transitionToCPUResetWait();
+        }
+        else
+        {
+            // Still waiting for other board(s)
+            if (event == Event::board0RunPowerPGAssert)
             {
-                // If Board 1 is not present, proceed with just Board 0
-                if (!powerContext.presence.board1)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting HPM Board 0 Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
-            
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-        
-                    // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
-                    cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetDeAssert);
-                }
-                // If Board 1 is present and its Run Power Good is asserted, de-assert both Board 0 and Board 1 Pre System Reset Lines and start the CPU Reset Watchdog Timer
-                else if(powerContext.presence.board1 && board1RunPowerPGLine.get_value() == board1RunPowerPGConfig.polarity)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board 0 Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
-
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-        
-                    // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
-                    cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetDeAssert);
-                }
-                // If Board 1 is present but not powered on yet, wait and let hpmPowerGoodWatchdogTimer continue...
-                else
-                {
-                    lg2::info("HPM Board 0 Run Power Good Asserted. Waiting for Board 1 Run Power Good Assertion...");
-                }
+                lg2::info("HPM Board 0 Run Power Good Asserted. Waiting for Board 1 Run Power Good Assertion...");
             }
-            break;
-
-        case Event::board1RunPowerPGAssert:
-            if(powerContext.action == PowerAction::POWER_ON)
+            else
             {
-                // If Board 0 is not present, proceed with just Board 1
-                if (!powerContext.presence.board0)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 1 Run Power Good Asserted. De-asserting HPM Board 0 Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
-                    
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-        
-                    // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
-                    cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetDeAssert);
-                }
-                // If Board 0 is present and its Run Power Good is asserted, de-assert both Board 0 and Board 1 Pre System Reset Lines and start the CPU Reset Watchdog Timer
-                else if(powerContext.presence.board0 && board0RunPowerPGLine.get_value() == board0RunPowerPGConfig.polarity)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. De-asserting HPM Board 0 Pre System Reset Lines. Waiting for CPU Reset De-assertion...");
-
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-        
-                    // Start the CPU Reset Watchdog Timer (uses timeout configured from config/power-config-host0.json)
-                    cpuResetWatchdogTimerStart();
-                    setPowerState(PowerState::waitForCPUResetDeAssert);
-                }
-                // If Board 0 is present but not powered on yet, wait and let hpmPowerGoodWatchdogTimer continue...
-                else
-                {
-                    lg2::info("HPM Board 1 Run Power Good Asserted. Waiting for Board 0 Run Power Good Assertion...");
-                }
+                lg2::info("HPM Board 1 Run Power Good Asserted. Waiting for Board 0 Run Power Good Assertion...");
             }
-            break;
+        }
+        return;
+    }
+    
+    // Handle watchdog timer expiration
+    if (event == Event::hpmPowerGoodWatchdogTimerExpired)
+    {
+        handlePowerOnFault();
+        return;
+    }
+    
+    // Default case
+    lg2::info("No action taken.");
+}
 
-        case Event::hpmPowerGoodWatchdogTimerExpired:
-            if(powerContext.action == PowerAction::POWER_ON)
-            {
-                lg2::error("HPM Main Power On Fault detected. Main Power On sequence failed.");
 
-                if(powerContext.presence.nvl144_pdb)
-                {
-                    lg2::info("Powering down PDB Main Power Rail to establish HPM/PDB consistency. De-asserting NVL144 PDB Main Power Enable.");
-                    setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
-                    pdbMainPowerOkWatchdogTimerStart();
-                    setPowerState(PowerState::waitForPDBMainPowerOff);
-                }
-                else if(powerContext.presence.c2_pdb)
-                {
-                    lg2::info("Powering down PDB Main Power Rail to establish HPM/PDB consistency. De-asserting C2 PDB 12V Rails and PSU Power Enable.");
-                    setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine);
-                    setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine);
-                    setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
-                    setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
-                    setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
-                    pdbMainPowerOkWatchdogTimerStart();
-                    setPowerState(PowerState::waitForPDBMainPowerOff);
-                    
-                }
-                else
-                {
-                    lg2::info("Conducting HPM Main Power On Fault Clean up. De-asserting Pre System Reset & Run Power Enable. Setting Host Power State to Off.");
-                    if(powerContext.presence.board0)
-                    {
-                        setGPIOOutput(board0RunPowerEnableConfig.lineName, !board0RunPowerEnableConfig.polarity, board0RunPowerEnableLine);
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                        setPowerState(PowerState::off);
-                        powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-                    }
-                    if(powerContext.presence.board1)
-                    {
-                        setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                        setPowerState(PowerState::off);
-                        powerContext.action = PowerAction::NONE;
-                    }
-                }
-            }
-            break;
+// Helper function: Check if all boards are powered off
+static bool areAllBoardsPoweredOff()
+{
+    bool board0Off = !powerContext.presence.board0 || 
+                    (powerContext.presence.board0 && (board0RunPowerPGLine.get_value() == !board0RunPowerPGConfig.polarity));
+    bool board1Off = !powerContext.presence.board1 || 
+                    (powerContext.presence.board1 && (board1RunPowerPGLine.get_value() == !board1RunPowerPGConfig.polarity));
+    return board0Off && board1Off;
+}
 
-        default:
-            lg2::info("No action taken.");
-            break;
+// Helper function: De-assert board control GPIOs for force off cleanup
+static void forceOffCleanUpSequence()
+{
+    if (powerContext.presence.board0)
+    {
+        if (!board0PreSystemResetConfig.lineName.empty())
+            setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
+        if (!board0CpuShutdownForceConfig.lineName.empty())
+            setGPIOOutput(board0CpuShutdownForceConfig.lineName, !board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
+    }
+    
+    if (powerContext.presence.board1)
+    {
+        if (!board1PreSystemResetConfig.lineName.empty())
+            setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
+        if (!board1CpuShutdownForceConfig.lineName.empty())
+            setGPIOOutput(board1CpuShutdownForceConfig.lineName, !board1CpuShutdownForceConfig.polarity, board1CpuShutdownForceLine);
     }
 }
 
+// Helper function: Complete last of forceful shutdown sequence
+static void completeForcefulShutdownSequence()
+{
+    forceOffCleanUpSequence();
+    setPowerState(PowerState::off);
+    powerContext.action = PowerAction::NONE;
+}
+
+// Helper function: Handle NVL144 PDB power off sequence
+static void handleNVL144PDBPowerOff()
+{
+    if (nvl144pdbMainPowerOkLine.get_value() == !nvl144pdbMainPowerOkConfig.polarity)
+    {
+        // Power OK already de-asserted - complete shutdown
+        lg2::info("NVL144 PDB Main Power OK is de-asserted. Completing shutdown sequence.");
+        setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+        completeForcefulShutdownSequence();
+    }
+    else
+    {
+        // Power OK still asserted - need to wait for it
+        lg2::info("NVL144 PDB Main Power OK is asserted. De-asserting Main Power Enable and waiting for Power OK de-assertion.");
+        setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine);
+        pdbMainPowerOkWatchdogTimerStart();
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+    }
+}
+
+// Helper function: Handle GB300 PDB power off sequence
+static void handleGB300PDBPowerOff()
+{
+    // if (gb300pdbMainPowerOkLine.get_value() == !gb300pdbMainPowerOkConfig.polarity)
+    int gb300PwrOkValue = getGB300PdbMainPowerOkValue();
+    if (gb300PwrOkValue >= 0 && gb300PwrOkValue == !gb300pdbMainPowerOkConfig.polarity)
+    {
+        // Power OK already de-asserted - complete shutdown
+        lg2::info("GB300 PDB Main Power OK is de-asserted. Completing shutdown sequence.");
+        setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, !gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+        completeForcefulShutdownSequence();
+    }
+    else
+    {
+        // Power OK still asserted - need to wait for it
+        lg2::info("GB300 PDB Main Power OK is asserted. De-asserting Main Power Enable and waiting for Power OK de-assertion.");
+        setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, !gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine);
+        pdbMainPowerOkWatchdogTimerStart();
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+    }
+}
+
+// Helper function: Handle C2 PDB power off sequence
+static void handleC2PDBPowerOff()
+{
+    if (c2pdbPSUPowerOkLine.get_value() == !c2pdbPSUPowerOkConfig.polarity)
+    {
+        // PSU Power OK already de-asserted - complete shutdown
+        lg2::info("C2 PDB PSU Power OK is de-asserted. Completing shutdown sequence.");
+        setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine);
+        setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine);
+        setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
+        setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
+        setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
+        completeForcefulShutdownSequence();
+    }
+    else
+    {
+        // PSU Power OK still asserted - need to wait for it
+        lg2::info("C2 PDB PSU Power OK is asserted. De-asserting 12V rails and PSU Power Enable, waiting for Power OK de-assertion.");
+        setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine);
+        setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine);
+        setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine);
+        setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine);
+        setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine);
+        pdbMainPowerOkWatchdogTimerStart();
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+    }
+}
+
+// Helper function: Conduct PDB power off sequence based on which PDB is present
+static void conductPDBPowerOffSequence()
+{
+    if (powerContext.presence.nvl144_pdb)
+    {
+        handleNVL144PDBPowerOff();
+    }
+    else if (powerContext.presence.gb300_pdb)
+    {
+        handleGB300PDBPowerOff();
+    }
+    else if (powerContext.presence.c2_pdb)
+    {
+        handleC2PDBPowerOff();
+    }
+}
+
+// Refactored main function
 static void powerStateWaitForHPMPowerGoodDeAssert(const Event event)
 {
     logEvent(__FUNCTION__, event);
+    
+    // Only handle board power good de-assert events during force-off
+    if (powerContext.action != PowerAction::FORCE_OFF)
+    {
+        if (event == Event::hpmPowerGoodWatchdogTimerExpired)
+        {
+            lg2::error("HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: De-asserting Pre System Reset & Shutdown Force lines. Setting Host Power State to On.");
+            forceOffCleanUpSequence();
+            setPowerState(PowerState::on);
+            powerContext.action = PowerAction::NONE;
+            return;
+        }
+        lg2::info("No action taken.");
+        return;
+    }
+
     switch (event)
     {
         case Event::board0RunPowerPGDeAssert:
-            if(powerContext.action == PowerAction::FORCE_OFF)
-            {
-                // If Board 1 is not present, proceed with just Board 0. Host Forceful Shutdown Sequence Completed Successfully. Set Host Power State to Off.
-                if (!powerContext.presence.board1)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 Run Power Good Asserted. Host Forceful Shutdown sequence completed successfully! Conducting Cleanup Sequence: De-asserting HPM Board 0 Pre System Reset Lines & Shutdown Force Lines. Setting Host Power State to Off!");
-            
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, !board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
-
-                    setPowerState(PowerState::off);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-                }
-                // If Board 1 is present and its Run Power Good is de-asserted, Host Forceful Shutdown Sequence Completed Successfully. Set Host Power State to Off.
-                // Conduct cleanup sequence:de-assert both Board 0 and Board 1 Pre System Reset Lines and Shutdown Force Lines.
-                else if(powerContext.presence.board1 && board1RunPowerPGLine.get_value() == !board1RunPowerPGConfig.polarity)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. Host Forceful Shutdown sequence completed successfully! Conducting Cleanup Sequence: De-asserting HPM Board 0 Pre System Reset Lines & Shutdown Force Lines. Setting Host Power State to Off!");
-
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, !board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
-                    if(powerContext.presence.board1 && !board1CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1CpuShutdownForceConfig.lineName, !board1CpuShutdownForceConfig.polarity, board1CpuShutdownForceLine);
-                    }
-
-                    setPowerState(PowerState::off);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-                }
-                // If Board 1 is present but not powered on yet, wait and let hpmPowerGoodWatchdogTimer continue...
-                else
-                {
-                    lg2::info("HPM Board 0 Run Power Good Asserted. Waiting for Board 1 Run Power Good Assertion...");
-                }
-            }
-            break;
         case Event::board1RunPowerPGDeAssert:
-            if(powerContext.action == PowerAction::FORCE_OFF)
+        {
+            // Check if all boards are now powered off
+            if (areAllBoardsPoweredOff())
             {
-                // If Board 0 is not present, proceed with just Board 1. Host Forceful Shutdown Sequence Completed Successfully. Set Host Power State to Off.
-                if (!powerContext.presence.board0)
+                hpmPowerGoodWatchdogTimer.cancel();
+                lg2::info("All HPM boards powered off. Conducting PDB power off sequence.");
+                conductPDBPowerOffSequence();
+            }
+            else
+            {
+                // Still waiting for other board(s)
+                if (event == Event::board0RunPowerPGDeAssert)
                 {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 1 Run Power Good Asserted. Host Forceful Shutdown sequence completed successfully! Conducting Cleanup Sequence: De-asserting HPM Board 1 Pre System Reset Lines & Shutdown Force Lines. Setting Host Power State to Off!");
-            
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-                    if(powerContext.presence.board1 && !board1CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1CpuShutdownForceConfig.lineName, !board1CpuShutdownForceConfig.polarity, board1CpuShutdownForceLine);
-                    }
-
-                    setPowerState(PowerState::off);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-                }
-                // If Board 0 is present and its Run Power Good is de-asserted, Host Forceful Shutdown Sequence Completed Successfully. Set Host Power State to Off.
-                // Conduct cleanup sequence:de-assert both Board 0 and Board 1 Pre System Reset Lines and Shutdown Force Lines.
-                else if(powerContext.presence.board0 && board0RunPowerPGLine.get_value() == !board0RunPowerPGConfig.polarity)
-                {
-                    hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good watchdog timer
-                    lg2::info("HPM Board 0 & Board 1 Run Power Good Asserted. Host Forceful Shutdown sequence completed successfully! Conducting Cleanup Sequence: De-asserting HPM Board 0 Pre System Reset Lines & Shutdown Force Lines. Setting Host Power State to Off!");
-
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, !board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
-                    if(powerContext.presence.board1 && !board1CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1CpuShutdownForceConfig.lineName, !board1CpuShutdownForceConfig.polarity, board1CpuShutdownForceLine);
-                    }
-
-                    setPowerState(PowerState::off);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
+                    lg2::info("HPM Board 0 Run Power Good de-asserted. Waiting for Board 1 Run Power Good de-assertion...");
                 }
                 else
                 {
-                    lg2::info("HPM Board 1 Run Power Good Asserted. Waiting for Board 0 Run Power Good Assertion...");
+                    lg2::info("HPM Board 1 Run Power Good de-asserted. Waiting for Board 0 Run Power Good de-assertion...");
                 }
             }
             break;
+        }
+        
         case Event::hpmPowerGoodWatchdogTimerExpired:
-            if(powerContext.action == PowerAction::FORCE_OFF)
-            {
-                    lg2::error("HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: De-asserting Pre System Reset & Shutdown Force lines. Setting Host Power State to On.");
-
-                    if(powerContext.presence.board0 && !board0PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0PreSystemResetConfig.lineName, !board0PreSystemResetConfig.polarity, board0PreSystemResetLine);
-                    }
-                    if(powerContext.presence.board1 && !board1PreSystemResetConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1PreSystemResetConfig.lineName, !board1PreSystemResetConfig.polarity, board1PreSystemResetLine);
-                    }
-
-                    if(powerContext.presence.board0 && !board0CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board0CpuShutdownForceConfig.lineName, !board0CpuShutdownForceConfig.polarity, board0CpuShutdownForceLine);
-                    }
-                    if(powerContext.presence.board1 && !board1CpuShutdownForceConfig.lineName.empty())
-                    {
-                        setGPIOOutput(board1CpuShutdownForceConfig.lineName, !board1CpuShutdownForceConfig.polarity, board1CpuShutdownForceLine);
-                    }
-
-                    setPowerState(PowerState::on);
-                    powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the Off state
-            }
+        {
+            lg2::error("HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: De-asserting Pre System Reset & Shutdown Force lines. Setting Host Power State to On.");
+            forceOffCleanUpSequence();
+            setPowerState(PowerState::on);
+            powerContext.action = PowerAction::NONE;
             break;
+        }
+        
         default:
             lg2::info("No action taken.");
             break;
@@ -3395,9 +3709,9 @@ static void powerStateWaitForCPUResetDeAssert(const Event event)
             cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
             if(powerContext.action == PowerAction::POWER_ON)
             {
-                lg2::info("CPU Reset De-asserted. CPUs are out of reset. Powered On Host Successfully. Setting Host Power State to On.");
+                lg2::info("CPU Reset De-asserted. CPUs are out of reset. Host Power On Sequence completed Successfully! Setting Host Power State to On.");
                 setPowerState(PowerState::on);
-                powerContext.action = PowerAction::NONE; // Clear the power action as Host reached the On state
+                powerContext.action = PowerAction::NONE;
             }
             break;
         case Event::cpuResetWatchdogTimerExpired:
@@ -3417,6 +3731,26 @@ static void powerStateWaitForCPUResetDeAssert(const Event event)
         default:
             lg2::info("No action taken.");
             break;
+    }
+}
+
+void triggerCpuBootDone()
+{
+    try
+    {
+        auto bus = sdbusplus::bus::new_default();
+        auto method = bus.new_method_call(
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1",
+            "org.freedesktop.systemd1.Manager",
+            "StartUnit");
+        
+        method.append("cpu-boot-done.service", "replace");
+        bus.call_noreply(method);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to start cpu-boot-done.service: {ERROR_MSG}", "ERROR_MSG", e.what());
     }
 }
 
@@ -3859,6 +4193,14 @@ static void nvl144pdbMainPowerOkHandler(bool state)
     sendPowerControlEvent(powerControlEvent);
 }
 
+static void gb300pdbMainPowerOkHandler(bool state)
+{
+    Event powerControlEvent = (state == gb300pdbMainPowerOkConfig.polarity)
+                                  ? Event::gb300pdbMainPowerOkAssert
+                                  : Event::gb300pdbMainPowerOkDeAssert;
+    sendPowerControlEvent(powerControlEvent);
+}
+
 static void c2pdbPSUPowerOkHandler(bool state)
 {
     Event powerControlEvent = (state == c2pdbPSUPowerOkConfig.polarity)
@@ -3915,6 +4257,7 @@ static bool checkIOXPresence(const std::string& ioxPath)
 static void detectBoardPresence()
 {
     // Check presence and update context using paths from build configuration
+    powerContext.presence.gb300_pdb = checkIOXPresence(GB300_PDB_IOX_PATH);
     powerContext.presence.c2_pdb = checkIOXPresence(C2_PDB_IOX_PATH);
     powerContext.presence.nvl144_pdb = checkIOXPresence(NVL144_PDB_IOX_PATH);
     powerContext.presence.board0 = checkIOXPresence(BOARD0_IOX_PATH);
@@ -3922,6 +4265,8 @@ static void detectBoardPresence()
     
     // Log detected board presence
     lg2::info("Board presence detection:");
+    lg2::info("  GB300 PDB ({PATH}): {PRESENT}", "PATH", std::string(GB300_PDB_IOX_PATH),
+              "PRESENT", powerContext.presence.gb300_pdb);
     lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH", std::string(C2_PDB_IOX_PATH),
               "PRESENT", powerContext.presence.c2_pdb);
     lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH", std::string(NVL144_PDB_IOX_PATH),
@@ -4372,6 +4717,7 @@ int main(int argc, char* argv[])
     // Detect Boards Presence and update context
     detectBoardPresence();
 
+   
     // Request PS_PWROK GPIO events
     // if (powerOkConfig.type == ConfigType::GPIO)
     // {
@@ -4565,12 +4911,58 @@ int main(int argc, char* argv[])
             return -1;
         }
     }
+    else if (powerContext.presence.gb300_pdb  && gb300pdbMainPowerOkConfig.type == ConfigType::GPIO)
+    {
+        // if (!requestGPIOEvents(gb300pdbMainPowerOkConfig.lineName,
+        //     gb300pdbMainPowerOkHandler, gb300pdbMainPowerOkLine,
+        //     gb300pdbMainPowerOkEvent))
+        
+        // Use input event monitoring instead of GPIO events due to missing interrupt line
+        // The gpio_keys_polled driver exposes the GPIO as a keyboard input event
+        // Device name: "gpio_keys_gb300", Key code: 0x102 (BTN_2)
+        // Pass stateTracker to keep our cached state updated
+        if (!requestInputEvents("gpio_keys_gb300", "GB300_PDB_MAIN_PWR_OK_Mon",
+                               0x102,  // BTN_2 key code
+                               gb300pdbMainPowerOkHandler,
+                               gb300pdbMainPowerOkEvent,
+                               &gb300pdbMainPowerOkState))
+        {
+            return -1;
+        }
+    }
     else if (powerContext.presence.c2_pdb  && c2pdbPSUPowerOkConfig.type == ConfigType::GPIO)
     {
         if (!requestGPIOEvents(c2pdbPSUPowerOkConfig.lineName,
                                c2pdbPSUPowerOkHandler, c2pdbPSUPowerOkLine,
                                c2pdbPSUPowerOkEvent))
         {
+            return -1;
+        }
+    }
+    if (powerContext.presence.c2_pdb  && c2pdbTypeConfig.type == ConfigType::GPIO)
+    {
+        c2pdbTypeLine = gpiod::find_line(c2pdbTypeConfig.lineName);
+        if (!c2pdbTypeLine)
+        {
+            lg2::error("Failed to find the C2PDB_Type line");
+            return -1;
+        }
+
+        try
+        {
+            c2pdbTypeLine.request({appName, gpiod::line_request::DIRECTION_INPUT, {}});
+            if(c2pdbTypeLine.get_value() == !c2pdbTypeConfig.polarity)
+            {
+                powerContext.presence.c2_pdb_mcu = true;
+            }
+            else
+            {
+                powerContext.presence.c2_pdb_mcu = false;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Failed to request C2PDB_Type input: {ERROR}", "ERROR", e);
             return -1;
         }
     }
@@ -4659,6 +5051,15 @@ int main(int argc, char* argv[])
                     return -1;
                 }
             }
+
+            if (!usbPowerEnableConfig.lineName.empty())
+            {
+                if(!setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine))
+                {
+                    // To-Do: Determine if this should be a fatal error?
+                    lg2::warning("Failed to set USB Power Enable GPIO to default value. Continuing with power control initialization.");
+                }
+            }
             
             // Set host state to On
             powerState = PowerState::on;
@@ -4687,6 +5088,14 @@ int main(int argc, char* argv[])
                 return -1;
             }
 
+            if (!usbPowerEnableConfig.lineName.empty())
+            {
+                if(!setGPIOOutput(usbPowerEnableConfig.lineName, !usbPowerEnableConfig.polarity, usbPowerEnableLine))
+                {
+                    lg2::warning("Failed to set USB Power Enable GPIO to default value. Continuing with power control initialization.");
+                }
+            }
+
             powerState = PowerState::off;
             operatingSystemState = OperatingSystemStateStage::Inactive;
         }
@@ -4708,6 +5117,14 @@ int main(int argc, char* argv[])
                     return -1;
                 }
             }
+
+            if (!usbPowerEnableConfig.lineName.empty())
+            {
+                if(!setGPIOOutput(usbPowerEnableConfig.lineName, usbPowerEnableConfig.polarity, usbPowerEnableLine))
+                {
+                    lg2::warning("Failed to set USB Power Enable GPIO to default value. Continuing with power control initialization.");
+                }
+            }
             
             // Set host state to On
             powerState = PowerState::on;
@@ -4722,73 +5139,144 @@ int main(int argc, char* argv[])
                 return -1;
             }
 
+            if (!usbPowerEnableConfig.lineName.empty())
+            {
+                if(!setGPIOOutput(usbPowerEnableConfig.lineName, !usbPowerEnableConfig.polarity, usbPowerEnableLine))
+                {
+                    lg2::warning("Failed to set USB Power Enable GPIO to default value. Continuing with power control initialization.");
+                }
+            }
+
             powerState = PowerState::off;
             operatingSystemState = OperatingSystemStateStage::Inactive;
         }
     }
-    else if (powerContext.presence.board1)
+    else
     {
-        // 1P Configuration (only board1 present - unusual but handle it)
-        bool board1PGAsserted = (board1RunPowerPGLine.get_value() == board1RunPowerPGConfig.polarity);
-        
-        if (board1PGAsserted)
-        {
-            lg2::info("1P Configuration: Board 1 HPM Run Power Good is asserted at startup. Setting Host State to On and asserting Board 1 Run Power Enable.");
-            
-            // Assert board1 run power enable
-            if (!board1RunPowerEnableConfig.lineName.empty())
-            {
-                setGPIOOutput(board1RunPowerEnableConfig.lineName, board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine);
-            }
-            
-            // Set host state to On
-            powerState = PowerState::on;
-            operatingSystemState = OperatingSystemStateStage::Standby;
-        }
-        else
-        {
-
-            if(!setGPIOOutput(board1RunPowerEnableConfig.lineName, !board1RunPowerEnableConfig.polarity, board1RunPowerEnableLine))
-            {
-                return -1;
-            }
-
-            lg2::info("1P Configuration: Board 1 HPM Run Power Good is not asserted at startup. Setting Host State to Off.");
-
-            powerState = PowerState::off;
-            operatingSystemState = OperatingSystemStateStage::Inactive;
-        }
+        // Board 0 is not present or only Board 1 is present...
+        lg2::info("Board 0 is not present. Fatal Error: Board 0 is required for power control. Exiting...");
+        return -1;
     }
 
-    // initialize output GPIOs:
+    // Check if any PDB is present, hard failure if no PDB is present
+    if(!powerContext.presence.gb300_pdb && !powerContext.presence.c2_pdb && !powerContext.presence.nvl144_pdb)
+    {
+        lg2::info("No PDB is present. Either C2, NVL144, or GB300 PDB is required for power control. Exiting...");
+        return -1;
+    }
 
     if(powerContext.presence.nvl144_pdb)
     {
-        if(nvl144pdbMainPowerOkLine.get_value() == nvl144pdbMainPowerOkConfig.polarity)
+        if(powerState == PowerState::on)
         {
             if(!setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine))
             {
                 return -1;
             }
-            lg2::info("NVL144 PDB Main Power OK is asserted at startup. Setting NVL144 PDB Main Power Enable to asserted.");  
+            if(!setGPIOOutput(e1sPowerEnableConfig.lineName, e1sPowerEnableConfig.polarity, e1sPowerEnableLine)) // Enable E1S Run Power
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(bmcSSDResetConfig.lineName, !bmcSSDResetConfig.polarity, bmcSSDResetLine)) // Pull BMC SDD out of Reset
+            {
+                return -1;
+            }
+            lg2::info("Matching NVL144 PDB Main Power Domain to the HPM Main Power Domain State. Setting NVL144 PDB Main Power Enable to asserted.");  
         }
-        else
+        else if(powerState == PowerState::off)
         {
             if(!setGPIOOutput(nvl144pdbMainPowerEnableConfig.lineName, !nvl144pdbMainPowerEnableConfig.polarity, nvl144pdbMainPowerEnableLine))
             {
                 return -1;
             }
-            lg2::info("NVL144 PDB Main Power OK is de-asserted at startup. Setting NVL144 PDB Main Power Enable to de-asserted.");
+            if(!setGPIOOutput(e1sPowerEnableConfig.lineName, !e1sPowerEnableConfig.polarity, e1sPowerEnableLine)) // Disable E1S Run Power Enable
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(bmcSSDResetConfig.lineName, bmcSSDResetConfig.polarity, bmcSSDResetLine)) // Put BMC SDD into Reset
+            {
+                return -1;
+            }
+            lg2::info("Matching NVL144 PDB Main Power Domain to the HPM Main Power Domain State. De-asserting NVL144 PDB Main Power Enable.");
         }
     }
-
-    if(powerContext.presence.c2_pdb)
+    else if(powerContext.presence.gb300_pdb)
+    {   
+        lg2::info("GB300 PDB is present. Initializing GB300 PDB GPIOs.");
+        // Match GB300 PDB Main Power Domain to the HPM Main Power Domain State
+        if(powerState == PowerState::on)
+        {
+            lg2::info("Matching GB300 PDB Main Power Domain to the HPM Main Power Domain State. Asserting GB300 PDB Main Power Enable.");
+            if(!setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine))
+            {
+                return -1;
+            }
+        }
+        else if (powerState == PowerState::off)
+        {
+            lg2::info("Matching GB300 PDB Main Power Domain to the HPM Main Power Domain State. De-asserting GB300 PDB Main Power Enable.");
+            if(!setGPIOOutput(gb300pdbMainPowerEnableConfig.lineName, !gb300pdbMainPowerEnableConfig.polarity, gb300pdbMainPowerEnableLine))
+            {
+                return -1;
+            }
+        }
+    }
+    else if(powerContext.presence.c2_pdb) // to-do: add check for C2 Non-intelligent PDB
     {
         //To-Do: Implement C2 PDB Output GPIO Initialization
         // C2PDBPSUPowerEnable, C2PDB_12V_HPMEnable, C2PDB_12V_GPU1Enable, C2PDB_12V_GPU2Enable, C2PDB_12V_AICEnable
-
+        if(powerState == PowerState::on)
+        {
+            if(!setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine))
+            {
+                return -1;
+            }
+            lg2::info("Matching C2 PDB Main Power Domain to the HPM Main Power Domain State. Asserting C2 PDB Main Power Enable and 12V Rails.");
+        }
+        else if(powerState == PowerState::off)
+        {
+            if(!setGPIOOutput(c2pdbPSUPowerEnableConfig.lineName, !c2pdbPSUPowerEnableConfig.polarity, c2pdbPSUPowerEnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_HPMEnableConfig.lineName, !c2pdb_12V_HPMEnableConfig.polarity, c2pdb_12V_HPMEnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_GPU1EnableConfig.lineName, !c2pdb_12V_GPU1EnableConfig.polarity, c2pdb_12V_GPU1EnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_GPU2EnableConfig.lineName, !c2pdb_12V_GPU2EnableConfig.polarity, c2pdb_12V_GPU2EnableLine))
+            {
+                return -1;
+            }
+            if(!setGPIOOutput(c2pdb_12V_AICEnableConfig.lineName, !c2pdb_12V_AICEnableConfig.polarity, c2pdb_12V_AICEnableLine))
+            {
+                return -1;
+            }
+            lg2::info("Matching C2 PDB Main Power Domain to the HPM Main Power Domain State. De-asserting C2 PDB Main Power Enable and 12V Rails.");
+        }
     }
+    // else if (powerContext.presence.c2_pdb_intelligent) // to-do: add check for C2 Intelligent PDB
 
+    // Set non power rail GPIO initial states for Board 0 & 1
     // Board0RunPowerEnable, Board1RunPowerEnable
     // Board0PreSystemReset, Board1PreSystemReset
     // Board0CpuShutdownForce, Board1CpuShutdownForce
@@ -4824,12 +5312,6 @@ int main(int argc, char* argv[])
             return -1;
         }
     }
-
-    if(!setGPIOOutput(usbPowerEnableConfig.lineName, !usbPowerEnableConfig.polarity, usbPowerEnableLine))
-    {
-        lg2::warning("Failed to set USB Power Enable GPIO to default value. Continuing with power control initialization.");
-    }
-
     // initialize NMI_OUT GPIO.
     // if (!nmiOutConfig.lineName.empty())
     // {
