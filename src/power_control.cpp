@@ -934,25 +934,75 @@ static constexpr std::string_view getChassisState(const PowerState state)
     switch (state)
     {
         case PowerState::on:
-        case PowerState::transitionToOff:
-        case PowerState::gracefulTransitionToOff:
-        case PowerState::transitionToCycleOff:
-        case PowerState::gracefulTransitionToCycleOff:
-        case PowerState::checkForWarmReset:
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         case PowerState::waitForPSPowerOK:
         case PowerState::waitForSIOPowerGood:
-        case PowerState::off:
-        case PowerState::cycleOff:
         case PowerState::waitForPDBMainPowerOk:
+            // Only called during PowerContext::action == PowerAction::POWER_ON
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            break;
         case PowerState::waitForPDBMainPowerOff:
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            }
+            else if(powerContext.action == PowerAction::FORCE_OFF 
+                    || powerContext.action == PowerAction::GRACE_OFF
+                    || powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            {
+                // Once Run Power is de-asserted, chassis is considered off
+                return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            }
+            break;
         case PowerState::waitForHPMPowerGoodAssert:
+            // Only called during PowerContext::action == PowerAction::POWER_ON
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            break;
+        case PowerState::transitionToOff:
+        case PowerState::gracefulTransitionToOff:
         case PowerState::waitForHPMPowerGoodDeAssert:
-        case PowerState::waitForCPUResetAssert:
-        case PowerState::waitForCPUResetDeAssert:
         case PowerState::waitForCPUShutdownOk:
+            // Only called during shutdown actions
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForCPUResetAssert:
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            }
+            else if(powerContext.action == PowerAction::FORCE_OFF 
+                    || powerContext.action == PowerAction::GRACE_OFF
+                    || powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            }
+            break;
+        case PowerState::waitForCPUResetDeAssert:
+            if(powerContext.action == PowerAction::POWER_ON)
+            {
+                // Once Run Power is asserted, chassis is considered on
+                return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            }
+            else if(powerContext.action == PowerAction::FORCE_OFF 
+                    || powerContext.action == PowerAction::GRACE_OFF
+                    || powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            }
+            break;
+        case PowerState::off:
             return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            break;
+        case PowerState::transitionToCycleOff:
+        case PowerState::gracefulTransitionToCycleOff:
+        case PowerState::cycleOff:
+            // During power cycle, chassis is transitioning
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::checkForWarmReset:
+            // During warm reset check, chassis is still considered on
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         default:
             return "";
