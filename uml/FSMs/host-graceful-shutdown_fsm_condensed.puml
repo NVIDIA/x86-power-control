@@ -1,0 +1,58 @@
+@startuml
+scale 600 width
+top to bottom direction
+
+[*] -[#green]-> HostPowerOn
+
+state "Host Power On\n<<powerStateOn>>" as HostPowerOn
+state "Host Graceful Transition To Off\n<<powerStateGracefulTransitionToOff>>" as GracefulTransitionToOff
+state "Host Power Off\n<<powerStateOff>>" as HostPowerOff
+
+' --- Forceful Shutdown Path ---
+state "Forceful Shutdown" as ForcefulShutdown {
+    state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdown>>" as Wait4ShutdownOk
+    ' state "Host Transition To Power Off\n<<powerStateTransitionPowerOff>>" as HostTransitionToOff
+    state "..." as forceOffPlaceholder
+
+    Wait4ShutdownOk --> forceOffPlaceholder
+    forceOffPlaceholder --> HostPowerOn
+    forceOffPlaceholder --> HostPowerOff
+}
+
+state "Host Power Cycle" as HostPowerCycle {
+    ' state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdownOKToCycleOff>>" as Wait4ShutdownOkToCycleOff
+    state "Host Transition To Cycle Power Off\n<<powerStateTransitionToCycleOff>>" as HostTransitionToCycleOff
+    ' state "Host Cycle Power Off\n<<powerStateCycleOff>>" as HostCycleOff
+    state "..." as powercycleplaceholder
+
+
+    HostTransitionToCycleOff --> powercycleplaceholder
+    powercycleplaceholder --> HostMainPowerOn.hostMainPowerOnPlaceholder
+}
+
+' --- Host Main Power On Composite ONLY contains these states ---
+state "Host Main Power On" as HostMainPowerOn {
+    ' state fork_state <<fork>>
+    ' state "Host Waiting For Power Rail to Power On\n<<powerStateWaitForPSPowerOK>>" as WaitForPSPowerOK
+    ' state "Host Waiting For System Reset Release\n<<powerStateWaitForSystemResetRelease>>" as WaitForSystemRstReleases
+    state "..." as hostMainPowerOnPlaceholder
+
+    hostMainPowerOnPlaceholder --> HostPowerOn
+    hostMainPowerOnPlaceholder --> HostPowerOff
+    hostMainPowerOnPlaceholder --> ForcefulShutdown.Wait4ShutdownOk
+    
+    ' WaitForSystemRstRelease --> ForcefulShutdown.Wait4ShutdownO : Event::systemResetReleaseWatchdogTimerExpired
+}
+
+
+
+' --- Happy Path: Graceful Shutdown ---
+HostPowerOn -[#green]-> GracefulTransitionToOff : <color:green>Event::gracefulPowerOffRequest</color>
+GracefulTransitionToOff -[#green]-> HostPowerOff : <color:green>Event::psPowerOKDeAssert</color>
+
+' --- Error paths / alternate flows ---
+GracefulTransitionToOff --> HostPowerOn : Event::gracefulPowerOffTimerExpired
+GracefulTransitionToOff --> ForcefulShutdown.Wait4ShutdownOk : Event::powerOffRequest
+GracefulTransitionToOff --> HostPowerCycle.HostTransitionToCycleOff : Event::powerCycleRequest
+
+@enduml

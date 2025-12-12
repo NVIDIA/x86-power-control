@@ -1,0 +1,39 @@
+@startuml
+scale 600 width
+top to bottom direction
+
+[*] --> HostPowerOff
+
+state "Host Power Off\n<<powerStateOff>>" as HostPowerOff
+state fork_state <<fork>>
+state "Host Power On\n<<powerStateOn>>" as HostPowerOn
+state "Host Waiting For Power Rail to Power On\n<<powerStateWaitForPSPowerOK>>" as WaitForPSPowerOK
+state "Host Waiting For System Reset Release\n<<powerStateWaitForSystemResetRelease>>" as WaitForSystemRstRelease
+
+state "Forceful Shutdown" as ForcefulShutdown {
+    state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdown>>" as Wait4ShutdownOk
+    state "Host Transition To Power Off\n<<powerStateTransitionPowerOff>>" as HostTransitionToOff
+
+    Wait4ShutdownOk --> HostTransitionToOff : Event::shutdownOKAssert
+    Wait4ShutdownOk --> HostPowerOn : Event::shutdownOKWatchdogTimerExpired
+    Wait4ShutdownOk --> HostPowerOff : Event::psPowerOKDeAssert
+
+    HostTransitionToOff --> HostPowerOff : Event::psPowerOKDeAssert
+    HostTransitionToOff --> HostPowerOn : Event::psPowerOKWatchdogTimerExpired
+}
+
+' --- Transitions ---
+HostPowerOff --> HostPowerOn : Event::psPowerOKAssert
+HostPowerOff -[#green]-> fork_state : <color:green>Event::powerOnRequest</color>
+
+fork_state -[#green]-> WaitForPSPowerOK : <color:green>RUN_POWER_PG-I == 0</color>
+fork_state --> HostPowerOn : RUN_POWER_PG-I == 1
+
+WaitForPSPowerOK -[#green]-> WaitForSystemRstRelease : <color:green>Event::psPowerOKAssert</color>
+WaitForPSPowerOK --> HostPowerOff : Event::psPowerOKWatchdogTimerExpired
+
+WaitForSystemRstRelease -[#green]-> HostPowerOn : <color:green>Event::systemResetReleaseAssert</color>
+WaitForSystemRstRelease --> ForcefulShutdown.Wait4ShutdownOk : Event::systemResetReleaseWatchdogTimerExpired
+
+@enduml
+

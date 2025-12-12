@@ -1,0 +1,32 @@
+@startuml
+scale 600 width
+
+state "Host Power On\n<<powerStateOn>>" as HostPowerOn
+state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdown>>" as Wait4ShutdownOk
+state "Host Transition To Power Off\n<<powerStateTransitionPowerOff>>" as HostTransitionToOff
+state "Host Power Off\n<<powerStateOff>>" as HostPowerOff
+
+[*] --> HostPowerOn
+
+HostPowerOn --> Wait4ShutdownOk : Event::powerOffRequest
+
+Wait4ShutdownOk --> HostTransitionToOff : Event::shutdownOKAssert
+Wait4ShutdownOk --> HostPowerOn : Event::shutdownOKWatchdogTimerExpired
+Wait4ShutdownOk --> HostPowerOff : Event::psPowerOKDeAssert
+
+HostTransitionToOff --> HostPowerOff : Event::psPowerOKDeAssert
+HostTransitionToOff --> HostPowerOn : Event::psPowerOKWatchdogTimerExpired
+
+' === Mapping Table ===
+note bottom of HostPowerOff
+|= Source State |= Event |= Target State |= Handler |= Action Function |= Description |
+| Host Power On | powerOffRequest | Host Wait For Shutdown Ok | powerStateOn | forcePowerOff() | Host Forceful Shutdown Sequence Started:\n 1. Assert SHDN_FORCE_L-O to 0 \n 2. Start watchdog timer for SHDN_OK_L-I assertion|
+| Host Wait For Shutdown Ok | shutdownOKAssert | Host Transition To Power Off | powerStateWaitForShutdown | TBD() | SHDN_OK_L-I asserted successfully:\n 1. Cancel watchdog timer for SHDN_OK_L-I assertion \n 2. De-assert RUN_POWER_EN-O \n 3. Start watchdog for RUN_POWER_PG-I to de-assert |
+| Host Wait For Shutdown Ok | shutdownOKWatchdogTimerExpired | Host Power On | powerStateWaitForShutdown | TBD() | Forceful shutdown failed because of SHDN_OK_L-I assertion timeout:\n 1. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Wait For Shutdown Ok | psPowerOKDeAssert | Host Power Off | powerStateWaitForShutdown | TBD() | Unexpected power loss during Forceful Shutdown Sequence:\n 1. De-assert SHDN_FORCE_L-O \n 2. De-assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+| Host Transition To Power Off | psPowerOKDeAssert | Host Power Off | powerStateTransitionPowerOff | TBD() | RUN_POWER_PG-I de-asserted so Forceful Shutdown sequence completed successfully: \n 1. Cancel watchdog for RUN_POWER_PG-I to de-assert \n 2. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Transition To Power Off | psPowerOKWatchdogTimerExpired | Host Power On | powerStateTransitionPowerOff | TBD() | Forceful shutdown failed because of RUN_POWER_PG-I de-assertion timeout: \n 1. De-assert SHDN_FORCE_L-O (cleanup) \n 2. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+end note
+
+
+@enduml

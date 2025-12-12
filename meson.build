@@ -36,6 +36,34 @@ if get_option('button-passthrough').allowed()
     cpp_args += '-DUSE_BUTTON_PASSTHROUGH'
 endif
 
+# Configure IOX paths
+conf_data = configuration_data()
+conf_data.set_quoted(
+    'GB300_PDB_IOX_PATH',
+    get_option('gb300-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'C2_PDB_IOX_PATH',
+    get_option('c2-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'NVL144_PDB_IOX_PATH',
+    get_option('nvl144-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD0_IOX_PATH',
+    get_option('board0-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD1_IOX_PATH',
+    get_option('board1-iox-path'),
+)
+
+configure_file(
+    output: 'config.h',
+    configuration: conf_data,
+)
+
 deps = [
     dependency('libgpiodcxx', default_options: ['bindings=cxx']),
     dependency('libsystemd'),
@@ -61,7 +89,7 @@ if systemd.found()
         'service_files/chassis-system-reset.service',
         'service_files/chassis-system-reset.target',
         'service_files/xyz.openbmc_project.Chassis.Control.Power@.service',
-        install_dir: systemd.get_variable('systemd_system_unit_dir'),
+        install_dir: systemd.get_variable('systemdsystemunitdir'),
     )
 endif
 

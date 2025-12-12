@@ -1,0 +1,69 @@
+@startuml
+scale 600 width
+top to bottom direction
+
+[*] -[#green]-> HostPowerOn
+
+state "Host Power On\n<<powerStateOn>>" as HostPowerOn
+state "Host Graceful Transition To Off\n<<powerStateGracefulTransitionToOff>>" as GracefulTransitionToOff
+state "Host Power Off\n<<powerStateOff>>" as HostPowerOff
+
+' --- Forceful Shutdown Path ---
+state "Forceful Shutdown" as ForcefulShutdown {
+    state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdown>>" as Wait4ShutdownOk
+    state "Host Transition To Power Off\n<<powerStateTransitionPowerOff>>" as HostTransitionToOff
+    ' state "..." as forceoffplaceholder
+
+    Wait4ShutdownOk --> HostTransitionToOff : Event::shutdownOKAssert
+    Wait4ShutdownOk --> HostPowerOn : Event::shutdownOKWatchdogTimerExpired
+    Wait4ShutdownOk --> HostPowerOff : Event::psPowerOKDeAssert
+
+    HostTransitionToOff --> HostPowerOff : Event::psPowerOKDeAssert
+    HostTransitionToOff --> HostPowerOn : Event::psPowerOKWatchdogTimerExpired
+}
+
+state "Host Power Cycle" as HostPowerCycle {
+    state "Host Wait For Shutdown Ok\n<<powerStateWaitForShutdownOKToCycleOff>>" as Wait4ShutdownOkToCycleOff
+    state "Host Transition To Cycle Power Off\n<<powerStateTransitionToCycleOff>>" as HostTransitionToCycleOff
+    state "Host Cycle Power Off\n<<powerStateCycleOff>>" as HostCycleOff
+    ' state "..." as powercycleplaceholder
+
+
+    HostTransitionToCycleOff -[#green]-> HostCycleOff : <color:green>Event::psPowerOKDeAssert</color>
+    HostTransitionToCycleOff --> HostPowerOn : Event::psPowerOKWatchdogTimerExpired
+
+    HostCycleOff --> HostPowerOn : Event::psPowerOKAssert
+    HostCycleOff -[#green]-> HostMainPowerOn.fork_state : <color:green>Event::powerCycleTimerExpired</color>
+}
+
+' --- Host Main Power On Composite ONLY contains these states ---
+state "Host Main Power On" as HostMainPowerOn {
+    state fork_state <<fork>>
+    state "Host Waiting For Power Rail to Power On\n<<powerStateWaitForPSPowerOK>>" as WaitForPSPowerOK
+    state "Host Waiting For System Reset Release\n<<powerStateWaitForSystemResetRelease>>" as WaitForSystemRstRelease
+
+    fork_state -[#green]-> WaitForPSPowerOK : <color:green>RUN_POWER_PG-I == 0</color>
+    fork_state --> HostPowerOn : RUN_POWER_PG-I == 1
+
+    WaitForPSPowerOK -[#green]-> WaitForSystemRstRelease : <color:green>Event::psPowerOKAssert</color>
+    WaitForPSPowerOK --> HostPowerOff : Event::psPowerOKWatchdogTimerExpired
+
+    WaitForSystemRstRelease -[#green]-> HostPowerOn : <color:green>Event::systemResetReleaseAssert</color>
+    WaitForSystemRstRelease --> ForcefulShutdown.Wait4ShutdownO : Event::systemResetReleaseWatchdogTimerExpired
+}
+
+
+
+' --- Happy Path: Graceful Shutdown ---
+HostPowerOn -[#green]-> GracefulTransitionToOff : <color:green>Event::gracefulPowerOffRequest</color>
+GracefulTransitionToOff -[#green]-> HostPowerOff : <color:green>Event::psPowerOKDeAssert</color>
+
+' --- Error paths / alternate flows ---
+GracefulTransitionToOff --> HostPowerOn : Event::gracefulPowerOffTimerExpired
+GracefulTransitionToOff --> ForcefulShutdown.Wait4ShutdownOk : Event::powerOffRequest
+GracefulTransitionToOff --> HostPowerCycle.HostTransitionToCycleOff : Event::powerCycleRequest
+
+' Placeholder for Power Cycle Pathway (not fully implemented in original)
+GracefulTransitionToOff --> HostPowerOn : Event::powerCycleRequest
+
+@enduml

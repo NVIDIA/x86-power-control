@@ -1,0 +1,12 @@
+state "Host Forceful Shutdown" as HostPowerOff
+
+' === Mapping Table ===
+note bottom of HostPowerOff
+|= Source State |= Event |= Target State |= Handler |= Action Function |= Description |
+| Host Power On | powerOffRequest | Host Wait For Shutdown Ok | powerStateOn | forcePowerOff() | Host Forceful Shutdown Sequence Started:\n 1. Assert SHDN_FORCE_L-O to 0 \n 2. Start watchdog timer for SHDN_OK_L-I assertion|
+| Host Wait For Shutdown Ok | shutdownOKAssert | Host Transition To Power Off | powerStateWaitForShutdown | TBD() | SHDN_OK_L-I asserted successfully:\n 1. Cancel watchdog timer for SHDN_OK_L-I assertion \n 2. De-assert RUN_POWER_EN-O \n 3. Start Power Supply Power Ok Watchdog timer |
+| Host Wait For Shutdown Ok | shutdownOKWatchdogTimerExpired | Host Power On | powerStateWaitForShutdown | TBD() | Forceful shutdown failed because of SHDN_OK_L-I assertion timeout:\n 1. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Wait For Shutdown Ok | psPowerOKDeAssert | Host Power Off | powerStateWaitForShutdown | TBD() | Unexpected power loss during Forceful Shutdown Sequence:\n 1. De-assert SHDN_FORCE_L-O \n 2. De-assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+| Host Transition To Power Off | psPowerOKDeAssert | Host Power Off | powerStateTransitionPowerOff | TBD() | RUN_POWER_PG-I de-asserted so Forceful Shutdown sequence completed successfully: \n 1. Cancel Power Supply Power Ok Watchdog timer \n 2. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Transition To Power Off | psPowerOKWatchdogTimerExpired | Host Power On | powerStateTransitionPowerOff | TBD() | Forceful shutdown failed because Power Supply Power Ok Watchdog timer timeout: \n 1. De-assert SHDN_FORCE_L-O (cleanup) \n 2. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+end note

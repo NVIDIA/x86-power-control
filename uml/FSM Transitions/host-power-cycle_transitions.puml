@@ -1,0 +1,30 @@
+@startuml
+
+state "Host Power Cycle" as HostPowerOff
+
+' === Mapping Table ===
+note bottom of HostPowerOff
+|= Source State |= Event |= Target State |= Handler |= Action Function |= Description |
+| Host Power On | powerCycleRequest | Host Wait For Shutdown Ok | powerStateOn | forcePowerOff() | Host Forceful Shutdown Sequence Started:\n 1. Assert SHDN_FORCE_L-O to 0 \n 2. Start Power Supply Power Ok Watchdog timer |
+| Host Wait For Shutdown Ok | shutdownOKAssert | Host Transition To Cycle Power Off Off | powerStateWaitForShutdownOKToCycleOff | TBD() | SHDN_OK_L-I asserted successfully:\n 1. Cancel watchdog timer for SHDN_OK_L-I assertion \n 2. De-assert RUN_POWER_EN-O \n 3. Start Power Supply Power Ok Watchdog timer |
+| Host Wait For Shutdown Ok | shutdownOKWatchdogTimerExpired | Host Power On | powerStateWaitForShutdownOKToCycleOff | TBD() | Forceful shutdown failed because of SHDN_OK_L-I assertion timeout:\n 1. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Wait For Shutdown Ok | psPowerOKDeAssert | Host Cycle Power Off | powerStateWaitForShutdown | TBD() | Unexpected power loss during Forceful Shutdown Sequence:\n 1. Cancel watchdog timer for SHDN_OK_L-I assertion\n 2. De-assert SHDN_FORCE_L-O \n 3. De-assert RUN_POWER_EN-O to match RUN_POWER_PG-I \n 4. Start Power Cycle Timer (allow for time before power on) |
+| Host Transition To Cycle Power Off Off | psPowerOKDeAssert | Host Cycle Power Off | powerStateTransitionToCycleOff | TBD() | RUN_POWER_PG-I de-asserted succesfully. Host Main Power Off sequence completed successfully. Entering Host Power Cycle On: 1. Cancel Power Supply Power Ok Watchdog timer \n 2. Start Power Cycle Timer (allow for time before power on)  |
+| Host Transition To Cycle Power Off Off | psPowerOKWatchdogTimerExpired | Host Power On | powerStateTransitionToCycleOff | TBD() | Power Supply Power Ok Watchdog timer timeout. Power Cycle Failed: \n 1. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+| Host Cycle Power Off | psPowerOKAssert | Host Power On | powerStateCycleOff | TBD() | Main Power Rail Unexpectedly Powered on Before Power Cycle Timer finished: \n 1. Cancel Power Cycle Timer \n 2. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I \n |
+| Host Cycle Power Off | psPowerOKAssert | Fork State | powerStateCycleOff | powerOn() | Power Cycle Timer Completed. Beginning Power Cycle On: Determine if RUN_POWER_PG-I is asserted |
+| Fork State | RUN_POWER_PG-I == 0 | Host Waiting For Power Rail to Power On | powerStateCycleOff | powerOn() | RUN_POWER_PG-I is disasserted. Host Power On Sequence Started: \n 1. Start Power Supply Power Ok Watchdog timer.\n 2. De-assert SHDN_REQ_L-O\n 3. De-assert SHDN_FORCE_L-O\n 4. Assert SYS_RST_IN_L-O (hold host in reset)\n 5. Set RUN_POWER_EN-O high permanently (enable power to FPGA) |
+| Fork State | RUN_POWER_PG-I == 1 | Host Power On | powerStateCycleOff | powerOn() | RUN_POWER_PG-I already asserted so Main Power Rail is already Powered On: \n 1. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+| Host Waiting For Power Rail to Power On | psPowerOKAssert | Host Waiting For System Reset Release | powerStateWaitForPSPowerOK | TBD() | RUN_POWER_PG-I asserted. Succesful FPGA Power On completed. Wait For System Reset Release: 1. Cancel any gpio assertions\n 2. Cancel Power Supply Power Ok Watchdog timer\n 3. De-assert SYS_RST_IN_L-O (clean up)\n 4. Start System Reset Release Watchdog timer |
+| Host Waiting For Power Rail to Power On | psPowerOKWatchdogTimerExpired | Host Power Off | powerStateWaitForPSPowerOK | TBD() | Host Main Power On failed because of RUN_POWER_PG-I assertion timeout:\n 1. Cancel any gpio assertions\n 2. De-assert RUN_POWER_EN-O\n 3. De-assert SYS_RST_IN_L-O\n 4. Formally log Power On Failure |
+| Host Waiting For System Reset Release | systemResetReleaseAssert | Host Power On | powerStateWaitForSystemResetRelease | TBD() | System Reset Release Asserted. Host Power On Successful: 1. Cancel any gpio assertions\n 2. Cancel System Reset Release Watchdog timer |
+| Host Waiting For System Reset Release | systemResetReleaseAssert | Host Wait For Shutdown Ok | powerStateWaitForSystemResetRelease | TBD() | System Reset Release failed because of SYS_RST_OUT_L-I assertion timeout. Host Power On failed. Conducting Host Forceful Shutdown:\n 1. Assert SHDN_FORCE_L-O to 0 \n 2. Start watchdog timer for SHDN_OK_L-I assertion |
+| Host Wait For Shutdown Ok | shutdownOKAssert | Host Transition To Power Off | powerStateWaitForShutdown | TBD() | SHDN_OK_L-I asserted successfully:\n 1. Cancel watchdog timer for SHDN_OK_L-I assertion \n 2. De-assert RUN_POWER_EN-O \n 3. Start watchdog for RUN_POWER_PG-I to de-assert |
+| Host Wait For Shutdown Ok | shutdownOKWatchdogTimerExpired | Host Power On | powerStateWaitForShutdown | TBD() | Forceful shutdown failed because of SHDN_OK_L-I assertion timeout:\n 1. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Wait For Shutdown Ok | psPowerOKDeAssert | Host Power Off | powerStateWaitForShutdown | TBD() | Unexpected power loss during Forceful Shutdown Sequence:\n 1. De-assert SHDN_FORCE_L-O \n 2. De-assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+| Host Transition To Power Off | psPowerOKDeAssert | Host Power Off | powerStateTransitionPowerOff | TBD() | RUN_POWER_PG-I de-asserted so Forceful Shutdown sequence completed successfully: \n 1. Cancel watchdog for RUN_POWER_PG-I to de-assert \n 2. De-assert SHDN_FORCE_L-O (cleanup) |
+| Host Transition To Power Off | psPowerOKWatchdogTimerExpired | Host Power On | powerStateTransitionPowerOff | TBD() | Forceful shutdown failed because of RUN_POWER_PG-I de-assertion timeout: \n 1. De-assert SHDN_FORCE_L-O (cleanup) \n 2. Assert RUN_POWER_EN-O to match RUN_POWER_PG-I |
+end note
+
+@enduml
+
