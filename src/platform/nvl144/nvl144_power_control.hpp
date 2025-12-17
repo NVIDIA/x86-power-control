@@ -28,7 +28,7 @@ namespace power_control
 class NVL144PowerControl : public VRPowerControl
 {
 public:
-    NVL144PowerControl() = default;
+    NVL144PowerControl(boost::asio::io_context& ioContext);
     virtual ~NVL144PowerControl() = default;
 
     /**
@@ -41,6 +41,18 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
+    /**
+     * @brief Initialize NVL144-specific GPIO events (Phase 2 of initialization)
+     * 
+     * This method is called after loadConfigValues() and detectBoardPresence().
+     * It first calls VRPowerControl::initializeGPIO() to register common VR GPIOs,
+     * then registers NVL144-specific GPIOs:
+     * - NVL144 PDB Main Power OK
+     * - E1S Power Enable
+     * - BMC SSD Reset
+     */
+    void initializeGPIO() override;
+
 protected:
     // NVL144 uses the default VR implementations (which are NVL144 behavior)
     // Override only if NVL144 needs platform-specific variations
@@ -52,6 +64,45 @@ protected:
      * Override if NVL144 needs platform-specific on-state monitoring.
      */
     void handlePowerStateOn(Event event) override;
+
+private:
+    // =============================================================================
+    // NVL144-SPECIFIC ConfigData OBJECTS
+    // =============================================================================
+    
+    ConfigData nvl144pdbMainPowerOkConfig;
+    ConfigData nvl144pdbMainPowerEnableConfig;
+    ConfigData e1sPowerEnableConfig;
+    ConfigData bmcSSDResetConfig;
+    
+    // =============================================================================
+    // NVL144-SPECIFIC GPIO LINES
+    // =============================================================================
+    
+    gpiod::line nvl144pdbMainPowerOkLine;
+    gpiod::line nvl144pdbMainPowerEnableLine;
+    gpiod::line e1sPowerEnableLine;
+    gpiod::line bmcSSDResetLine;
+    
+    // =============================================================================
+    // NVL144-SPECIFIC EVENT DESCRIPTORS
+    // =============================================================================
+    
+    boost::asio::posix::stream_descriptor nvl144pdbMainPowerOkEvent;
+    
+    // =============================================================================
+    // NVL144-SPECIFIC GPIO HANDLERS (Member functions)
+    // =============================================================================
+    
+    /**
+     * @brief Handler for NVL144 PDB Main Power OK GPIO events
+     * 
+     * - If state == true: Send Event::nvl144pdbMainPowerOkAssert
+     * - If state == false: Send Event::nvl144pdbMainPowerOkDeAssert
+     * 
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    void nvl144pdbMainPowerOkHandler(bool state);
 };
 
 } // namespace power_control
