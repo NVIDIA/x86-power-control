@@ -3,6 +3,12 @@
 namespace power_control
 {
 
+PowerControl::PowerControl(boost::asio::io_context& ioContext)
+{
+    // TODO: Add the upstream Event Descriptors to the constructor initialization list
+    // TODO: Add upstream configs to the PowerSignalMap
+}
+
 std::function<void(Event)> PowerControl::getPowerStateHandler(PowerState state)
 {
     // Map upstream PowerState values to their handler functions
@@ -59,6 +65,15 @@ void PowerControl::sendPowerControlEvent(Event event, PowerState currentState)
     
     // Execute the handler (will use virtual dispatch)
     handler(event);
+}
+
+void PowerControl::initializeGPIO()
+{
+    // Base class does nothing - upstream GPIO initialization still happens in main()
+    // Derived classes (VRPowerControl, NVL144PowerControl, etc.) override this to
+    // register their specific GPIO event handlers
+
+    // TODO: Move the upstream GPIO initialization to this function
 }
 
 void PowerControl::handlePowerStateOn(Event event)

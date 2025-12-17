@@ -27,7 +27,7 @@ namespace power_control
 class PowerControl
 {
 public:
-    PowerControl() = default;
+    PowerControl(boost::asio::io_context& ioContext);
     virtual ~PowerControl() = default;
 
     /**
@@ -53,11 +53,25 @@ public:
      */
     void sendPowerControlEvent(Event event, PowerState currentState);
 
+    /**
+     * @brief Initialize GPIO events
+     * 
+     * 
+     * Register GPIO event handlers for GPIOs. 
+     * The base class implementation does nothing (upstream GPIO
+     * registration happens in main() for now).
+     */
+    virtual void initializeGPIO();
+
 protected:
-    // =============================================================================
+
+    // TODO: Add the Upstream Event Descriptors to the class
+    // TODO: Add the Upstream ConfigData to the class
+    // TODO: Add the Upstream GPIO Lines to the class
+    // TODO: Add the Upstream GPIO Event Handlers
+
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior
-    // =============================================================================
 
     /**
      * @brief Handler for PowerState::on

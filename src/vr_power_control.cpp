@@ -5,8 +5,161 @@
 
 #include "vr_power_control.hpp"
 
+// External references to global variables/functions from power_control.cpp
 namespace power_control
 {
+    extern std::map<std::string, ConfigData*> powerSignalMap;
+    extern PowerState powerState;
+    extern Context powerContext;
+    extern ConfigType;
+    
+    extern bool requestGPIOEvents(
+        const std::string& lineName,
+        std::function<void(bool)> handler,
+        gpiod::line& gpioLine,
+        boost::asio::posix::stream_descriptor& gpioEventDescriptor
+    );
+}
+
+namespace power_control
+{
+
+// Constructor: Adds common VR/HPM ConfigData entries to powerSignalMap
+VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext)
+    : PowerControl(ioContext),                  // Call base constructor
+      board0RunPowerPGEvent(ioContext),         // Initialize event descriptors with io
+      board1RunPowerPGEvent(ioContext),
+      board0CpuShutdownOkEvent(ioContext),
+      board1CpuShutdownOkEvent(ioContext),
+      cpuResetIndicatorEvent(ioContext)
+{
+    // Add common VR/HPM signals to powerSignalMap
+    powerSignalMap["Board0RunPowerPG"] = &board0RunPowerPGConfig;
+    powerSignalMap["Board0RunPowerEnable"] = &board0RunPowerEnableConfig;
+    powerSignalMap["Board0PreSystemReset"] = &board0PreSystemResetConfig;
+    powerSignalMap["Board0CpuShutdownForce"] = &board0CpuShutdownForceConfig;
+    powerSignalMap["Board0CpuShutdownRequest"] = &board0CpuShutdownRequestConfig;
+    powerSignalMap["Board0CpuShutdownOk"] = &board0CpuShutdownOkConfig;
+    
+    powerSignalMap["Board1RunPowerPG"] = &board1RunPowerPGConfig;
+    powerSignalMap["Board1RunPowerEnable"] = &board1RunPowerEnableConfig;
+    powerSignalMap["Board1PreSystemReset"] = &board1PreSystemResetConfig;
+    powerSignalMap["Board1CpuShutdownForce"] = &board1CpuShutdownForceConfig;
+    powerSignalMap["Board1CpuShutdownOk"] = &board1CpuShutdownOkConfig;
+    
+    powerSignalMap["CpuResetIndicator"] = &cpuResetIndicatorConfig;
+    powerSignalMap["USBPowerEnable"] = &usbPowerEnableConfig;
+}
+
+// Initialize common VR/HPM GPIO events (PHASE 2: After loadConfigValues())
+void VRPowerControl::initializeGPIO()
+{
+    // Register common VR/HPM GPIO event handlers
+    
+    // Board 0 Run Power Good
+    if (board0RunPowerPGConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board0RunPowerPGConfig.lineName,
+                              [this](bool state) { this->board0RunPowerPGHandler(state); },
+                              board0RunPowerPGLine,
+                              board0RunPowerPGEvent))
+        {
+            throw std::runtime_error("VR: Failed to register Board 0 Run Power Good GPIO events");
+        }
+    }
+    
+    // Board 1 Run Power Good
+    if (powerContext.presence.board1 && board1RunPowerPGConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board1RunPowerPGConfig.lineName,
+                              [this](bool state) { this->board1RunPowerPGHandler(state); },
+                              board1RunPowerPGLine,
+                              board1RunPowerPGEvent))
+        {
+            throw std::runtime_error("VR: Failed to register Board 1 Run Power Good GPIO events");
+        }
+    }
+    
+    // Board 0 CPU Shutdown OK
+    if (board0CpuShutdownOkConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board0CpuShutdownOkConfig.lineName,
+                              [this](bool state) { this->board0CpuShutdownOkHandler(state); },
+                              board0CpuShutdownOkLine,
+                              board0CpuShutdownOkEvent))
+        {
+            throw std::runtime_error("VR: Failed to register Board 0 CPU Shutdown OK GPIO events");
+        }
+    }
+    
+    // Board 1 CPU Shutdown OK
+    if (powerContext.presence.board1 && board1CpuShutdownOkConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(board1CpuShutdownOkConfig.lineName,
+                              [this](bool state) { this->board1CpuShutdownOkHandler(state); },
+                              board1CpuShutdownOkLine,
+                              board1CpuShutdownOkEvent))
+        {
+            throw std::runtime_error("VR: Failed to register Board 1 CPU Shutdown OK GPIO events");
+        }
+    }
+    
+    // CPU Reset Indicator
+    if (cpuResetIndicatorConfig.type == ConfigType::GPIO)
+    {
+        if (!requestGPIOEvents(cpuResetIndicatorConfig.lineName,
+                              [this](bool state) { this->cpuResetIndicatorHandler(state); },
+                              cpuResetIndicatorLine,
+                              cpuResetIndicatorEvent))
+        {
+            throw std::runtime_error("VR: Failed to register CPU Reset Indicator GPIO events");
+        }
+    }
+}
+
+// =============================================================================
+// GPIO EVENT HANDLERS (Member functions)
+// =============================================================================
+
+void VRPowerControl::board0RunPowerPGHandler(bool state)
+{
+    Event powerControlEvent = (state == board0RunPowerPGConfig.polarity)
+                                  ? Event::board0RunPowerPGAssert
+                                  : Event::board0RunPowerPGDeAssert;
+    this->sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void VRPowerControl::board1RunPowerPGHandler(bool state)
+{
+    Event powerControlEvent = (state == board1RunPowerPGConfig.polarity)
+                                  ? Event::board1RunPowerPGAssert
+                                  : Event::board1RunPowerPGDeAssert;
+    this->sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void VRPowerControl::board0CpuShutdownOkHandler(bool state)
+{
+    Event powerControlEvent = (state == board0CpuShutdownOkConfig.polarity)
+                                  ? Event::board0CpuShutdownOkAssert
+                                  : Event::board0CpuShutdownOkDeAssert;
+    this->sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void VRPowerControl::board1CpuShutdownOkHandler(bool state)
+{
+    Event powerControlEvent = (state == board1CpuShutdownOkConfig.polarity)
+                                  ? Event::board1CpuShutdownOkAssert
+                                  : Event::board1CpuShutdownOkDeAssert;
+    this->sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void VRPowerControl::cpuResetIndicatorHandler(bool state)
+{
+    Event powerControlEvent = (state == cpuResetIndicatorConfig.polarity)
+                                  ? Event::cpuResetIndicatorAssert
+                                  : Event::cpuResetIndicatorDeAssert;
+    this->sendPowerControlEvent(powerControlEvent, powerState);
+}
 
 std::function<void(Event)> VRPowerControl::getPowerStateHandler(PowerState state)
 {
@@ -86,7 +239,7 @@ void VRPowerControl::handleWaitForCPUResetAssert(Event event)
 void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 {
     // TODO: Move powerStateWaitForCPUResetDeAssert() implementation here
- 
+}
 
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 {
