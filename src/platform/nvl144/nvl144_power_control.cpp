@@ -5,55 +5,44 @@
 
 #include "nvl144_power_control.hpp"
 
-// External references to global variables/functions from power_control.cpp
+// External references to global variables from power_control.cpp
 namespace power_control
 {
-    extern std::map<std::string, ConfigData*> powerSignalMap;
     extern PowerState powerState;
     extern Context powerContext;
-    extern ConfigType;
-    
-    extern bool requestGPIOEvents(
-        const std::string& lineName,
-        std::function<void(bool)> handler,
-        gpiod::line& gpioLine,
-        boost::asio::posix::stream_descriptor& gpioEventDescriptor
-    );
 }
 
 namespace power_control
 {
 
-// Constructor: Adds NVL144-specific ConfigData entries to powerSignalMap
+// Constructor: Assigns handlers and registers events for NVL144-specific GPIOs
 NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext)
-    : VRPowerControl(ioContext),              // ← MUST call parent constructor FIRST
-      nvl144pdbMainPowerOkEvent(ioContext)    // Then initialize own event descriptors
+    : VRPowerControl(ioContext)  // Call parent constructor (registers VR GPIOs)
 {
-    // Add NVL144-specific signals to powerSignalMap
-    powerSignalMap["NVL144PDBMainPowerOk"] = &nvl144pdbMainPowerOkConfig;
-    powerSignalMap["NVL144PDBMainPowerEnable"] = &nvl144pdbMainPowerEnableConfig;
-    powerSignalMap["E1SPowerEnable"] = &e1sPowerEnableConfig;
-    powerSignalMap["BMCSSDReset"] = &bmcSSDResetConfig;
-}
-
-// Initialize NVL144-specific GPIO events (PHASE 2: After loadConfigValues())
-void NVL144PowerControl::initializeGPIO()
-{
-    // First, initialize common VR/HPM GPIOs (parent implementation)
-    VRPowerControl::initializeGPIO();
-    
-    // Register NVL144-specific GPIO event handlers
+    // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
+    // VR handlers already assigned and registered by VRPowerControl constructor
+    // Need to register NVL144 handlers for NVL144-specific signals
     
     // NVL144 PDB Main Power OK
-    if (powerContext.presence.nvl144_pdb && 
-        nvl144pdbMainPowerOkConfig.type == ConfigType::GPIO)
+    if (auto it = powerSignalMap.find("NVL144PDBMainPowerOk"); it != powerSignalMap.end())
     {
-        if (!requestGPIOEvents(nvl144pdbMainPowerOkConfig.lineName,
-                              [this](bool state) { this->nvl144pdbMainPowerOkHandler(state); },
-                              nvl144pdbMainPowerOkLine,
-                              nvl144pdbMainPowerOkEvent))
+        if (powerContext.presence.nvl144_pdb)
         {
-            throw std::runtime_error("NVL144: Failed to register PDB Main Power OK GPIO events");
+            it->second->gpioHandler = [this](bool state) { this->nvl144pdbMainPowerOkHandler(state); };
+            if (!requestGPIOEvents(*it->second))
+            {
+                lg2::error("Failed to register GPIO events for NVL144 PDB Main Power OK");
+                throw std::runtime_error("NVL144: Failed to register PDB Main Power OK GPIO events");
+            }
+        }
+    }
+    else
+    {
+        // NVL144 requires this signal if PDB is present
+        if (powerContext.presence.nvl144_pdb)
+        {
+            lg2::error("NVL144PDBMainPowerOk not found in config");
+            throw std::runtime_error("NVL144: Required signal NVL144PDBMainPowerOk missing from config");
         }
     }
 }
@@ -61,7 +50,10 @@ void NVL144PowerControl::initializeGPIO()
 // NVL144-specific GPIO handler implementations
 void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
 {
-    Event powerControlEvent = (state == nvl144pdbMainPowerOkConfig.polarity)
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["NVL144PDBMainPowerOk"];
+    
+    Event powerControlEvent = (state == config.polarity)
                                   ? Event::nvl144pdbMainPowerOkAssert
                                   : Event::nvl144pdbMainPowerOkDeAssert;
     this->sendPowerControlEvent(powerControlEvent, powerState);
