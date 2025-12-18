@@ -1,16 +1,54 @@
 #pragma once
 
 #include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <regex>
+#include <string>
+#include <gpiod.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
 
 // Forward declarations (these enums are defined in power_control.cpp)
 namespace power_control
 {
     enum class PowerState;
     enum class Event;
+    enum class ConfigType;
 }
 
 namespace power_control
 {
+
+// TODO: Add the Upsteram ConfigType enum to the class
+
+/**
+ * @brief Upstream Configuration data for a single GPIO or D-Bus signal
+ * 
+ * This structure consolidates all resources needed for a signal:
+ * - Metadata (name, line name, polarity, type)
+ * - GPIO line handle
+ * - Event descriptor for async monitoring (populated if an input GPIO and requested via requestGPIOEvents)
+ * - Handler function for GPIO events (initially null, if an input GPIO  added after loadConfigValues)
+ */
+struct ConfigData
+{
+    std::string name;
+    std::string lineName;
+    std::string dbusName;
+    std::string path;
+    std::string interface;
+    std::optional<std::regex> matchRegex;
+    bool polarity;
+    ConfigType type;
+    gpiod::line gpioLine;                               // GPIO line handle
+    boost::asio::posix::stream_descriptor eventDescriptor; // Event descriptor for async monitoring
+    std::function<void(bool)> gpioHandler;              // Handler function for GPIO events (initially null, populated after loadConfigValues)
+    
+    // Constructor to initialize event descriptor with io_context
+    ConfigData(boost::asio::io_context& io) 
+        : eventDescriptor(io), gpioHandler(nullptr) {}
+};
 
 /**
  * @brief Base Power Control class - Upstream functionality
@@ -53,15 +91,58 @@ public:
      */
     void sendPowerControlEvent(Event event, PowerState currentState);
 
+protected:
     /**
-     * @brief Initialize GPIO events
+     * @brief Power signal map - maps signal names to ConfigData
      * 
-     * 
-     * Register GPIO event handlers for GPIOs. 
-     * The base class implementation does nothing (upstream GPIO
-     * registration happens in main() for now).
+     * This map is dynamically populated from the JSON config file during construction.
+     * Each entry contains all resource information for a single signal.
      */
-    virtual void initializeGPIO();
+    std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
+    
+    /**
+     * @brief Reference to the io_context for async operations
+     */
+    boost::asio::io_context& ioContext;
+    
+    /**
+     * @brief Load configuration values from JSON config file
+     * 
+     * This method reads the JSON config file and dynamically creates ConfigData
+     * entries in powerSignalMap for each signal defined in the file.
+     * 
+     * Called by the base class constructor.
+     * 
+     * @param io The io_context for initializing stream descriptors
+     */
+    void loadConfigValues(boost::asio::io_context& io);
+    
+    /**
+     * @brief Request GPIO events for a signal
+     * 
+     * Registers async event monitoring for a GPIO signal. The handler function
+     * stored in ConfigData will be called when events occur.
+     * 
+     * @param config The ConfigData containing GPIO line, event descriptor, and handler
+     * @return true if successful, false otherwise
+     * @throws std::runtime_error if registration fails
+     */
+    bool requestGPIOEvents(ConfigData& config);
+    
+    /**
+     * @brief Wait for GPIO event on a signal
+     * 
+     * Sets up async waiting for the next GPIO event. This is called recursively
+     * by requestGPIOEvents to continuously monitor events.
+     * 
+     * @param config The ConfigData containing GPIO line, event descriptor, and handler
+     */
+    void waitForGPIOEvent(ConfigData& config);
+
+    // TODO: Add the Upstream Event Descriptors to the class
+    // TODO: Add the Upstream ConfigData to the class
+    // TODO: Add the Upstream GPIO Lines to the class
+    // TODO: Add the Upstream GPIO Event Handlers
 
 protected:
 
