@@ -51,63 +51,9 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
-    /**
-     * @brief Initialize common VR GPIO events (Phase 2 of initialization)
-     * 
-     * This method is called after loadConfigValues().
-     * It registers GPIO event handlers for common VR/HPM GPIOs:
-     * - Board 0 Run Power Good
-     * - Board 0/1 CPU Shutdown OK
-     * - CPU Reset Indicator
-     * 
-     * Platform-specific derived classes should call this base implementation
-     * first, then register their own platform-specific GPIOs.
-     */
-    void initializeGPIO() override;
-
 protected:
-    // COMMON VR/HPM ConfigData OBJECTS (Accessible to derived platform classes)
-    
-    // Board 0 GPIOs (common to all VR platforms)
-    ConfigData board0RunPowerPGConfig;
-    ConfigData board0RunPowerEnableConfig;
-    ConfigData board0PreSystemResetConfig;
-    ConfigData board0CpuShutdownForceConfig;
-    ConfigData board0CpuShutdownOkConfig;
-    ConfigData board0CpuShutdownRequestConfig;
-    
-    // Board 1 GPIOs (common to all VR platforms with 2P support)
-    ConfigData board1RunPowerPGConfig;
-    ConfigData board1RunPowerEnableConfig;
-    ConfigData board1PreSystemResetConfig;
-    ConfigData board1CpuShutdownForceConfig;
-    ConfigData board1CpuShutdownOkConfig;
-    ConfigData board1CpuShutdownRequestConfig;
-    
-    // Other common VR GPIOs
-    ConfigData cpuResetIndicatorConfig;
-    ConfigData usbPowerEnableConfig;
-    
-    // COMMON VR/HPM GPIO LINES
-    gpiod::line board0RunPowerPGLine;
-    gpiod::line board1RunPowerPGLine;
-    gpiod::line board0CpuShutdownOkLine;
-    gpiod::line board1CpuShutdownOkLine;
-    gpiod::line cpuResetIndicatorLine;
-    
-    // COMMON VR/HPM EVENT DESCRIPTORS
-    
-    // Board 0/1 event descriptors, passed ioContext from constructor
-    boost::asio::posix::stream_descriptor board0RunPowerPGEvent;
-    boost::asio::posix::stream_descriptor board1RunPowerPGEvent;
-    boost::asio::posix::stream_descriptor board0CpuShutdownOkEvent;
-    boost::asio::posix::stream_descriptor board1CpuShutdownOkEvent;
-    
-    // Other common VR event descriptors
-    boost::asio::posix::stream_descriptor cpuResetIndicatorEvent;
-    
-
     // GPIO EVENT HANDLERS (Member functions)
+    // These handlers check polarity and send appropriate events via sendPowerControlEvent()
     
     /**
      * @brief Handler for Board 0 Run Power Good GPIO events
