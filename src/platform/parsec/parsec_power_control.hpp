@@ -28,7 +28,7 @@ namespace power_control
 class ParsecPowerControl : public VRPowerControl
 {
 public:
-    ParsecPowerControl() = default;
+    ParsecPowerControl(boost::asio::io_context& ioContext);
     virtual ~ParsecPowerControl() = default;
 
     /**
@@ -40,6 +40,17 @@ public:
      * @return Function that handles events in the given state
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
+
+private:
+    /**
+     * @brief Handler for GB300 PDB Main Power OK GPIO events
+     * 
+     * - If state == true: Send Event::gb300pdbMainPowerOkAssert
+     * - If state == false: Send Event::gb300pdbMainPowerOkDeAssert
+     * 
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    void gb300pdbMainPowerOkHandler(bool state);
 
 protected:
     /**
