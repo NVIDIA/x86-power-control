@@ -5,8 +5,24 @@
 
 #include "e5010_power_control.hpp"
 
+// External references to global variables from power_control.cpp
 namespace power_control
 {
+    extern PowerState powerState;
+    extern Context powerContext;
+}
+
+namespace power_control
+{
+
+// Constructor: E5010 has no platform-specific GPIOs (no PDB)
+E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext)
+    : VRPowerControl(ioContext)  // Call parent constructor (registers VR GPIOs)
+{
+    // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
+    // VR handlers already assigned and registered by VRPowerControl constructor
+    // E5010 has no platform-specific GPIOs (no PDB), so nothing to register here
+}
 
 std::function<void(Event)> E5010PowerControl::getPowerStateHandler(PowerState state)
 {

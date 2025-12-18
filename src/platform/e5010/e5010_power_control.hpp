@@ -22,7 +22,7 @@ namespace power_control
 class E5010PowerControl : public VRPowerControl
 {
 public:
-    E5010PowerControl() = default;
+    E5010PowerControl(boost::asio::io_context& ioContext);
     virtual ~E5010PowerControl() = default;
 
     /**
