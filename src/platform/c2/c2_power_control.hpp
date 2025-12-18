@@ -30,7 +30,8 @@ namespace power_control
 class C2PowerControl : public VRPowerControl
 {
 public:
-    C2PowerControl() = default;
+
+    C2PowerControl(boost::asio::io_context& ioContext);
     virtual ~C2PowerControl() = default;
 
     /**
@@ -44,7 +45,23 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
+private:
+    // C2-SPECIFIC GPIO HANDLERS (Member functions)
+    
+    /**
+     * @brief Handler for C2 PDB PSU Power OK GPIO events
+     * 
+     * - If state == true: Send Event::c2pdbPSUPowerOkAssert
+     * - If state == false: Send Event::c2pdbPSUPowerOkDeAssert
+     * 
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    void c2pdbPSUPowerOkHandler(bool state);
+
 protected:
+
+    // OVERRIDDEN VR STATE HANDLERS (C2-specific behavior)
+    
     /**
      * @brief Handler for PowerState::on (C2 Override)
      * 
