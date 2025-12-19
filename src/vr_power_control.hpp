@@ -51,6 +51,39 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
+    /**
+     * @brief Get the host state dbus property value for a given power state (VR override)
+     * 
+     * Converts VR-specific PowerState enums to D-Bus host state property string value.
+     * Falls back to base class for upstream states.
+     * 
+     * @param state The power state
+     * @return D-Bus host state string
+     */
+    std::string_view getHostState(const PowerState state) override;
+
+    /**
+     * @brief Get the chassis state dbus property value for a given power state (VR override)
+     * 
+     * Converts VR-specific PowerState enums to D-Bus chassis state property string value.
+     * Falls back to base class for upstream states.
+     * 
+     * @param state The power state
+     * @return D-Bus chassis state string
+     */
+    std::string_view getChassisState(const PowerState state) override;
+
+    /**
+     * @brief Get a human-readable name for a power state (VR override)
+     * 
+     * Converts VR-specific PowerState enums to strings for logging purposes.
+     * Falls back to base class for upstream states.
+     * 
+     * @param state The power state
+     * @return Human-readable state name
+     */
+    std::string getPowerStateName(const PowerState state) override;
+
 protected:
     // GPIO EVENT HANDLERS (Member functions)
     // These handlers check polarity and send appropriate events via sendPowerControlEvent()

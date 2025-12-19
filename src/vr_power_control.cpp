@@ -235,5 +235,116 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 
 }
 
+std::string_view VRPowerControl::getHostState(const PowerState state)
+{
+    // VR-specific implementation - maps VR PowerState extensions to D-Bus host state
+    switch (state)
+    {
+        case PowerState::waitForPDBMainPowerOk:
+        case PowerState::waitForHPMPowerGoodAssert:
+        case PowerState::waitForCPUResetDeAssert:
+            return "xyz.openbmc_project.State.Host.HostState.TransitioningToRunning";
+            break;
+        case PowerState::waitForCPUResetAssert:
+        case PowerState::waitForCPUShutdownOk:
+            return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
+            break;
+        case PowerState::waitForHPMPowerGoodDeAssert:
+            return "xyz.openbmc_project.State.Host.HostState.Off";
+            break;
+        case PowerState::waitForPDBMainPowerOff:
+            if (powerContext.action == PowerAction::POWER_ON)
+            {
+                return "xyz.openbmc_project.State.Host.HostState.TransitioningToRunning";
+            }
+            else if (powerContext.action == PowerAction::FORCE_OFF || 
+                     powerContext.action == PowerAction::GRACE_OFF ||
+                     powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            {
+                return "xyz.openbmc_project.State.Host.HostState.Off";
+            }
+            break;
+        default:
+            break;
+    }
+    
+    // Fall through to base class for upstream states
+    return PowerControl::getHostState(state);
+}
+
+std::string_view VRPowerControl::getChassisState(const PowerState state)
+{
+    // VR-specific implementation - maps VR PowerState extensions to D-Bus chassis state
+    switch (state)
+    {
+        case PowerState::waitForPDBMainPowerOk:
+        case PowerState::waitForHPMPowerGoodAssert:
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            break;
+        case PowerState::waitForHPMPowerGoodDeAssert:
+        case PowerState::waitForCPUResetAssert:
+        case PowerState::waitForCPUShutdownOk:
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForCPUResetDeAssert:
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            break;
+        case PowerState::waitForPDBMainPowerOff:
+            if (powerContext.action == PowerAction::POWER_ON)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
+            }
+            else if (powerContext.action == PowerAction::FORCE_OFF || 
+                     powerContext.action == PowerAction::GRACE_OFF ||
+                     powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            }
+            break;
+        default:
+            break;
+    }
+    
+    // Fall through to base class for upstream states
+    return PowerControl::getChassisState(state);
+}
+
+std::string VRPowerControl::getPowerStateName(const PowerState state)
+{
+    // VR-specific state name mappings
+    // TODO: Confirm  VR-specific logic
+    
+    switch (state)
+    {
+        case PowerState::waitForPDBMainPowerOk:
+            return "Wait for PDB Main Power OK";
+            break;
+        case PowerState::waitForPDBMainPowerOff:
+            return "Wait for PDB Main Power Off";
+            break;
+        case PowerState::waitForHPMPowerGoodAssert:
+            return "Wait for HPM Power Good Assert";
+            break;
+        case PowerState::waitForHPMPowerGoodDeAssert:
+            return "Wait for HPM Power Good De-Assert";
+            break;
+        case PowerState::waitForCPUResetAssert:
+            return "Wait for CPU Reset Assert";
+            break;
+        case PowerState::waitForCPUResetDeAssert:
+            return "Wait for CPU Reset De-Assert";
+            break;
+        case PowerState::waitForCPUShutdownOk:
+            return "Wait for CPU Shutdown OK";
+            break;
+        default:
+            // Fall through to base class for upstream states
+            break;
+    }
+    
+    // Call base class for upstream states
+    return PowerControl::getPowerStateName(state);
+}
+
 } // namespace power_control
 
