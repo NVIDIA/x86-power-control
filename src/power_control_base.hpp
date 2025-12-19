@@ -6,8 +6,10 @@
 #include <optional>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <gpiod.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <sdbusplus/asio/object_server.hpp>
 
 // Forward declarations (these enums are defined in power_control.cpp)
 namespace power_control
@@ -65,7 +67,9 @@ struct ConfigData
 class PowerControl
 {
 public:
-    PowerControl(boost::asio::io_context& ioContext);
+    PowerControl(boost::asio::io_context& ioContext, 
+                 std::shared_ptr<sdbusplus::asio::connection> conn,
+                 const std::string& node);
     virtual ~PowerControl() = default;
 
     /**
@@ -91,6 +95,68 @@ public:
      */
     void sendPowerControlEvent(Event event, PowerState currentState);
 
+    /**
+     * @brief Set the power state and update D-Bus interfaces
+     * 
+     * This method updates the internal power state and writes to 
+     * the dbus host and chassis interfaces. It uses virtual dispatch to call the
+     * appropriate getHostState() and getChassisState() implementations.
+     * 
+     * @param state The new power state
+     */
+    void setPowerState(const PowerState state);
+
+    /**
+     * @brief Get the host state string for a given power state (virtual)
+     * 
+     * Converts a PowerState enum to the corresponding D-Bus host state string.
+     * Derived classes can override this to provide platform-specific mappings.
+     * 
+     * @param state The power state
+     * @return D-Bus host state string
+     */
+    virtual std::string_view getHostState(const PowerState state);
+
+    /**
+     * @brief Get the chassis state string for a given power state (virtual)
+     * 
+     * Converts a PowerState enum to the corresponding D-Bus chassis state string.
+     * Derived classes can override this to provide platform-specific mappings.
+     * 
+     * @param state The power state
+     * @return D-Bus chassis state string
+     */
+    virtual std::string_view getChassisState(const PowerState state);
+
+    /**
+     * @brief Get a human-readable name for a power state (virtual)
+     * 
+     * Converts a PowerState enum to a string for logging purposes.
+     * 
+     * @param state The power state
+     * @return Human-readable state name
+     */
+    virtual std::string getPowerStateName(const PowerState state);
+
+    /**
+     * @brief Log a power state transition
+     * 
+     * Logs an informational message when the power state changes.
+     * 
+     * @param state The new power state
+     */
+    void logStateTransition(const PowerState state);
+
+    /**
+     * @brief Get current time in milliseconds
+     * 
+     * Returns the current system time in milliseconds since epoch.
+     * Used for timestamping power state transitions.
+     * 
+     * @return Current time in milliseconds
+     */
+    uint64_t getCurrentTimeMs();
+
 protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -106,6 +172,28 @@ protected:
     boost::asio::io_context& ioContext;
     
     /**
+     * @brief D-Bus connection
+     */
+    std::shared_ptr<sdbusplus::asio::connection> dbusConn;
+    
+    /**
+     * @brief Node identifier
+     */
+    std::string nodeId;
+    
+    /**
+     * @brief Static D-Bus interface for host state
+     * 
+     */
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
+    
+    /**
+     * @brief Static D-Bus interface for chassis state
+     * 
+     */
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
+    
+    /**
      * @brief Load configuration values from JSON config file
      * 
      * This method reads the JSON config file and dynamically creates ConfigData
@@ -116,6 +204,17 @@ protected:
      * @param io The io_context for initializing stream descriptors
      */
     void loadConfigValues(boost::asio::io_context& io);
+    
+    /**
+     * @brief Initialize D-Bus interfaces
+     * 
+     * Creates and registers the host, chassis D-Bus interfaces, and other upstream D-Bus interfaces.
+     * 
+     * @param conn The D-Bus connection
+     * @param node The node identifier (e.g., "0" for host0)
+     */
+    void initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::connection> conn,
+                                   const std::string& node);
     
     /**
      * @brief Request GPIO events for a signal

@@ -2,15 +2,25 @@
 #include <phosphor-logging/lg2.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <ctime>
 
 namespace power_control
 {
 
-PowerControl::PowerControl(boost::asio::io_context& ioContext)
-    : ioContext(ioContext)
+// Initialize static members
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
+
+PowerControl::PowerControl(boost::asio::io_context& ioContext,
+                           std::shared_ptr<sdbusplus::asio::connection> conn,
+                           const std::string& node)
+    : ioContext(ioContext), dbusConn(conn), nodeId(node)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues(ioContext);
+    
+    // Initialize D-Bus interfaces
+    initializeDBusInterfaces(conn, node);
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler(PowerState state)
@@ -432,6 +442,366 @@ void PowerControl::handleCheckForWarmReset(Event event)
     // - Monitor PLT_RST or POST Complete signals
     // - If PLT_RST de-asserts (warm reset) → transition back to on
     // - If power off detected → transition to transitionToOff
+}
+
+std::string_view PowerControl::getHostState(const PowerState state)
+{
+    // Upstream implementation - maps PowerState to D-Bus host state
+    switch (state)
+    {
+        case PowerState::on:
+        case PowerState::gracefulTransitionToOff:
+        case PowerState::gracefulTransitionToCycleOff:
+            return "xyz.openbmc_project.State.Host.HostState.Running";
+            break;
+        case PowerState::waitForPSPowerOK:
+        case PowerState::waitForSIOPowerGood:
+        case PowerState::off:
+        case PowerState::transitionToOff:
+        case PowerState::transitionToCycleOff:
+        case PowerState::cycleOff:
+        case PowerState::checkForWarmReset:
+            return "xyz.openbmc_project.State.Host.HostState.Off";
+            break;
+        default:
+            return "";
+            break;
+    }
+}
+
+std::string_view PowerControl::getChassisState(const PowerState state)
+{
+    // Upstream implementation - maps PowerState to D-Bus chassis state
+    switch (state)
+    {
+        case PowerState::on:
+        case PowerState::transitionToOff:
+        case PowerState::gracefulTransitionToOff:
+        case PowerState::transitionToCycleOff:
+        case PowerState::gracefulTransitionToCycleOff:
+        case PowerState::checkForWarmReset:
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            break;
+        case PowerState::waitForPSPowerOK:
+        case PowerState::waitForSIOPowerGood:
+        case PowerState::off:
+        case PowerState::cycleOff:
+            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            break;
+        default:
+            return "";
+            break;
+    }
+}
+
+std::string PowerControl::getPowerStateName(PowerState state)
+{
+    // Upstream implementation - only knows about upstream power states
+    switch (state)
+    {
+        case PowerState::on:
+            return "On";
+            break;
+        case PowerState::waitForPSPowerOK:
+            return "Wait for Power OK";
+            break;
+        case PowerState::waitForSIOPowerGood:
+            return "Wait for SIO Power Good";
+            break;
+        case PowerState::off:
+            return "Off";
+            break;
+        case PowerState::transitionToOff:
+            return "Transition to Off";
+            break;
+        case PowerState::gracefulTransitionToOff:
+            return "Graceful Transition to Off";
+            break;
+        case PowerState::cycleOff:
+            return "Power Cycle Off";
+            break;
+        case PowerState::transitionToCycleOff:
+            return "Transition to Power Cycle Off";
+            break;
+        case PowerState::gracefulTransitionToCycleOff:
+            return "Graceful Transition to Power Cycle Off";
+            break;
+        case PowerState::checkForWarmReset:
+            return "Check for Warm Reset";
+            break;
+        default:
+            return "unknown state: " + std::to_string(static_cast<int>(state));
+            break;
+    }
+}
+
+void PowerControl::logStateTransition(const PowerState state)
+{
+    lg2::info("Host{HOST}: Moving to \"{STATE}\" state", "HOST", nodeId, "STATE",
+              this->getPowerStateName(state));
+}
+
+uint64_t PowerControl::getCurrentTimeMs()
+{
+    struct timespec time = {};
+
+    if (clock_gettime(CLOCK_REALTIME, &time) < 0)
+    {
+        return 0;
+    }
+    uint64_t currentTimeMs = static_cast<uint64_t>(time.tv_sec) * 1000;
+    currentTimeMs += static_cast<uint64_t>(time.tv_nsec) / 1000 / 1000;
+
+    return currentTimeMs;
+}
+
+void PowerControl::setPowerState(const PowerState state)
+{
+    // Note: This function still references the external global powerState variable
+    // which will need to be refactored in the future.
+    
+    extern PowerState powerState;
+    
+    // Update global power state
+    powerState = state;
+    logStateTransition(state);
+
+    // Update D-Bus host state (uses virtual dispatch)
+    hostIface->set_property("CurrentHostState",
+                            std::string(this->getHostState(powerState)));
+
+    // Update D-Bus chassis state (uses virtual dispatch)
+    chassisIface->set_property("CurrentPowerState",
+                               std::string(this->getChassisState(powerState)));
+    chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
+
+    // Reset boot progress to Unspecified when host powers off
+    // TODO: Commented out for now - boot progress interface not created yet
+    // if (state == PowerState::off)
+    // {
+    //     setBootProgress("xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
+    // }
+
+    // Save the power state for the restore policy
+    // TODO: Commented out for now - will be implemented when powerStateSaveTimer 
+    // and appState are moved to the base PowerControl class
+    // savePowerState(state);
+}
+
+void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::connection> conn,
+                                             const std::string& node)
+{
+    // Note: This function still references the external global powerState variable
+    // Button masking (powerButtonMask, resetButtonMask) and restart cause tracking
+    // (addRestartCause) are not yet moved to the class, so those checks are commented out.
+    
+    extern PowerState powerState;
+    
+    // Create Host Interface
+    sdbusplus::asio::object_server hostServer =
+        sdbusplus::asio::object_server(*conn);
+
+    hostIface =
+        hostServer.add_interface("/xyz/openbmc_project/state/host" + node,
+                                 "xyz.openbmc_project.State.Host");
+    
+    // Interface for IPMI/Redfish initiated host state transitions
+    hostIface->register_property(
+        "RequestedHostTransition",
+        std::string("xyz.openbmc_project.State.Host.Transition.Off"),
+        [this](const std::string& requested, std::string& resp) {
+            // Note: Button masking and restart cause tracking not yet implemented
+            // TODO: Uncomment when powerButtonMask, resetButtonMask, and addRestartCause are moved
+            
+            if (requested == "xyz.openbmc_project.State.Host.Transition.Off")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    // Use member function sendPowerControlEvent
+                    sendPowerControlEvent(Event::gracefulPowerOffRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to Off requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+
+                // sendPowerControlEvent(Event::gracefulPowerOffRequest, powerState);
+                // addRestartCause(RestartCause::command);
+            }
+            else if (requested ==
+                     "xyz.openbmc_project.State.Host.Transition.On")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    sendPowerControlEvent(Event::powerOnRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to On requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else if (requested ==
+                     "xyz.openbmc_project.State.Host.Transition.Reboot")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    sendPowerControlEvent(Event::powerCycleRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to Reboot requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else if (
+                requested ==
+                "xyz.openbmc_project.State.Host.Transition.GracefulWarmReboot")
+            {
+                // TODO: Check reset button mask when implemented
+                // if (!resetButtonMask)
+                // {
+                    sendPowerControlEvent(Event::gracefulPowerCycleRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to GracefulWarmReboot requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Reset Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else if (
+                requested ==
+                "xyz.openbmc_project.State.Host.Transition.ForceWarmReboot")
+            {
+                // TODO: Check reset button mask when implemented
+                // if (!resetButtonMask)
+                // {
+                    sendPowerControlEvent(Event::resetRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to ForceWarmReboot requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Reset Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else
+            {
+                lg2::error("Unrecognized host state transition request.");
+                throw std::invalid_argument("Unrecognized Transition Request");
+                return 0;
+            }
+            resp = requested;
+            return 1;
+        });
+    
+    hostIface->register_property("CurrentHostState",
+                                 std::string(getHostState(powerState)));
+
+    hostIface->initialize();
+
+    lg2::info("Created the host interface successfully");
+
+    // Create Chassis Interface
+    sdbusplus::asio::object_server chassisServer =
+        sdbusplus::asio::object_server(*conn);
+
+    chassisIface =
+        chassisServer.add_interface("/xyz/openbmc_project/state/chassis" + node,
+                                    "xyz.openbmc_project.State.Chassis");
+
+    chassisIface->register_property(
+        "RequestedPowerTransition",
+        std::string("xyz.openbmc_project.State.Chassis.Transition.Off"),
+        [this](const std::string& requested, std::string& resp) {
+            // Note: Button masking and restart cause tracking not yet implemented
+            // TODO: Uncomment when powerButtonMask and addRestartCause are moved
+            
+            if (requested == "xyz.openbmc_project.State.Chassis.Transition.Off")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    sendPowerControlEvent(Event::powerOffRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Chassis transition to Off requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else if (requested ==
+                     "xyz.openbmc_project.State.Chassis.Transition.On")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    sendPowerControlEvent(Event::powerOnRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Chassis transition to On requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else if (requested ==
+                     "xyz.openbmc_project.State.Chassis.Transition.PowerCycle")
+            {
+                // TODO: Check power button mask when implemented
+                // if (!powerButtonMask)
+                // {
+                    sendPowerControlEvent(Event::powerCycleRequest, powerState);
+                    // addRestartCause(RestartCause::command);
+                    lg2::info("Chassis transition to PowerCycle requested");
+                // }
+                // else
+                // {
+                //     lg2::info("Power Button Masked.");
+                //     throw std::invalid_argument("Transition Request Masked");
+                //     return 0;
+                // }
+            }
+            else
+            {
+                lg2::error("Unrecognized chassis state transition request.");
+                throw std::invalid_argument("Unrecognized Transition Request");
+                return 0;
+            }
+            resp = requested;
+            return 1;
+        });
+    
+    chassisIface->register_property("CurrentPowerState",
+                                    std::string(getChassisState(powerState)));
+    chassisIface->register_property("LastStateChangeTime", getCurrentTimeMs());
+
+    chassisIface->initialize();
+
+    lg2::info("Created the chassis interface successfully");
 }
 
 } // namespace power_control
