@@ -16,34 +16,24 @@ namespace power_control
 {
 
 // Constructor: Assigns handlers and registers events for C2-specific GPIOs
-C2PowerControl::C2PowerControl(boost::asio::io_context& ioContext)
-    : VRPowerControl(ioContext)  // Call parent constructor (registers VR GPIOs)
+C2PowerControl::C2PowerControl(boost::asio::io_context& ioContext,
+                               std::shared_ptr<sdbusplus::asio::connection> conn,
+                               const std::string& node)
+    : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
     // VR handlers already assigned and registered by VRPowerControl constructor
     // Need to register C2 handlers for C2-specific signals
-    
-    // C2 PDB PSU Power OK
-    if (auto it = powerSignalMap.find("C2PDBPSUPowerOk"); it != powerSignalMap.end())
+
+    // call validateRequiredSignals() to validate all required signals
+    validateRequiredSignals();
+    auto it = powerSignalMap.find("C2PDBPSUPowerOk");
+    it->second->gpioHandler = [this](bool state) { this->c2pdbPSUPowerOkHandler(state); };
+
+    if(!requestGPIOEvents(*it->second))
     {
-        if (powerContext.presence.c2_pdb)
-        {
-            it->second->gpioHandler = [this](bool state) { this->c2pdbPSUPowerOkHandler(state); };
-            if (!requestGPIOEvents(*it->second))
-            {
-                lg2::error("Failed to register GPIO events for C2 PDB PSU Power OK");
-                throw std::runtime_error("C2: Failed to register PDB PSU Power OK GPIO events");
-            }
-        }
-    }
-    else
-    {
-        // C2 requires this signal if PDB is present
-        if (powerContext.presence.c2_pdb)
-        {
-            lg2::error("C2PDBPSUPowerOk not found in config");
-            throw std::runtime_error("C2: Required signal C2PDBPSUPowerOk missing from config");
-        }
+        lg2::error("Failed to register GPIO events for C2 PDB PSU Power OK");
+        throw std::runtime_error("C2: Failed to register PDB PSU Power OK GPIO events");
     }
     
     // Note: C2PDB_Type no requestGPIOEvents call needed
@@ -100,5 +90,51 @@ void C2PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 {
     // TODO: Move C2-specific powerStateWaitForHPMPowerGoodDeAssert() implementation here
 }
+
+void C2PowerControl::validateRequiredSignals()
+{
+    // Validate C2 PDB signals (always required for C2 platform)
+    for (const auto& signalName : requiredSignals)
+    {
+        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        {
+            lg2::error("Required C2 PDB signal '{SIGNAL}' not found in config", 
+                      "SIGNAL", signalName);
+            throw std::runtime_error("C2: Required PDB signal missing from config: " + signalName);
+        }
+    }
+    
+    // Call VRPowerControl to validate common VR signals
+    VRPowerControl::validateRequiredSignals();
+    
+    lg2::info("C2 signal validation complete");
+}
+
+void C2PowerControl::setGPIOsForHostStateOn()
+{
+    // TODO: Set C2 PDB control GPIOs for host state "on"
+    // - Assert C2PDB12VHPMEnable
+    // - Assert C2PDB12VGPU1Enable
+    // - Assert C2PDB12VGPU2Enable
+    
+    lg2::info("Setting C2 GPIOs for host state ON");
+    
+    // Call parent to set VR GPIOs
+    VRPowerControl::setGPIOsForHostStateOn();
+}
+
+void C2PowerControl::setGPIOsForHostStateOff()
+{
+    // TODO: Set C2 PDB control GPIOs for host state "off"
+    // - De-assert C2PDB12VHPMEnable
+    // - De-assert C2PDB12VGPU1Enable
+    // - De-assert C2PDB12VGPU2Enable
+    
+    lg2::info("Setting C2 GPIOs for host state OFF");
+    
+    // Call parent to set VR GPIOs
+    VRPowerControl::setGPIOsForHostStateOff();
+}
+
 } // namespace power_control
 

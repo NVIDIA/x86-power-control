@@ -31,7 +31,9 @@ class C2PowerControl : public VRPowerControl
 {
 public:
 
-    C2PowerControl(boost::asio::io_context& ioContext);
+    C2PowerControl(boost::asio::io_context& ioContext,
+                   std::shared_ptr<sdbusplus::asio::connection> conn,
+                   const std::string& node);
     virtual ~C2PowerControl() = default;
 
     /**
@@ -45,6 +47,17 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
+protected:
+    /**
+     * @brief Validate that all required signals for C2 platform are present in config
+     * 
+     * Checks for C2-specific PDB signals, then calls VRPowerControl::validateRequiredSignals()
+     * to check common VR signals based on board presence.
+     * 
+     * @throws std::runtime_error if any required signal is missing from config
+     */
+    void validateRequiredSignals() override;
+
 private:
     // C2-SPECIFIC GPIO HANDLERS (Member functions)
     
@@ -57,6 +70,17 @@ private:
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void c2pdbPSUPowerOkHandler(bool state);
+
+protected:
+    /**
+     * @brief Required C2 PDB signals
+     */
+    const std::vector<std::string> requiredSignals = {
+        "C2PDBPSUPowerOk",
+        "C2PDB12VHPMEnable",
+        "C2PDB12VGPU1Enable",
+        "C2PDB12VGPU2Enable"
+    };
 
 protected:
 
@@ -102,6 +126,22 @@ protected:
      * 
      */
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "on" (C2 override)
+     * 
+     * Sets C2 PDB control GPIOs, then calls VRPowerControl::setGPIOsForHostStateOn()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOn() override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "off" (C2 override)
+     * 
+     * Sets C2 PDB control GPIOs, then calls VRPowerControl::setGPIOsForHostStateOff()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOff() override;
 };
 
 } // namespace power_control
