@@ -28,7 +28,9 @@ namespace power_control
 class ParsecPowerControl : public VRPowerControl
 {
 public:
-    ParsecPowerControl(boost::asio::io_context& ioContext);
+    ParsecPowerControl(boost::asio::io_context& ioContext,
+                       std::shared_ptr<sdbusplus::asio::connection> conn,
+                       const std::string& node);
     virtual ~ParsecPowerControl() = default;
 
     /**
@@ -41,6 +43,17 @@ public:
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
 
+protected:
+    /**
+     * @brief Validate that all required signals for Parsec platform are present in config
+     * 
+     * Checks for Parsec-specific GB300 PDB signals, then calls VRPowerControl::validateRequiredSignals()
+     * to check common VR signals based on board presence.
+     * 
+     * @throws std::runtime_error if any required signal is missing from config
+     */
+    void validateRequiredSignals() override;
+
 private:
     /**
      * @brief Handler for GB300 PDB Main Power OK GPIO events
@@ -51,6 +64,15 @@ private:
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void gb300pdbMainPowerOkHandler(bool state);
+
+protected:
+    /**
+     * @brief Required Parsec GB300 PDB signals
+     */
+    const std::vector<std::string> requiredSignals = {
+        "GB300PDBMainPowerOk",
+        "GB300PDBMainPowerEnable"
+    };
 
 protected:
     /**
@@ -87,6 +109,22 @@ protected:
      * NOTE: no E1S/BMC SSD toggling (compared to NVL144)
      */
     void handleWaitForPDBMainPowerOk(Event event) override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "on" (Parsec override)
+     * 
+     * Sets Parsec GB300 PDB control GPIOs, then calls VRPowerControl::setGPIOsForHostStateOn()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOn() override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "off" (Parsec override)
+     * 
+     * Sets Parsec GB300 PDB control GPIOs, then calls VRPowerControl::setGPIOsForHostStateOff()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOff() override;
 };
 
 } // namespace power_control

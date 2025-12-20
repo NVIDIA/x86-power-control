@@ -27,27 +27,23 @@ namespace power_control
 {
 
 // Constructor: Adds Parsec-specific ConfigData entries to powerSignalMap
-ParsecPowerControl::ParsecPowerControl(boost::asio::io_context& ioContext)
-    : VRPowerControl(ioContext) // Call parent constructor (registers VR GPIOs)
+ParsecPowerControl::ParsecPowerControl(boost::asio::io_context& ioContext,
+                                       std::shared_ptr<sdbusplus::asio::connection> conn,
+                                       const std::string& node)
+    : VRPowerControl(ioContext, conn, node) // Call parent constructor (registers VR GPIOs)
 {
 
-    // GB300 PDB Main Power OK
-    if (auto it = powerSignalMap.find("GB300PDBMainPowerOk"); it != powerSignalMap.end())
+    // call validateRequiredSignals() to validate all required signals
+    validateRequiredSignals();
+    
+    auto it = powerSignalMap.find("GB300PDBMainPowerOk");
+    it->second->gpioHandler = [this](bool state) { this->gb300pdbMainPowerOkHandler(state); };
+
+    if(!requestGPIOEvents(*it->second))
     {
-        // GB300 requires this signal if PDB is present
-        if (powerContext.presence.gb300_pdb)
-        {
-            it->second->gpioHandler = [this](bool state) { this->gb300pdbMainPowerOkHandler(state); };
-            
-            // TODO: Call base class's requestInputEvents function to register the input event
-        }
-        else
-        {
-            lg2::error("GB300PDBMainPowerOk not found in config");
-            throw std::runtime_error("Parsec: Required signal GB300PDBMainPowerOk missing from config");
-        }
+        lg2::error("Failed to register GPIO events for GB300 PDB Main Power OK");
+        throw std::runtime_error("Parsec: Failed to register GB300 PDB Main Power OK GPIO events");
     }
-    // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
 }
 
 // PARSEC-SPECIFIC GPIO EVENT HANDLERS
@@ -90,6 +86,47 @@ void ParsecPowerControl::handlePowerStateOff(Event event)
 void ParsecPowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     // TODO: Move Parsec-specific powerStateWaitForPDBMainPowerOk() implementation here
+}
+
+void ParsecPowerControl::validateRequiredSignals()
+{
+    // Validate Parsec GB300 PDB signals (always required for Parsec platform)
+    for (const auto& signalName : requiredSignals)
+    {
+        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        {
+            lg2::error("Required Parsec GB300 PDB signal '{SIGNAL}' not found in config", 
+                      "SIGNAL", signalName);
+            throw std::runtime_error("Parsec: Required GB300 PDB signal missing from config: " + signalName);
+        }
+    }
+    
+    // Call VRPowerControl to validate common VR signals
+    VRPowerControl::validateRequiredSignals();
+    
+    lg2::info("Parsec signal validation complete");
+}
+
+void ParsecPowerControl::setGPIOsForHostStateOn()
+{
+    // TODO: Set Parsec GB300 PDB control GPIOs for host state "on"
+    // - Assert GB300PDBMainPowerEnable
+    
+    lg2::info("Setting Parsec GPIOs for host state ON");
+    
+    // Call parent to set VR GPIOs
+    VRPowerControl::setGPIOsForHostStateOn();
+}
+
+void ParsecPowerControl::setGPIOsForHostStateOff()
+{
+    // TODO: Set Parsec GB300 PDB control GPIOs for host state "off"
+    // - De-assert GB300PDBMainPowerEnable
+    
+    lg2::info("Setting Parsec GPIOs for host state OFF");
+    
+    // Call parent to set VR GPIOs
+    VRPowerControl::setGPIOsForHostStateOff();
 }
 
 } // namespace power_control
