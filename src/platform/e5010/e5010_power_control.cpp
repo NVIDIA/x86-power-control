@@ -16,12 +16,16 @@ namespace power_control
 {
 
 // Constructor: E5010 has no platform-specific GPIOs (no PDB)
-E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext)
-    : VRPowerControl(ioContext)  // Call parent constructor (registers VR GPIOs)
+E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext,
+                                     std::shared_ptr<sdbusplus::asio::connection> conn,
+                                     const std::string& node)
+    : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
-    // VR handlers already assigned and registered by VRPowerControl constructor
     // E5010 has no platform-specific GPIOs (no PDB), so nothing to register here
+
+    // call validateRequiredSignals() to validate all required signals
+    validateRequiredSignals();
 }
 
 std::function<void(Event)> E5010PowerControl::getPowerStateHandler(PowerState state)
@@ -51,6 +55,29 @@ void E5010PowerControl::handlePowerStateOff(Event event)
 void E5010PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 {
     // TODO: Move E5010-specific powerStateWaitForHPMPowerGoodDeAssert() implementation here
+}
+
+void E5010PowerControl::validateRequiredSignals()
+{
+    // E5010 has no PDB, so no platform-specific signals to validate
+    // Just call VRPowerControl to validate common VR signals
+    VRPowerControl::validateRequiredSignals();
+    
+    lg2::info("E5010 signal validation complete");
+}
+
+void E5010PowerControl::setGPIOsForHostStateOn()
+{
+    // E5010 has no PDB, just call parent to set VR GPIOs
+    lg2::info("Setting E5010 GPIOs for host state ON");
+    VRPowerControl::setGPIOsForHostStateOn();
+}
+
+void E5010PowerControl::setGPIOsForHostStateOff()
+{
+    // E5010 has no PDB, just call parent to set VR GPIOs
+    lg2::info("Setting E5010 GPIOs for host state OFF");
+    VRPowerControl::setGPIOsForHostStateOff();
 }
 
 } // namespace power_control

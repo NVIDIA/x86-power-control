@@ -22,7 +22,9 @@ namespace power_control
 class E5010PowerControl : public VRPowerControl
 {
 public:
-    E5010PowerControl(boost::asio::io_context& ioContext);
+    E5010PowerControl(boost::asio::io_context& ioContext,
+                      std::shared_ptr<sdbusplus::asio::connection> conn,
+                      const std::string& node);
     virtual ~E5010PowerControl() = default;
 
     /**
@@ -34,6 +36,17 @@ public:
      * @return Function that handles events in the given state
      */
     std::function<void(Event)> getPowerStateHandler(PowerState state) override;
+
+protected:
+    /**
+     * @brief Validate that all required signals for E5010 platform are present in config
+     * 
+     * E5010 has no PDB, so only calls VRPowerControl::validateRequiredSignals()
+     * to check common VR signals based on board presence.
+     * 
+     * @throws std::runtime_error if any required signal is missing from config
+     */
+    void validateRequiredSignals() override;
 
 protected:
     /**
@@ -73,6 +86,22 @@ protected:
      * NOTE: Skips waitForPDBMainPowerOff state entirely
      */
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "on" (E5010 override)
+     * 
+     * E5010 has no PDB, so just calls VRPowerControl::setGPIOsForHostStateOn()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOn() override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "off" (E5010 override)
+     * 
+     * E5010 has no PDB, so just calls VRPowerControl::setGPIOsForHostStateOff()
+     * to set VR control GPIOs.
+     */
+    void setGPIOsForHostStateOff() override;
 };
 
 } // namespace power_control
