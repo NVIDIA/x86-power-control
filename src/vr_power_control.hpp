@@ -12,6 +12,21 @@ namespace power_control
 {
 
 /**
+ * @brief Placeholder struct for board presence detection
+ * 
+ * TODO: Replace with actual implementation from coworker
+ * This struct will be populated by detectBoardPresence() method
+ */
+struct BoardPresence
+{
+    bool board0Present;      // HPM Board 0 IOX
+    bool board1Present;      // HPM Board 1 IOX
+    bool nvl144PdbPresent;   // NVL144 PDB IOX
+    bool c2PdbPresent;       // C2 PDB IOX
+    bool parsecPdbPresent;   // Parsec/GB300 PDB IOX
+};
+
+/**
  * @brief VR Power Control class - VR-specific extensions (NVL144 default)
  * 
  * This class extends PowerControl with VR-specific functionality:
@@ -37,7 +52,9 @@ namespace power_control
 class VRPowerControl : public PowerControl
 {
 public:
-    VRPowerControl(boost::asio::io_context& ioContext);
+    VRPowerControl(boost::asio::io_context& ioContext,
+                   std::shared_ptr<sdbusplus::asio::connection> conn,
+                   const std::string& node);
     virtual ~VRPowerControl() = default;
 
     /**
@@ -83,6 +100,99 @@ public:
      * @return Human-readable state name
      */
     std::string getPowerStateName(const PowerState state) override;
+
+protected:
+    /**
+     * @brief Validate that all required signals for detected hardware are present in config
+     * 
+     * This method checks that ConfigData objects for all required signals exist in
+     * powerSignalMap based on which boards are detected as present (uses BoardPresence).
+     * 
+     * VR implementation checks:
+     * - Board 0 signals (always required): Board0RunPowerPG, Board0CpuShutdownOk, etc.
+     * - Board 1 signals (conditional): Only if boardPresence.board1Present is true
+     * 
+     * Platform classes override to add checks for platform-specific PDB signals,
+     * then call VRPowerControl::validateRequiredSignals() for common VR signals.
+     * 
+     * @throws std::runtime_error if any required signal is missing from config
+     */
+    void validateRequiredSignals() override;
+
+    /**
+     * @brief Set all control GPIOs to match the host state "on"
+     * 
+     * This virtual method sets all control GPIOs (Run Power Enable, Pre System Reset, etc.)
+     * to the values that correspond to the host being in the "on" state.
+     * 
+     * Platform classes override to add platform-specific and PDB GPIO settings.
+     */
+    virtual void setGPIOsForHostStateOn();
+
+    /**
+     * @brief Set all control GPIOs to match the host state "off"
+     * 
+     * This virtual method sets all control GPIOs (Run Power Enable, Pre System Reset, etc.)
+     * to the values that correspond to the host being in the "off" state.
+     * 
+     * Platform classes override to add platform-specific and PDB GPIO settings.
+     */
+    virtual void setGPIOsForHostStateOff();
+
+    /**
+     * @brief Board presence information
+     * 
+     * TODO: Replace with actual implementation from coworker
+     * This will be populated by detectBoardPresence() method
+     */
+    BoardPresence boardPresence;
+
+    /**
+     * @brief Required Board 0 signals (always required for VR platforms)
+     */
+    const std::vector<std::string> requiredBoard0Signals = {
+        "Board0RunPowerEnable",
+        "Board0RunPowerPG",
+        "Board0PreSystemReset",
+        "Board0CpuShutdownForce",
+        "Board0CpuShutdownRequest",
+        "Board0CpuShutdownOk",
+        "CpuResetIndicator",
+        "USBPowerEnable"
+    };
+
+    /**
+     * @brief Required Board 1 signals (only required if Board 1 is present)
+     */
+    const std::vector<std::string> requiredBoard1Signals = {
+        "Board1RunPowerEnable",
+        "Board1PreSystemReset",
+        "Board1CpuShutdownOk"
+    };
+
+protected:
+    // VR-SPECIFIC TIMERS
+    // These timers are used by VR-specific power sequencing (not in upstream)
+    
+    /**
+     * @brief Timer for PDB main power OK assertion/de-assertion in PDB power sequencing
+     */
+    boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
+    
+    /**
+     * @brief Timer for HPM board power good assertion/de-assertion in HPM power sequencing
+     */
+    boost::asio::steady_timer hpmPowerGoodWatchdogTimer;
+    
+    /**
+     * @brief Timer for CPU reset assertion on power-on
+     */
+    boost::asio::steady_timer cpuResetWatchdogTimer;
+    
+    /**
+     * @brief Timer for CPU shutdown OK assertion
+     */
+    boost::asio::steady_timer cpuShutdownOkWatchdogTimer;
 
 protected:
     // GPIO EVENT HANDLERS (Member functions)
