@@ -6,7 +6,12 @@
 
 namespace power_control
 {
+    extern PowerState powerState;
+}
 
+
+namespace power_control
+{
 // Initialize static members
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
@@ -14,7 +19,17 @@ std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nu
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& node)
-    : ioContext(ioContext), dbusConn(conn), nodeId(node)
+    : ioContext(ioContext), dbusConn(conn), nodeId(node), appName("power-control"),
+      gpioAssertTimer(ioContext),
+      powerCycleTimer(ioContext),
+      gracefulPowerOffTimer(ioContext),
+      warmResetCheckTimer(ioContext),
+      psPowerOKWatchdogTimer(ioContext),
+      sioPowerGoodWatchdogTimer(ioContext),
+      powerStateSaveTimer(ioContext),
+      pohCounterTimer(ioContext),
+      restartCauseTimer(ioContext),
+      slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues(ioContext);
@@ -239,6 +254,37 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
     
     lg2::info("Successfully loaded {COUNT} signal configurations from JSON",
               "COUNT", powerSignalMap.size());
+    
+    // Load timer values from JSON config
+    if (jsonData.contains("timers"))
+    {
+        auto timers = jsonData["timers"];
+        if (timers.is_object())
+        {
+            for (auto& [key, value] : timers.items())
+            {
+                if (value.is_number_integer())
+                {
+                    TimerMap[key] = value.get<int>();
+                }
+                else
+                {
+                    lg2::warning("Timer '{TIMER}' has non-integer value, skipping", 
+                                 "TIMER", key);
+                }
+            }
+            lg2::info("Successfully loaded {COUNT} timer configurations from JSON",
+                      "COUNT", TimerMap.size());
+        }
+        else
+        {
+            lg2::warning("'timers' field in JSON is not an object, skipping timer loading");
+        }
+    }
+    else
+    {
+        lg2::info("No 'timers' field found in JSON config, TimerMap will be empty");
+    }
 }
 
 bool PowerControl::requestGPIOEvents(ConfigData& config)
@@ -255,7 +301,7 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
 
     try
     {
-        config.gpioLine.request({"x86-power-control", gpiod::line_request::EVENT_BOTH_EDGES, {}});
+        config.gpioLine.request({appName, gpiod::line_request::EVENT_BOTH_EDGES, {}});
     }
     catch (const std::exception& e)
     {
@@ -560,8 +606,6 @@ void PowerControl::setPowerState(const PowerState state)
     // Note: This function still references the external global powerState variable
     // which will need to be refactored in the future.
     
-    extern PowerState powerState;
-    
     // Update global power state
     powerState = state;
     logStateTransition(state);
@@ -594,8 +638,6 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
     // Note: This function still references the external global powerState variable
     // Button masking (powerButtonMask, resetButtonMask) and restart cause tracking
     // (addRestartCause) are not yet moved to the class, so those checks are commented out.
-    
-    extern PowerState powerState;
     
     // Create Host Interface
     sdbusplus::asio::object_server hostServer =
@@ -802,6 +844,122 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
     chassisIface->initialize();
 
     lg2::info("Created the chassis interface successfully");
+}
+
+bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int value)
+{
+    if (!config)
+    {
+        lg2::error("setGPIOOutput called with null ConfigData pointer");
+        return false;
+    }
+    
+    // Find the GPIO line
+    if (!config->gpioLine)
+    {
+        config->gpioLine = gpiod::find_line(config->lineName);
+        if (!config->gpioLine)
+        {
+            lg2::error("Failed to find the {GPIO_NAME} line", "GPIO_NAME", config->lineName);
+            return false;
+        }
+    }
+    
+    // Request GPIO output to specified value
+    if (!config->gpioLine.is_requested())
+    {
+        try
+        {
+            config->gpioLine.request({appName, gpiod::line_request::DIRECTION_OUTPUT, {}},
+                            value);
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Failed to request {GPIO_NAME} output: {ERROR}", "GPIO_NAME",
+                    config->lineName, "ERROR", e);
+            return false;
+        }
+    }
+    else
+    {
+        try 
+        {
+            config->gpioLine.set_value(value);
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Failed to set {GPIO_NAME} value: {ERROR}",
+                       "GPIO_NAME", config->lineName, "ERROR", e);
+            return false;
+        }
+    }
+
+    lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME", config->lineName,
+              "GPIO_VALUE", value);
+    return true;
+}
+
+void PowerControl::startTimer(const std::string& timerName,
+                               boost::asio::steady_timer& timer,
+                               Event eventOnExpiry)
+{
+    // Look up timeout from TimerMap
+    auto it = TimerMap.find(timerName);
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer '{TIMER}' not found in TimerMap", "TIMER", timerName);
+        throw std::runtime_error("Timer not found in TimerMap: " + timerName);
+    }
+    
+    int timeoutMs = it->second;
+    
+    // Use the overloaded version with direct timeout
+    startTimer(timeoutMs, timer, eventOnExpiry);
+}
+
+void PowerControl::startTimer(int timeoutMs,
+                               boost::asio::steady_timer& timer,
+                               Event eventOnExpiry)
+{
+    lg2::info("Timer started with {TIMEOUT_MS}ms timeout", "TIMEOUT_MS", timeoutMs);
+    
+    timer.expires_after(std::chrono::milliseconds(timeoutMs));
+    timer.async_wait([this, eventOnExpiry](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before completion
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Timer async_wait failed: {ERROR_MSG}",
+                          "ERROR_MSG", ec.message());
+            }
+            lg2::info("Timer canceled");
+            return;
+        }
+        
+        lg2::info("Timer expired");
+        sendPowerControlEvent(eventOnExpiry, powerState);
+    });
+}
+
+void PowerControl::validateRequiredSignals()
+{
+    // TODO: Determine which configs are required by upstream PowerControl
+    // 
+    // {"PowerOut", &powerOutConfig},
+    // {"PowerOk", &powerOkConfig},
+    // {"ResetOut", &resetOutConfig},
+    // {"NMIOut", &nmiOutConfig},
+    // {"SioPowerGood", &sioPwrGoodConfig},
+    // {"SioOnControl", &sioOnControlConfig},
+    // {"SIOS5", &sioS5Config},
+    // {"PostComplete", &postCompleteConfig},
+    // {"PowerButton", &powerButtonConfig},
+    // {"ResetButton", &resetButtonConfig},
+    // {"IdButton", &idButtonConfig},
+    // {"NMIButton", &nmiButtonConfig},
+    // {"SlotPower", &slotPowerConfig},
+    // {"HpmStbyEn", &hpmStbyEnConfig}};
 }
 
 } // namespace power_control

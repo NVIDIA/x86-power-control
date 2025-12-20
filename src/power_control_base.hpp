@@ -157,6 +157,62 @@ public:
      */
     uint64_t getCurrentTimeMs();
 
+    /**
+     * @brief Set a GPIO output to a specified value
+     * 
+     * Finds a GPIO line by name, requests it as an output, and sets its value.
+     * If the line is already requested, just sets the value.
+     * Uses the ConfigData object from powerSignalMap which contains the line name
+     * and GPIO line handle.
+     * 
+     * @param config Shared pointer to ConfigData containing GPIO information
+     * @param value The value to set (0 or 1)
+     * @return true if successful, false otherwise
+     */
+    bool setGPIOOutput(std::shared_ptr<ConfigData> config, const int value);
+
+    /**
+     * @brief Start a timer with timeout from TimerMap
+     * 
+     * Looks up the timeout value from TimerMap and starts the timer.
+     * Handles all standard error checking and logging.
+     * Calls sendPowerControlEvent with the specified event when timer expires.
+     * 
+     * @param timerName Name of the timer in TimerMap to lookup timeout
+     * @param timer Reference to the timer to start
+     * @param eventOnExpiry Event to send when timer expires successfully
+     */
+    void startTimer(const std::string& timerName,
+                    boost::asio::steady_timer& timer,
+                    Event eventOnExpiry);
+
+    /**
+     * @brief Start a timer with direct timeout value
+     * 
+     * Starts the timer with the provided timeout value.
+     * Handles all standard error checking and logging.
+     * Calls sendPowerControlEvent with the specified event when timer expires.
+     * 
+     * @param timeoutMs Timeout in milliseconds
+     * @param timer Reference to the timer to start
+     * @param eventOnExpiry Event to send when timer expires successfully
+     */
+    void startTimer(int timeoutMs,
+                    boost::asio::steady_timer& timer,
+                    Event eventOnExpiry);
+
+    /**
+     * @brief Validate that all required signals are present in config
+     * 
+     * This virtual method checks that ConfigData objects for all required signals
+     * exist in powerSignalMap. The base PowerControl implementation is a placeholder.
+     * 
+     * Derived classes override to check for platform-specific required signals.
+     * 
+     * @throws std::runtime_error if any required signal is missing from config
+     */
+    virtual void validateRequiredSignals();
+
 protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -165,6 +221,14 @@ protected:
      * Each entry contains all resource information for a single signal.
      */
     std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
+    
+    /**
+     * @brief Timer map - maps timer names to timeout values in milliseconds
+     * 
+     * This map is dynamically populated from the JSON config file during loadConfigValues().
+     * Contains timeout values for all timers used.
+     */
+    std::map<std::string, int> TimerMap;
     
     /**
      * @brief Reference to the io_context for async operations
@@ -182,6 +246,11 @@ protected:
     std::string nodeId;
     
     /**
+     * @brief Application name for GPIO requests
+     */
+    std::string appName;
+    
+    /**
      * @brief Static D-Bus interface for host state
      * 
      */
@@ -192,6 +261,59 @@ protected:
      * 
      */
     static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
+    
+    // UPSTREAM TIMERS
+    // These timers are used by the upstream (OpenBMC x86-power-control) functionality
+    
+    /**
+     * @brief Timer for holding GPIOs asserted
+     */
+    boost::asio::steady_timer gpioAssertTimer;
+    
+    /**
+     * @brief Timer between off and on during a power cycle
+     */
+    boost::asio::steady_timer powerCycleTimer;
+    
+    /**
+     * @brief Timer for OS gracefully powering off
+     */
+    boost::asio::steady_timer gracefulPowerOffTimer;
+    
+    /**
+     * @brief Timer for warm reset check
+     */
+    boost::asio::steady_timer warmResetCheckTimer;
+    
+    /**
+     * @brief Timer for power supply power OK assertion on power-on
+     */
+    boost::asio::steady_timer psPowerOKWatchdogTimer;
+    
+    /**
+     * @brief Timer for SIO power good assertion on power-on
+     */
+    boost::asio::steady_timer sioPowerGoodWatchdogTimer;
+    
+    /**
+     * @brief Timer for power-off state save for power loss tracking
+     */
+    boost::asio::steady_timer powerStateSaveTimer;
+    
+    /**
+     * @brief POH (Power On Hours) timer
+     */
+    boost::asio::steady_timer pohCounterTimer;
+    
+    /**
+     * @brief Timer for when to allow restart cause updates
+     */
+    boost::asio::steady_timer restartCauseTimer;
+    
+    /**
+     * @brief Timer for slot power cycle
+     */
+    boost::asio::steady_timer slotPowerCycleTimer;
     
     /**
      * @brief Load configuration values from JSON config file
