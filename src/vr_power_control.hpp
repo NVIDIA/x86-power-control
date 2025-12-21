@@ -287,9 +287,7 @@ protected:
      * 
      * PREVIOUS IMPLEMENTATION (NVL144 default in powerStateWaitForPDBMainPowerOk):
      * 
-     * case Event::nvl144pdbMainPowerOkAssert:
-     * case Event::pdbMainPowerOkWatchdogTimerExpired:
-     * 
+     * NOTE: NVL144 overrides for NVL144-specific PDB behavior
      * NOTE: C2 overrides to enable 12V rails after PDB powers up
      * NOTE: Parsec (GB300) overrides for GB300-specific PDB behavior
      * NOTE: E5010 defines skip PDB sequencing and go directly to HPM sequencing

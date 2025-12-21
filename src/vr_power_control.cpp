@@ -216,7 +216,42 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
 {
     // TODO: Move powerStateWaitForHPMPowerGoodAssert() implementation here
+    switch (event)
+    {
+        case Event::board0RunPowerPGAssert:
+            hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good Watchdog Timer
+            lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
 
+            auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+            auto cpuResetWatchdogTimer = powerSignalMap.find("CPUResetWatchdogTimer");
+
+            std::map<std::string, std::shared_ptr<ConfigData>>::iterator board1PreSystemReset;
+            if (boardPresence.board1Present)
+            {
+                board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+            }
+
+            setGPIOOutput(board0PreSystemReset->second, !board0PreSystemReset->second->polarity);
+            if (boardPresence.board1Present)
+            {
+                setGPIOOutput(board1PreSystemReset->second, !board1PreSystemReset->second->polarity);
+            }
+
+            startTimer(TimerMap["CPUResetWatchdogTimer"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
+            setPowerState(PowerState::waitForCPUResetAssert);
+            break;
+        case Event::hpmPowerGoodWatchdogTimerExpired:
+            lg2::error("HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            setGPIOsForHostStateOff(); // TODO: fill function implementation
+
+            setPowerState(PowerState::off);
+            break;
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void VRPowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
@@ -228,12 +263,34 @@ void VRPowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 void VRPowerControl::handleWaitForCPUResetAssert(Event event)
 {
     // TODO: Move powerStateWaitForCPUResetAssert() implementation here
- 
 }
 
 void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 {
     // TODO: Move powerStateWaitForCPUResetDeAssert() implementation here
+    switch (event)
+    {
+        case Event::cpuResetIndicatorDeAssert:
+            cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
+            lg2::info("CPU Reset Indicator De-asserted. CPUs are out of reset. Setting Host Power State to On/Running.");
+
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            setGPIOsForHostStateOn(); // TODO: fill function implementation
+            setPowerState(PowerState::on);
+            break;
+        case Event::cpuResetWatchdogTimerExpired:
+            lg2::error("CPU Reset Watchdog Timer Expired. CPUs are not out of reset. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+
+            setGPIOsForHostStateOff(); // TODO: fill function implementation
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            setGPIOsForHostStateOff(); // TODO: fill function implementation
+
+            setPowerState(PowerState::off);
+            break;
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
