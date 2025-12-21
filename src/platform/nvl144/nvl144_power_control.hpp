@@ -60,19 +60,22 @@ protected:
     
     /**
      * @brief Handler for PowerState::on (NVL144 Override - optional)
-     * 
-     * Currently uses VRPowerControl default implementation.
      * Override if NVL144 needs platform-specific on-state monitoring.
      */
     void handlePowerStateOn(Event event) override;
 
     /**
      * @brief Handler for PowerState::off (NVL144 Override - optional)
-     * 
-     * Currently uses VRPowerControl default implementation.
      * Override if NVL144 needs platform-specific off-state monitoring.
      */
     void handlePowerStateOff(Event event) override;
+
+    /**
+     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL144 Override - optional)
+     * 
+     * Override if NVL144 needs platform-specific waitForPDBMainPowerOk monitoring.
+     */
+     void handleWaitForPDBMainPowerOk(Event event) override;
 
     /**
      * @brief Set all control GPIOs to match the host state "on" (NVL144 override)
