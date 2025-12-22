@@ -15,7 +15,6 @@
 namespace power_control
 {
     enum class PowerState;
-    enum class Event;
     enum class ConfigType;
 }
 
@@ -72,6 +71,80 @@ public:
                  const std::string& node);
     virtual ~PowerControl() = default;
 
+    /**
+     * @brief Power control events
+     * 
+     * Events that trigger power state transitions.
+     */
+    enum class Event
+    {
+        psPowerOKAssert,
+        psPowerOKDeAssert,
+        sioPowerGoodAssert,
+        sioPowerGoodDeAssert,
+        sioS5Assert,
+        sioS5DeAssert,
+        pltRstAssert,
+        pltRstDeAssert,
+        postCompleteAssert,
+        postCompleteDeAssert,
+        powerButtonPressed,
+        resetButtonPressed,
+        powerCycleTimerExpired,
+        psPowerOKWatchdogTimerExpired,
+        pdbMainPowerOkWatchdogTimerExpired,
+        hpmPowerGoodWatchdogTimerExpired,
+        cpuResetWatchdogTimerExpired,
+        cpuShutdownOkWatchdogTimerExpired,
+        sioPowerGoodWatchdogTimerExpired,
+        gracefulPowerOffTimerExpired,
+        powerOnRequest,
+        powerOffRequest,
+        powerCycleRequest,
+        resetRequest,
+        gracefulPowerOffRequest,
+        gracefulPowerCycleRequest,
+        warmResetDetected,
+        nvl144pdbMainPowerOkAssert,
+        nvl144pdbMainPowerOkDeAssert,
+        gb300pdbMainPowerOkAssert,
+        gb300pdbMainPowerOkDeAssert,
+        c2pdbPSUPowerOkAssert,
+        c2pdbPSUPowerOkDeAssert,
+        board0RunPowerPGAssert,
+        board0RunPowerPGDeAssert,
+        board1RunPowerPGAssert,
+        board1RunPowerPGDeAssert,
+        cpuResetIndicatorAssert,
+        cpuResetIndicatorDeAssert,
+        board0CpuShutdownOkAssert,
+        board0CpuShutdownOkDeAssert,
+        board1CpuShutdownOkAssert,
+        board1CpuShutdownOkDeAssert,
+    };
+
+    /**
+     * @brief Get human-readable name for an Event
+     * 
+     * Converts an Event enum value to a descriptive string for logging.
+     * 
+     * @param event The event to get the name for
+     * @return Human-readable event name
+     */
+    static std::string getEventName(Event event);
+
+    /**
+     * @brief Log an event received by a state handler
+     * 
+     * Logs an informational message showing which state handler received which event.
+     * 
+     * @param stateHandler Name of the state handler function
+     * @param event The event that was received
+     */
+    static void logEvent(std::string_view stateHandler, Event event);
+
+    PowerState powerState;
+
     std::string hostDbusName = "xyz.openbmc_project.State.Host";
     std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
@@ -90,8 +163,72 @@ public:
         HOST_INITIATED_SHUTDOWN,
     };
 
+    // This map contains all timer values that are to be read from json config
+    boost::container::flat_map<std::string, int> TimerMap = {
+    {"PowerPulseMs", 200},
+    {"ForceOffPulseMs", 15000},
+    {"ResetPulseMs", 500},
+    {"PowerCycleMs", 5000},
+    {"SioPowerGoodWatchdogMs", 1000},
+    {"CpuResetWatchdogMs", 10000},
+    {"CpuShutdownOkWatchdogMs", 10000},
+    {"GracefulPowerOffS", (5 * 60)},
+    {"WarmResetCheckMs", 500},
+    {"PowerOffSaveMs", 7000},
+    {"SlotPowerCycleMs", 200},
+    {"DbusGetPropertyRetry", 1000}};
+
+    enum class DbusConfigType
+    {
+        name = 1,
+        path,
+        interface,
+        property
+    };
+
+    // Mandatory config parameters for dbus inputs
+    boost::container::flat_map<DbusConfigType, std::string> dbusParams = {
+        {DbusConfigType::name, "DbusName"},
+        {DbusConfigType::path, "Path"},
+        {DbusConfigType::interface, "Interface"},
+        {DbusConfigType::property, "Property"}};
+
+    enum class ConfigType
+    {
+        GPIO = 1,
+        DBUS
+    };
+
     PowerAction action = PowerAction::NONE;
     std::string target_state = "HostOff";
+
+
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> bootProgressIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
+    #ifdef CHASSIS_SYSTEM_RESET
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSysIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSlotIface;
+    #endif
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> powerButtonIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> resetButtonIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> nmiButtonIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
+    static std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
+
+    static gpiod::line powerButtonMask;
+    static gpiod::line resetButtonMask;
+    static bool nmiButtonMasked = false;
+    #if IGNORE_SOFT_RESETS_DURING_POST
+    static bool ignoreNextSoftReset = false;
+    #endif
+
+    // Changed from default true to false
+    static bool nmiEnabled = false;
+    static bool nmiWhenPoweredOff = false;
+    static bool sioEnabled = false;
 
     /**
      * @brief Get the handler function for a given power state

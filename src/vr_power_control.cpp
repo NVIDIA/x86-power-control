@@ -26,8 +26,14 @@ VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext, const std::st
     // Assign handlers and register events for common VR/HPM signals
     detectBoardPresence();
 
-    // powerSignalMap is now populated by PowerControl::loadConfigValues()
-    // Assign handlers and register events for common VR/HPM signals
+    // Extend TimerMap with VR-specific timers
+    TimerMap.insert_or_assign({
+    {"PsPowerOKWatchdogMs", 8000},
+    {"NVL144PdbMainPowerOkWatchdogMs", 10000},
+    {"GB300PdbMainPowerOkWatchdogMs", 10000},
+    {"C2PdbPSUPowerOkWatchdogMs", 10000},
+    {"HpmPowerGoodWatchdogMs", 15000},
+    });
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();

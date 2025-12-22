@@ -4,14 +4,111 @@
 #include <nlohmann/json.hpp>
 #include <ctime>
 
+
 namespace power_control
 {
-    extern PowerState powerState;
+
+std::string PowerControl::getEventName(Event event)
+{
+    switch (event)
+    {
+        case Event::psPowerOKAssert:
+            return "power supply power OK assert";
+        case Event::psPowerOKDeAssert:
+            return "power supply power OK de-assert";
+        case Event::sioPowerGoodAssert:
+            return "SIO power good assert";
+        case Event::sioPowerGoodDeAssert:
+            return "SIO power good de-assert";
+        case Event::sioS5Assert:
+            return "SIO S5 assert";
+        case Event::sioS5DeAssert:
+            return "SIO S5 de-assert";
+        case Event::pltRstAssert:
+            return "PLT_RST assert";
+        case Event::pltRstDeAssert:
+            return "PLT_RST de-assert";
+        case Event::postCompleteAssert:
+            return "POST Complete assert";
+        case Event::postCompleteDeAssert:
+            return "POST Complete de-assert";
+        case Event::powerButtonPressed:
+            return "power button pressed";
+        case Event::resetButtonPressed:
+            return "reset button pressed";
+        case Event::powerCycleTimerExpired:
+            return "power cycle timer expired";
+        case Event::psPowerOKWatchdogTimerExpired:
+            return "power supply power OK watchdog timer expired";
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
+            return "PDB main power OK watchdog timer expired";
+        case Event::hpmPowerGoodWatchdogTimerExpired:
+            return "HPM power good watchdog timer expired";
+        case Event::cpuResetWatchdogTimerExpired:
+            return "CPU reset watchdog timer expired";
+        case Event::cpuShutdownOkWatchdogTimerExpired:
+            return "CPU shutdown OK watchdog timer expired";
+        case Event::sioPowerGoodWatchdogTimerExpired:
+            return "SIO power good watchdog timer expired";
+        case Event::gracefulPowerOffTimerExpired:
+            return "graceful power-off timer expired";
+        case Event::powerOnRequest:
+            return "power-on request";
+        case Event::powerOffRequest:
+            return "power-off request";
+        case Event::powerCycleRequest:
+            return "power-cycle request";
+        case Event::resetRequest:
+            return "reset request";
+        case Event::gracefulPowerOffRequest:
+            return "graceful power-off request";
+        case Event::gracefulPowerCycleRequest:
+            return "graceful power-cycle request";
+        case Event::warmResetDetected:
+            return "warm reset detected";
+        case Event::nvl144pdbMainPowerOkAssert:
+            return "NVL144 PDB main power OK assert";
+        case Event::nvl144pdbMainPowerOkDeAssert:
+            return "NVL144 PDB main power OK de-assert";
+        case Event::gb300pdbMainPowerOkAssert:
+            return "GB300 PDB main power OK assert";
+        case Event::gb300pdbMainPowerOkDeAssert:
+            return "GB300 PDB main power OK de-assert";
+        case Event::c2pdbPSUPowerOkAssert:
+            return "C2 PDB main power OK assert";
+        case Event::c2pdbPSUPowerOkDeAssert:
+            return "C2 PDB main power OK de-assert";
+        case Event::board0RunPowerPGAssert:
+            return "Board 0 run power PG assert";
+        case Event::board0RunPowerPGDeAssert:
+            return "Board 0 run power PG de-assert";
+        case Event::board1RunPowerPGAssert:
+            return "Board 1 run power PG assert";
+        case Event::board1RunPowerPGDeAssert:
+            return "Board 1 run power PG de-assert";
+        case Event::cpuResetIndicatorAssert:
+            return "CPU reset indicator assert";
+        case Event::cpuResetIndicatorDeAssert:
+            return "CPU reset indicator de-assert";
+        case Event::board0CpuShutdownOkAssert:
+            return "Board 0 CPU shutdown OK assert";
+        case Event::board0CpuShutdownOkDeAssert:
+            return "Board 0 CPU shutdown OK de-assert";
+        case Event::board1CpuShutdownOkAssert:
+            return "Board 1 CPU shutdown OK assert";
+        case Event::board1CpuShutdownOkDeAssert:
+            return "Board 1 CPU shutdown OK de-assert";
+        default:
+            return "unknown event: " + std::to_string(static_cast<int>(event));
+    }
 }
 
-
-namespace power_control
+void PowerControl::logEvent(std::string_view stateHandler, Event event)
 {
+    lg2::info("{STATE_HANDLER}: {EVENT} event received", "STATE_HANDLER",
+              stateHandler, "EVENT", getEventName(event));
+}
+
 // Initialize static members
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
