@@ -974,5 +974,40 @@ void PowerControl::validateRequiredSignals()
     // {"HpmStbyEn", &hpmStbyEnConfig}};
 }
 
+void PowerControl::registerGPIOHandlers()
+{
+    lg2::info("Registering GPIO handlers from gpioHandlerMap");
+    
+    for (const auto& [signalName, handler] : gpioHandlerMap)
+    {
+        // Find the signal in powerSignalMap
+        auto it = powerSignalMap.find(signalName);
+        if (it == powerSignalMap.end())
+        {
+            lg2::error("GPIO signal '{SIGNAL}' not found in powerSignalMap", 
+                      "SIGNAL", signalName);
+            throw std::runtime_error("GPIO signal '" + signalName + 
+                                    "' not found in powerSignalMap");
+        }
+        
+        // Assign the handler to the ConfigData object
+        it->second->gpioHandler = handler;
+        
+        // Request GPIO events for this signal
+        if (!requestGPIOEvents(*it->second))
+        {
+            lg2::error("Failed to register GPIO events for '{SIGNAL}'", 
+                      "SIGNAL", signalName);
+            throw std::runtime_error("Failed to register GPIO events for '" + 
+                                    signalName + "'");
+        }
+        
+        lg2::info("Successfully registered GPIO handler for '{SIGNAL}'", 
+                 "SIGNAL", signalName);
+    }
+    
+    lg2::info("All GPIO handlers registered successfully");
+}
+
 } // namespace power_control
 

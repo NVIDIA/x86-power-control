@@ -245,6 +245,29 @@ protected:
     std::string configFilePath;
     std::shared_ptr<sdbusplus::asio::connection> conn;
     std::string node;
+
+    /**
+     * @brief Map of GPIO signal names to their handler functions
+     * 
+     * This map is built up by each class in the hierarchy (PowerControl, VRPowerControl, 
+     * and platform-specific classes) in their constructors. The registerGPIOHandlers() 
+     * method then assigns these handlers to the corresponding ConfigData objects in the 
+     * powerSignalMap and calls requestGPIOEvents() for each.
+     */
+    std::map<std::string, std::function<void(bool)>> gpioHandlerMap;
+
+    /**
+     * @brief Register all GPIO handlers and request GPIO events
+     * 
+     * This method should be called in the most derived class's constructor after all
+     * classes have added their handlers to gpioHandlerMap. It iterates through the map,
+     * assigns the handler functions to the corresponding ConfigData objects in the
+     * powerSignalMap, and calls requestGPIOEvents() for each signal.
+     * 
+     * @throws std::runtime_error if a signal in gpioHandlerMap is not found in powerSignalMap
+     *                            or if requestGPIOEvents() fails for any signal
+     */
+    void registerGPIOHandlers();
     
     /**
      * @brief Timer map - maps timer names to timeout values in milliseconds
