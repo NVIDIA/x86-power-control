@@ -10,7 +10,6 @@ namespace power_control
 {
     // External global variables (runtime variables, not types)
     extern PowerState powerState;
-    extern Context powerContext;
     
     // TODO: Implement the requestInputEvents function in the Base PowerControl class
     // extern bool requestInputEvents(
@@ -32,18 +31,18 @@ ParsecPowerControl::ParsecPowerControl(boost::asio::io_context& ioContext,
                                        const std::string& node)
     : VRPowerControl(ioContext, conn, node) // Call parent constructor (registers VR GPIOs)
 {
+    // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
+    // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
+    // Now add Parsec-specific handlers to the map
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
     
-    auto it = powerSignalMap.find("GB300PDBMainPowerOk");
-    it->second->gpioHandler = [this](bool state) { this->gb300pdbMainPowerOkHandler(state); };
+    // Add Parsec-specific GPIO handler to the map
+    gpioHandlerMap["GB300PDBMainPowerOk"] = [this](bool state) { this->gb300pdbMainPowerOkHandler(state); };
 
-    if(!requestGPIOEvents(*it->second))
-    {
-        lg2::error("Failed to register GPIO events for GB300 PDB Main Power OK");
-        throw std::runtime_error("Parsec: Failed to register GB300 PDB Main Power OK GPIO events");
-    }
+    // Register all GPIO handlers (from base, VR, and Parsec)
+    registerGPIOHandlers();
 }
 
 // PARSEC-SPECIFIC GPIO EVENT HANDLERS
