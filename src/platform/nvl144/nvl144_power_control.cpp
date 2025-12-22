@@ -9,7 +9,6 @@
 namespace power_control
 {
     extern PowerState powerState;
-    extern Context powerContext;
 }
 
 namespace power_control
@@ -20,20 +19,17 @@ NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext, const
     : VRPowerControl(ioContext, configFilePath, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
-    // VR handlers already assigned and registered by VRPowerControl constructor
-    // Need to register NVL144 handlers for NVL144-specific signals
+    // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
+    // Now add NVL144-specific handlers to the map
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
-    auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
-    it->second->gpioHandler = [this](bool state) { this->nvl144pdbMainPowerOkHandler(state); };
+    // Add NVL144-specific GPIO handler to the map
+    gpioHandlerMap["NVL144PDBMainPowerOk"] = [this](bool state) { this->nvl144pdbMainPowerOkHandler(state); };
 
-    if(!requestGPIOEvents(*it->second))
-    {
-        lg2::error("Failed to register GPIO events for NVL144 PDB Main Power OK");
-        throw std::runtime_error("NVL144: Failed to register PDB Main Power OK GPIO events");
-    }
+    // Register all GPIO handlers (from base, VR, and NVL144)
+    registerGPIOHandlers();
 }
 
 // NVL144-specific GPIO handler implementations
@@ -103,7 +99,7 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     {
         lg2::info("PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
         setGPIOsForHostStateOff(); // TODO: fill function implementation
-        powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+        action = PowerAction::NONE;
         setPowerState(PowerState::off);
     }
     else
@@ -162,7 +158,7 @@ void NVL144PowerControl::handlePowerOnRequest()
     {
         lg2::info("PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
         setGPIOsForHostStateOn(); // TODO: fill function implementation
-        powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+        action = PowerAction::NONE;
         setPowerState(PowerState::on);
     }
     else
@@ -261,7 +257,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
         case Event::pdbMainPowerOkWatchdogTimerExpired:
             lg2::error("PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            action = PowerAction::NONE;
             setGPIOsForHostStateOff(); // TODO: fill function implementation
             setPowerState(PowerState::off);
             break;
@@ -284,11 +280,11 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
     if (success)
     {
         // Log success based on shutdown type
-        if(powerContext.action == PowerAction::FORCE_OFF)
+        if(action == PowerAction::FORCE_OFF)
         {
             lg2::info("NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
         }
-        else if(powerContext.action == PowerAction::GRACE_OFF)
+        else if(action == PowerAction::GRACE_OFF)
         {
             lg2::info("NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
         }
@@ -299,7 +295,7 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         lg2::error("PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
     }
 
-    powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+    action = PowerAction::NONE;
     setGPIOsForHostStateOff(); // TODO: fill function implementation
     setPowerState(PowerState::off);
 }
@@ -381,7 +377,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
         case Event::cpuResetWatchdogTimerExpired:
             lg2::error("CPU Reset Watchdog Timer Expired. CPUs are not in reset. Host Shutdown sequence failed {reccomend checking CPLD  status}. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            action = PowerAction::NONE;
             setGPIOsForHostStateOff(); // TODO: fill function implementation
             setPowerState(PowerState::off);
             break;
@@ -444,7 +440,7 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
             // TODO: determine if this is the correct fault handling for No Run Power Good De-assertion during shutdown sequences
             lg2::error("HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: Setting GPIO states to match Host State ON. Setting Host Power State to On.");
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            action = PowerAction::NONE;
             setGPIOsForHostStateOn(); // TODO: fill function implementation
             setPowerState(PowerState::on);
             break;
