@@ -140,6 +140,83 @@ protected:
     virtual void setGPIOsForHostStateOff();
 
     /**
+     * @brief Check if all required boards have asserted CPU Shutdown OK
+     * 
+     * Reads GPIO values from powerSignalMap and checks if they match polarity.
+     * For 1P: Only checks Board 0
+     * For 2P: Checks both Board 0 and Board 1
+     * 
+     * @return true if all required boards have asserted SHDN_OK, false otherwise
+     */
+    bool areAllRequiredBoardsShutdownOk();
+
+    /**
+     * @brief Get count of boards that have asserted CPU Shutdown OK
+     * 
+     * Used for detailed logging during graceful shutdown timeout handling.
+     * 
+     * @return Number of boards (0, 1, or 2) that have asserted SHDN_OK
+     */
+    int getShutdownOkAssertedCount();
+
+    /**
+     * @brief Assert Pre System Reset lines for all present boards
+     * 
+     * Sets Board0PreSystemReset to polarity (assert)
+     * Sets Board1PreSystemReset to polarity if board1Present (assert)
+     */
+    void assertBoardPreSystemResets();
+
+    /**
+     * @brief Transition to CPU reset assert wait state (success path)
+     * 
+     * Cancels CPU Shutdown OK watchdog timer, logs success, asserts Pre System Reset
+     * lines, and transitions to PowerState::waitForCPUResetAssert.
+     */
+    void transitionToCPUResetAssertState();
+
+    /**
+     * @brief Abort graceful shutdown and return to powered-on state
+     * 
+     * Called when CPU(s) fail to assert SHDN_OK during GRACE_OFF.
+     * Sets GPIOs back to host state ON and transitions to PowerState::on.
+     */
+    void abortGracefulShutdown();
+
+    /**
+     * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
+     * 
+     * For forced power off, we don't care about SHDN_OK state - just proceed
+     * with asserting Pre System Reset and transitioning to waitForCPUResetAssert.
+     */
+    void handleCPUShutdownOkWatchdogExpiry_ForceOff();
+
+    /**
+     * @brief Handle CPU Shutdown OK watchdog expiry during GRACE_OFF
+     * 
+     * For graceful power off, check how many boards asserted SHDN_OK:
+     * - 1P: Abort if Board 0 didn't assert
+     * - 2P: Abort if neither asserted, warn and proceed if only one asserted
+     */
+    void handleCPUShutdownOkWatchdogExpiry_GraceOff();
+
+    /**
+     * @brief De-assert Pre System Reset lines during HPM power-on sequence
+     * 
+     * De-asserts Board 0 Pre System Reset and Board 1 Pre System Reset (if present)
+     * when HPM Board 0 Run Power Good asserts during power-on.
+     */
+    void deassertPreSystemResets();
+
+    /**
+     * @brief Transition to CPU Reset Assert wait state
+     * 
+     * Cancels HPM power good watchdog, logs transition, de-asserts Pre System Resets,
+     * starts CPU reset watchdog, and transitions to waitForCPUResetAssert.
+     */
+    void transitionToCPUResetAssertState();
+
+    /**
      * @brief Board presence information
      * 
      * TODO: Replace with actual implementation from coworker

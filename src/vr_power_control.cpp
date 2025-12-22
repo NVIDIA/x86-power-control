@@ -213,41 +213,59 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 
 }
 
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForHPMPowerGoodAssert
+// ============================================================================
+
+// Helper function: De-assert Pre System Resets during power-on
+void VRPowerControl::deassertPreSystemResets()
+{
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+
+    // De-assert Board 0 Pre System Reset
+    setGPIOOutput(board0PreSystemReset->second, !board0PreSystemReset->second->polarity);
+    
+    // De-assert Board 1 Pre System Reset if present
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        setGPIOOutput(board1PreSystemReset->second, !board1PreSystemReset->second->polarity);
+    }
+}
+
+// Helper function: Transition to CPU Reset Assert wait state
+void VRPowerControl::transitionToCPUResetAssertState()
+{
+    hpmPowerGoodWatchdogTimer.cancel();
+    
+    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
+    
+    deassertPreSystemResets();
+    startTimer(TimerMap["CPUResetWatchdogTimer"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
+// ============================================================================
+// handleWaitForHPMPowerGoodAssert state handler
+// ============================================================================
+
 void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
 {
     // TODO: Move powerStateWaitForHPMPowerGoodAssert() implementation here
     switch (event)
     {
         case Event::board0RunPowerPGAssert:
-            hpmPowerGoodWatchdogTimer.cancel(); // Cancel the HPM Power Good Watchdog Timer
-            lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
-
-            auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-            auto cpuResetWatchdogTimer = powerSignalMap.find("CPUResetWatchdogTimer");
-
-            std::map<std::string, std::shared_ptr<ConfigData>>::iterator board1PreSystemReset;
-            if (boardPresence.board1Present)
-            {
-                board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-            }
-
-            setGPIOOutput(board0PreSystemReset->second, !board0PreSystemReset->second->polarity);
-            if (boardPresence.board1Present)
-            {
-                setGPIOOutput(board1PreSystemReset->second, !board1PreSystemReset->second->polarity);
-            }
-
-            startTimer(TimerMap["CPUResetWatchdogTimer"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
-            setPowerState(PowerState::waitForCPUResetAssert);
+            transitionToCPUResetAssertState();
             break;
+            
         case Event::hpmPowerGoodWatchdogTimerExpired:
             lg2::error("HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
             powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setGPIOsForHostStateOff(); // TODO: fill function implementation
-
             setPowerState(PowerState::off);
             break;
+            
         default:
             lg2::info("No action taken.");
             break;
@@ -274,17 +292,17 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             cpuResetWatchdogTimer.cancel(); // Cancel the CPU Reset Watchdog Timer
             lg2::info("CPU Reset Indicator De-asserted. CPUs are out of reset. Setting Host Power State to On/Running.");
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setGPIOsForHostStateOn(); // TODO: fill function implementation
+
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setPowerState(PowerState::on);
             break;
         case Event::cpuResetWatchdogTimerExpired:
             lg2::error("CPU Reset Watchdog Timer Expired. CPUs are not out of reset. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
             setGPIOsForHostStateOff(); // TODO: fill function implementation
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
-            setGPIOsForHostStateOff(); // TODO: fill function implementation
 
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setPowerState(PowerState::off);
             break;
         default:
@@ -293,10 +311,217 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
     }
 }
 
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForCPUShutdownOk
+// ============================================================================
+
+// Helper function: Check if all required boards have asserted SHDN_OK
+bool VRPowerControl::areAllRequiredBoardsShutdownOk()
+{
+    auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
+    bool board0ShutdownOkAsserted = board0CpuShutdownOk->second->gpioLine.get_value() == 
+                                    board0CpuShutdownOk->second->polarity;
+    
+    if (!boardPresence.board1Present)
+    {
+        // 1P system - only need Board 0
+        return board0ShutdownOkAsserted;
+    }
+    
+    // 2P system - need both Board 0 and Board 1
+    auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
+    bool board1ShutdownOkAsserted = board1CpuShutdownOk->second->gpioLine.get_value() == 
+                                    board1CpuShutdownOk->second->polarity;
+    
+    return board0ShutdownOkAsserted && board1ShutdownOkAsserted;
+}
+
+// Helper function: Get count of boards that have asserted SHDN_OK (for logging)
+int VRPowerControl::getShutdownOkAssertedCount()
+{
+    int count = 0;
+    
+    auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
+    if (board0CpuShutdownOk->second->gpioLine.get_value() == board0CpuShutdownOk->second->polarity)
+    {
+        count++;
+    }
+    
+    if (boardPresence.board1Present)
+    {
+        auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
+        if (board1CpuShutdownOk->second->gpioLine.get_value() == board1CpuShutdownOk->second->polarity)
+        {
+            count++;
+        }
+    }
+    
+    return count;
+}
+
+// Helper function: Assert Pre System Reset lines for all present boards
+void VRPowerControl::assertBoardPreSystemResets()
+{
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    setGPIOOutput(board0PreSystemReset->second, board0PreSystemReset->second->polarity);
+    
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        setGPIOOutput(board1PreSystemReset->second, board1PreSystemReset->second->polarity);
+    }
+}
+
+// Helper function: Transition to CPU reset assert wait state (success path)
+void VRPowerControl::transitionToCPUResetAssertState()
+{
+    cpuShutdownOkWatchdogTimer.cancel();
+    
+    // Log appropriate message based on board configuration
+    if (boardPresence.board1Present)
+    {
+        lg2::info("CPU Shutdown OK received from both boards. Asserting Pre System Reset lines. Transitioning to wait for CPU Reset assertion...");
+    }
+    else
+    {
+        lg2::info("CPU Shutdown OK received from Board 0. Asserting Pre System Reset line. Transitioning to wait for CPU Reset assertion...");
+    }
+    
+    assertBoardPreSystemResets();
+    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
+// Helper function: Abort graceful shutdown and return to powered-on state
+void VRPowerControl::abortGracefulShutdown()
+{
+    lg2::error("Graceful shutdown aborted - CPU(s) failed to assert SHDN_OK within timeout. Returning to powered-on state.");
+    setGPIOsForHostStateOn();
+    powerContext.action = PowerAction::NONE;
+    setPowerState(PowerState::on);
+}
+
+// Helper function: Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
+void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
+{
+    // FORCE_OFF: Don't care about SHDN_OK state, just proceed
+    lg2::info("CPU Shutdown OK watchdog expired during FORCE_OFF. Proceeding with forced power down.");
+    assertBoardPreSystemResets();
+    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
+// Helper function: Handle CPU Shutdown OK watchdog expiry during GRACE_OFF
+void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
+{
+    // GRACE_OFF: Check how many boards asserted SHDN_OK
+    int assertedCount = getShutdownOkAssertedCount();
+    
+    if (!boardPresence.board1Present)
+    {
+        // 1P system
+        if (assertedCount == 0)
+        {
+            // Board 0 did not assert SHDN_OK - abort graceful shutdown
+            lg2::error("CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Board 0 CPU failed to assert SHDN_OK.");
+            abortGracefulShutdown();
+        }
+        else
+        {
+            // Board 0 asserted SHDN_OK - proceed (shouldn't normally reach here as we'd transition earlier)
+            lg2::info("Board 0 CPU Shutdown OK confirmed. Proceeding with graceful power down.");
+            transitionToCPUResetAssertState();
+        }
+    }
+    else
+    {
+        // 2P system
+        if (assertedCount == 0)
+        {
+            // Neither board asserted SHDN_OK - abort graceful shutdown
+            lg2::error("CPU Shutdown OK watchdog expired during GRACE_OFF. Neither CPU asserted SHDN_OK.");
+            abortGracefulShutdown();
+        }
+        else if (assertedCount == 1)
+        {
+            // Only one board asserted SHDN_OK - system in bad state, proceed anyway
+            auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
+            bool board0Asserted = board0CpuShutdownOk->second->gpioLine.get_value() == 
+                                 board0CpuShutdownOk->second->polarity;
+            
+            if (board0Asserted)
+            {
+                lg2::warning("CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 0 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+            }
+            else
+            {
+                lg2::warning("CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 1 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+            }
+            
+            assertBoardPreSystemResets();
+            startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
+            setPowerState(PowerState::waitForCPUResetAssert);
+        }
+        else
+        {
+            // Both boards asserted SHDN_OK - proceed (shouldn't normally reach here as we'd transition earlier)
+            lg2::info("Both CPUs confirmed Shutdown OK. Proceeding with graceful power down.");
+            transitionToCPUResetAssertState();
+        }
+    }
+}
+
+// ============================================================================
+// handleWaitForCPUShutdownOk state handler
+// ============================================================================
+
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 {
-    // TODO: Move powerStateWaitForCPUShutdownOk() implementation here
-
+    switch (event)
+    {
+        case Event::board0CpuShutdownOkAssert:
+        case Event::board1CpuShutdownOkAssert:
+            // Check if all required boards have now asserted SHDN_OK
+            if (areAllRequiredBoardsShutdownOk())
+            {
+                // All required boards have asserted - proceed with reset
+                transitionToCPUResetAssertState();
+            }
+            else
+            {
+                // Still waiting for other board(s) in 2P configuration
+                if (event == Event::board0CpuShutdownOkAssert)
+                {
+                    lg2::info("Board 0 CPU Shutdown OK asserted. Waiting for Board 1...");
+                }
+                else
+                {
+                    lg2::info("Board 1 CPU Shutdown OK asserted. Waiting for Board 0...");
+                }
+            }
+            break;
+            
+        case Event::cpuShutdownOkWatchdogTimerExpired:
+            // Behavior depends on power action (FORCE_OFF vs GRACE_OFF)
+            if (powerContext.action == PowerAction::FORCE_OFF)
+            {
+                handleCPUShutdownOkWatchdogExpiry_ForceOff();
+            }
+            else if (powerContext.action == PowerAction::GRACE_OFF)
+            {
+                handleCPUShutdownOkWatchdogExpiry_GraceOff();
+            }
+            else
+            {
+                // Unknown action - log and do nothing
+                lg2::warning("CPU Shutdown OK watchdog expired with unexpected power action. No action taken.");
+            }
+            break;
+            
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 std::string_view VRPowerControl::getHostState(const PowerState state)
