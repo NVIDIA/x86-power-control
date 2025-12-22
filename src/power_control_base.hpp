@@ -72,6 +72,27 @@ public:
                  const std::string& node);
     virtual ~PowerControl() = default;
 
+    std::string hostDbusName = "xyz.openbmc_project.State.Host";
+    std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
+    std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
+    std::string buttonDbusName = "xyz.openbmc_project.Chassis.Buttons";
+    std::string nmiDbusName = "xyz.openbmc_project.Control.Host.NMI";
+    std::string rstCauseDbusName =
+        "xyz.openbmc_project.Control.Host.RestartCause";
+
+    enum class PowerAction {
+        NONE,
+        POWER_ON,
+        FORCE_OFF,
+        GRACE_OFF,
+        POWER_CYCLE,
+        SYSTEM_RESET,
+        HOST_INITIATED_SHUTDOWN,
+    };
+
+    PowerAction action = PowerAction::NONE;
+    std::string target_state = "HostOff";
+
     /**
      * @brief Get the handler function for a given power state
      * 
@@ -221,6 +242,9 @@ protected:
      * Each entry contains all resource information for a single signal.
      */
     std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
+    std::string configFilePath;
+    std::shared_ptr<sdbusplus::asio::connection> conn;
+    std::string node;
     
     /**
      * @brief Timer map - maps timer names to timeout values in milliseconds

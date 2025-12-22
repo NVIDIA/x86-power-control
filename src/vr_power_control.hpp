@@ -52,9 +52,7 @@ struct BoardPresence
 class VRPowerControl : public PowerControl
 {
 public:
-    VRPowerControl(boost::asio::io_context& ioContext,
-                   std::shared_ptr<sdbusplus::asio::connection> conn,
-                   const std::string& node);
+    VRPowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0");
     virtual ~VRPowerControl() = default;
 
     /**
@@ -227,6 +225,8 @@ protected:
     /**
      * @brief Required Board 0 signals (always required for VR platforms)
      */
+
+    // ToDo: Move this to the new "map" that stores ground truth for GPIO values 
     const std::vector<std::string> requiredBoard0Signals = {
         "Board0RunPowerEnable",
         "Board0RunPowerPG",
@@ -283,6 +283,20 @@ protected:
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void board0RunPowerPGHandler(bool state);
+
+    /**
+     * @brief Handler for detecting board presence
+     * 
+     * Checks presence and updates context using paths from build configuration
+     */
+    void detectBoardPresence();
+
+    /**
+     * @brief Check if IOX presence is present
+     * 
+     * Checks if the IOX presence is present
+     */
+    bool checkIOXPresence(const std::string& ioxPath);
     
     /**
      * @brief Handler for Board 1 Run Power Good GPIO events

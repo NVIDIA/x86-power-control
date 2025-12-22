@@ -16,15 +16,17 @@ namespace power_control
 {
 
 // Constructor: Assigns handlers and registers events for common VR/HPM GPIOs
-VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext,
-                               std::shared_ptr<sdbusplus::asio::connection> conn,
-                               const std::string& node)
-    : PowerControl(ioContext, conn, node),  // Call base constructor (populates powerSignalMap from JSON)
+VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
+    : PowerControl(ioContext, configFilePath, node), 
       pdbMainPowerOkWatchdogTimer(ioContext),
       hpmPowerGoodWatchdogTimer(ioContext),
       cpuResetWatchdogTimer(ioContext),
       cpuShutdownOkWatchdogTimer(ioContext)
 {
+    // powerSignalMap is now populated by PowerControl::loadConfigValues()
+    // Assign handlers and register events for common VR/HPM signals
+    detectBoardPresence();
+
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
 
@@ -34,7 +36,8 @@ VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext,
     auto it = powerSignalMap.find("Board0RunPowerPG");
     it->second->gpioHandler = [this](bool state) { this->board0RunPowerPGHandler(state); };
 
-    if(!requestGPIOEvents(*it->second))
+    // Board 0 Run Power Good
+    if (auto it = powerSignalMap.find("Board0RunPowerPG"); it != powerSignalMap.end())
     {
         lg2::error("Failed to register GPIO events for Board 0 Run Power Good");
         throw std::runtime_error("VR: Failed to register Board 0 Run Power Good GPIO events");
@@ -95,6 +98,35 @@ VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext,
     //         }
     //     }
     // }
+}
+
+void VRPowerControl::detectBoardPresence()
+{
+    // Check presence and update context using paths from build configuration
+    presence.gb300_pdb = checkIOXPresence(GB300_PDB_IOX_PATH);
+    presence.c2_pdb = checkIOXPresence(C2_PDB_IOX_PATH);
+    presence.nvl144_pdb = checkIOXPresence(NVL144_PDB_IOX_PATH);
+    presence.board0 = checkIOXPresence(BOARD0_IOX_PATH);
+    presence.board1 = checkIOXPresence(BOARD1_IOX_PATH);
+    
+    // Log detected board presence
+    lg2::info("Board presence detection:");
+    lg2::info("  GB300 PDB ({PATH}): {PRESENT}", "PATH", std::string(GB300_PDB_IOX_PATH),
+              "PRESENT", powerContext.presence.gb300_pdb);
+    lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH", std::string(C2_PDB_IOX_PATH),
+              "PRESENT", powerContext.presence.c2_pdb);
+    lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH", std::string(NVL144_PDB_IOX_PATH),
+              "PRESENT", powerContext.presence.nvl144_pdb);
+    lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH", std::string(BOARD0_IOX_PATH),
+              "PRESENT", powerContext.presence.board0);
+    lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH", std::string(BOARD1_IOX_PATH),
+              "PRESENT", powerContext.presence.board1);
+}
+
+// Board presence detection functions
+bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
+{
+    return std::filesystem::exists(ioxPath);
 }
 
 // =============================================================================

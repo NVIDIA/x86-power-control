@@ -16,10 +16,8 @@ namespace power_control
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
 
-PowerControl::PowerControl(boost::asio::io_context& ioContext,
-                           std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& node)
-    : ioContext(ioContext), dbusConn(conn), nodeId(node), appName("power-control"),
+PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
+    : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),
       powerCycleTimer(ioContext),
       gracefulPowerOffTimer(ioContext),
@@ -32,10 +30,27 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
       slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
-    loadConfigValues(ioContext);
+    loadConfigValues(ioContext, configFilePath);
     
+    // Load configuration from JSON file and populate powerSignalMap
+
+    hostDbusName += node;
+    chassisDbusName += node;
+    osDbusName += node;
+    buttonDbusName += node;
+    nmiDbusName += node;
+    rstCauseDbusName += node;
+
+    // Request all the dbus names
+    conn->request_name(hostDbusName.c_str());
+    conn->request_name(chassisDbusName.c_str());
+    conn->request_name(osDbusName.c_str());
+    conn->request_name(buttonDbusName.c_str());
+    conn->request_name(nmiDbusName.c_str());
+    conn->request_name(rstCauseDbusName.c_str());
+
     // Initialize D-Bus interfaces
-    initializeDBusInterfaces(conn, node);
+    initializeDBusInterfaces(conn, nodeId);
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler(PowerState state)
@@ -101,9 +116,6 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
     // Dynamically build powerSignalMap from JSON config file
     
     // Determine config file path
-    // Note: 'node' global variable from power_control.cpp - for now hardcode to "0"
-    // TODO: Pass node as parameter or make it accessible
-    std::string node = "0";  // Default to host 0
     const std::string configFilePath =
         "/usr/share/x86-power-control/power-config-host" + node + ".json";
     

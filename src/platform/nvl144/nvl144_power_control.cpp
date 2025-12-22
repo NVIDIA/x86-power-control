@@ -16,10 +16,8 @@ namespace power_control
 {
 
 // Constructor: Assigns handlers and registers events for NVL144-specific GPIOs
-NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext,
-                                       std::shared_ptr<sdbusplus::asio::connection> conn,
-                                       const std::string& node)
-    : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
+NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
+    : VRPowerControl(ioContext, configFilePath, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
     // VR handlers already assigned and registered by VRPowerControl constructor

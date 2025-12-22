@@ -28,9 +28,8 @@ namespace power_control
 class NVL144PowerControl : public VRPowerControl
 {
 public:
-    NVL144PowerControl(boost::asio::io_context& ioContext,
-                       std::shared_ptr<sdbusplus::asio::connection> conn,
-                       const std::string& node);
+    NVL144PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0");
+
     virtual ~NVL144PowerControl() = default;
 
     /**
