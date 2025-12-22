@@ -9,7 +9,6 @@
 namespace power_control
 {
     extern PowerState powerState;
-    extern Context powerContext;
 }
 
 namespace power_control
@@ -22,19 +21,17 @@ C2PowerControl::C2PowerControl(boost::asio::io_context& ioContext,
     : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
-    // VR handlers already assigned and registered by VRPowerControl constructor
-    // Need to register C2 handlers for C2-specific signals
+    // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
+    // Now add C2-specific handlers to the map
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
-    auto it = powerSignalMap.find("C2PDBPSUPowerOk");
-    it->second->gpioHandler = [this](bool state) { this->c2pdbPSUPowerOkHandler(state); };
 
-    if(!requestGPIOEvents(*it->second))
-    {
-        lg2::error("Failed to register GPIO events for C2 PDB PSU Power OK");
-        throw std::runtime_error("C2: Failed to register PDB PSU Power OK GPIO events");
-    }
+    // Add C2-specific GPIO handler to the map
+    gpioHandlerMap["C2PDBPSUPowerOk"] = [this](bool state) { this->c2pdbPSUPowerOkHandler(state); };
+
+    // Register all GPIO handlers (from base, VR, and C2)
+    registerGPIOHandlers();
     
     // Note: C2PDB_Type no requestGPIOEvents call needed
 }
