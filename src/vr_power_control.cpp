@@ -9,7 +9,6 @@
 namespace power_control
 {
     extern PowerState powerState;
-    extern Context powerContext;
 }
 
 namespace power_control
@@ -33,71 +32,16 @@ VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext, const std::st
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
-    auto it = powerSignalMap.find("Board0RunPowerPG");
-    it->second->gpioHandler = [this](bool state) { this->board0RunPowerPGHandler(state); };
-
-    // Board 0 Run Power Good
-    if (auto it = powerSignalMap.find("Board0RunPowerPG"); it != powerSignalMap.end())
-    {
-        lg2::error("Failed to register GPIO events for Board 0 Run Power Good");
-        throw std::runtime_error("VR: Failed to register Board 0 Run Power Good GPIO events");
-    }
-
-    it = powerSignalMap.find("Board0CpuShutdownOk");
-    it->second->gpioHandler = [this](bool state) { this->board0CpuShutdownOkHandler(state); };
-
-    if(!requestGPIOEvents(*it->second))
-    {
-        lg2::error("Failed to register GPIO events for Board 0 CPU Shutdown OK");
-        throw std::runtime_error("VR: Failed to register Board 0 CPU Shutdown OK GPIO events");
-    }
-
-    it = powerSignalMap.find("CpuResetIndicator");
-    it->second->gpioHandler = [this](bool state) { this->cpuResetIndicatorHandler(state); };
-
-    if(!requestGPIOEvents(*it->second))
-    {
-        lg2::error("Failed to register GPIO events for CpuResetIndicator");
-        throw std::runtime_error("VR: Failed to register CPU Reset Indicator GPIO events");
-    }
-
-    if (auto it = powerSignalMap.find("Board1RunPowerPG"); it != powerSignalMap.end())
-    {
-        it->second->gpioHandler = [this](bool state) { this->board1RunPowerPGHandler(state); };
-
-        if(!requestGPIOEvents(*it->second))
-        {
-            lg2::error("Failed to register GPIO events for Board 1 Run Power Good");
-            throw std::runtime_error("VR: Failed to register Board 1 Run Power Good GPIO events");
-        }
-    }
-
-    if (auto it = powerSignalMap.find("Board1CpuShutdownOk"); it != powerSignalMap.end())
-    {
-        it->second->gpioHandler = [this](bool state) { this->board1CpuShutdownOkHandler(state); };
-
-        if(!requestGPIOEvents(*it->second))
-        {
-            lg2::error("Failed to register GPIO events for Board 1 CPU Shutdown OK");
-            throw std::runtime_error("VR: Failed to register Board 1 CPU Shutdown OK GPIO events");
-        }
-    }
-
+    // Add VR-specific GPIO handlers to the map (will be registered by most derived class)
+    gpioHandlerMap["Board0RunPowerPG"] = [this](bool state) { this->board0RunPowerPGHandler(state); };
+    gpioHandlerMap["Board0CpuShutdownOk"] = [this](bool state) { this->board0CpuShutdownOkHandler(state); };
+    gpioHandlerMap["CpuResetIndicator"] = [this](bool state) { this->cpuResetIndicatorHandler(state); };
     
-    // DO NOT NEED TO MONITOR BOARD 1 RUN POWER GOOD - ONLY MONITOR BOARD 0 RUN POWER GOOD
-    // // Board 1 Run Power Good (optional - depends on presence)
-    // if (auto it = powerSignalMap.find("Board1RunPowerPG"); it != powerSignalMap.end())
-    // {
-    //     if (powerContext.presence.board1)
-    //     {
-    //         it->second->gpioHandler = [this](bool state) { this->board1RunPowerPGHandler(state); };
-    //         if (!requestGPIOEvents(*it->second))
-    //         {
-    //             lg2::error("Failed to register GPIO events for Board1RunPowerPG");
-    //             throw std::runtime_error("VR: Failed to register Board 1 Run Power Good GPIO events");
-    //         }
-    //     }
-    // }
+    // Add Board 1 handlers if Board 1 is present
+    if (boardPresence.board1Present)
+    {
+        gpioHandlerMap["Board1CpuShutdownOk"] = [this](bool state) { this->board1CpuShutdownOkHandler(state); };
+    }
 }
 
 void VRPowerControl::detectBoardPresence()
@@ -293,8 +237,8 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
         case Event::hpmPowerGoodWatchdogTimerExpired:
             lg2::error("HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setGPIOsForHostStateOff(); // TODO: fill function implementation
+            action = PowerAction::NONE;
             setPowerState(PowerState::off);
             break;
             
@@ -326,7 +270,7 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 
             setGPIOsForHostStateOn(); // TODO: fill function implementation
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            action = PowerAction::NONE;
             setPowerState(PowerState::on);
             break;
         case Event::cpuResetWatchdogTimerExpired:
@@ -334,7 +278,7 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 
             setGPIOsForHostStateOff(); // TODO: fill function implementation
 
-            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            action = PowerAction::NONE;
             setPowerState(PowerState::off);
             break;
         default:
@@ -429,7 +373,7 @@ void VRPowerControl::abortGracefulShutdown()
 {
     lg2::error("Graceful shutdown aborted - CPU(s) failed to assert SHDN_OK within timeout. Returning to powered-on state.");
     setGPIOsForHostStateOn();
-    powerContext.action = PowerAction::NONE;
+    action = PowerAction::NONE;
     setPowerState(PowerState::on);
 }
 
@@ -535,11 +479,11 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             
         case Event::cpuShutdownOkWatchdogTimerExpired:
             // Behavior depends on power action (FORCE_OFF vs GRACE_OFF)
-            if (powerContext.action == PowerAction::FORCE_OFF)
+            if (action == PowerAction::FORCE_OFF)
             {
                 handleCPUShutdownOkWatchdogExpiry_ForceOff();
             }
-            else if (powerContext.action == PowerAction::GRACE_OFF)
+            else if (action == PowerAction::GRACE_OFF)
             {
                 handleCPUShutdownOkWatchdogExpiry_GraceOff();
             }
@@ -574,13 +518,13 @@ std::string_view VRPowerControl::getHostState(const PowerState state)
             return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
         case PowerState::waitForPDBMainPowerOff:
-            if (powerContext.action == PowerAction::POWER_ON)
+            if (action == PowerAction::POWER_ON)
             {
                 return "xyz.openbmc_project.State.Host.HostState.TransitioningToRunning";
             }
-            else if (powerContext.action == PowerAction::FORCE_OFF || 
-                     powerContext.action == PowerAction::GRACE_OFF ||
-                     powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            else if (action == PowerAction::FORCE_OFF || 
+                     action == PowerAction::GRACE_OFF ||
+                     action == PowerAction::HOST_INITIATED_SHUTDOWN)
             {
                 return "xyz.openbmc_project.State.Host.HostState.Off";
             }
@@ -611,13 +555,13 @@ std::string_view VRPowerControl::getChassisState(const PowerState state)
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         case PowerState::waitForPDBMainPowerOff:
-            if (powerContext.action == PowerAction::POWER_ON)
+            if (action == PowerAction::POWER_ON)
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
             }
-            else if (powerContext.action == PowerAction::FORCE_OFF || 
-                     powerContext.action == PowerAction::GRACE_OFF ||
-                     powerContext.action == PowerAction::HOST_INITIATED_SHUTDOWN)
+            else if (action == PowerAction::FORCE_OFF || 
+                     action == PowerAction::GRACE_OFF ||
+                     action == PowerAction::HOST_INITIATED_SHUTDOWN)
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
             }
