@@ -57,24 +57,128 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler(PowerState s
     switch (state)
     {
         // No NVL144-specific states (empty switch)
-        
-        // Delegate all states to parent VRPowerControl
+        case PowerState::off:
+            return [this](Event e) { this->handlePowerStateOff(e); };
+        case PowerState::on:
+            return [this](Event e) { this->handlePowerStateOn(e); };
+        case PowerState::waitForPDBMainPowerOk:
+            return [this](Event e) { this->handleWaitForPDBMainPowerOk(e); };
+        case PowerState::waitForPDBMainPowerOff:
+            return [this](Event e) { this->handleWaitForPDBMainPowerOff(e); };
+        case PowerState::waitForCPUResetAssert:
+            return [this](Event e) { this->handleWaitForCPUResetAssert(e); };
+        case PowerState::waitForHPMPowerGoodDeAssert:
+            return [this](Event e) { this->handleWaitForHPMPowerGoodDeAssert(e); };
+        // Add more as Power State Handlers are overrident and implemented by NVL144PowerControl
         default:
             return VRPowerControl::getPowerStateHandler(state);
     }
 }
 
+// ============================================================================
+// HELPER FUNCTIONS for handlePowerStateOn
+// ============================================================================
+
+// Helper function: Handle shutdown requests (force or graceful)
+void NVL144PowerControl::handleShutdownRequest(Event event)
+{
+    // Determine which shutdown signal to use based on event type
+    const char* shutdownSignalName = (event == Event::powerOffRequest) ? 
+        "Board0CpuShutdownForce" : "Board0CpuShutdownRequest";
+    
+    const char* shutdownType = (event == Event::powerOffRequest) ? 
+        "Forceful" : "Graceful";
+    
+    const char* shutdownAction = (event == Event::powerOffRequest) ? 
+        "Shutdown Force" : "Shutdown Request";
+    
+    lg2::info("{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.", 
+              "SHUTDOWN_TYPE", shutdownType);
+
+    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
+    auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
+    auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
+
+    // Check if power is already off
+    if(board0RunPowerPG->second->gpioLine.get_value() == !board0RunPowerPG->second->polarity 
+        && nvl144pdbMainPowerOk->second->gpioLine.get_value() == !nvl144pdbMainPowerOk->second->polarity)
+    {
+        lg2::info("PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
+        setGPIOsForHostStateOff(); // TODO: fill function implementation
+        powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+        setPowerState(PowerState::off);
+    }
+    else
+    {
+        lg2::info("Asserting Board 0 CPU {SHUTDOWN_ACTION}. Starting CPU Shutdown OK Watchdog Timer. Transitioning to PowerState::waitForCPUShutdownOk",
+                  "SHUTDOWN_ACTION", shutdownAction);
+        setGPIOOutput(shutdownSignal->second, !shutdownSignal->second->polarity);
+        startTimer(TimerMap["CpuShutdownOkWatchdogMs"], cpuShutdownOkWatchdogTimer, Event::cpuShutdownOkWatchdogTimerExpired);
+        setPowerState(PowerState::waitForCPUShutdownOk);
+    }
+}
+
+// ============================================================================
+// handlePowerStateOn state handler
+// ============================================================================
+
 void NVL144PowerControl::handlePowerStateOn(Event event)
 {
     // TODO: Move NVL144-specific powerStateOn() implementation here
-    //
-    // Currently NVL144 uses VRPowerControl default implementation which already
-    // implements NVL144 behavior. This override exists for consistency and can be
-    // customized if NVL144 requires platform-specific on-state monitoring.
-    //
-    // For now, call base class:
-    // VRPowerControl::handlePowerStateOn(event);
+    switch (event)
+    {
+        case Event::powerOffRequest:
+        case Event::gracefulPowerOffRequest:
+            handleShutdownRequest(event);
+            break;
+            
+        case Event::powerCycleRequest:
+            break;
+        case Event::resetRequest:
+            break;
+        case Event::powerButtonPressed:
+            break;
+        case Event::gracefulPowerCycleRequest:
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
+
+// ============================================================================
+// HELPER FUNCTIONS for handlePowerStateOff
+// ============================================================================
+
+// Helper function: Handle power on request
+void NVL144PowerControl::handlePowerOnRequest()
+{
+    lg2::info("Power On Request received. Commencing Host Main Power On sequence.");
+
+    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
+    auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
+    auto nvl144pdbMainPowerEnable = powerSignalMap.find("NVL144PDBMainPowerEnable");
+
+    // Check if power is already on
+    if(board0RunPowerPG->second->gpioLine.get_value() == board0RunPowerPG->second->polarity 
+        && nvl144pdbMainPowerOk->second->gpioLine.get_value() == nvl144pdbMainPowerOk->second->polarity)
+    {
+        lg2::info("PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
+        setGPIOsForHostStateOn(); // TODO: fill function implementation
+        powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+        setPowerState(PowerState::on);
+    }
+    else
+    {
+        lg2::info("Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
+        setGPIOOutput(nvl144pdbMainPowerEnable->second, nvl144pdbMainPowerEnable->second->polarity);
+        startTimer(TimerMap["PDBMainPowerOkWatchdogTimer"], pdbMainPowerOkWatchdogTimer, Event::pdbMainPowerOkWatchdogTimerExpired);
+        setPowerState(PowerState::waitForPDBMainPowerOk);
+    }
+}
+
+// ============================================================================
+// handlePowerStateOff state handler
+// ============================================================================
 
 void NVL144PowerControl::handlePowerStateOff(Event event)
 {
@@ -82,33 +186,9 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
     switch (event)
     {
         case Event::powerOnRequest:
-            // Determine if 1P or 2P sequencing being performed
-            // log power on request received
-            // check if Run Power is already enabled (PDB Main Power OK & HPM Board 0 Run Power Good & HPM Board 1 Run Power Good are ALL asserted)
-            //  if not, enable NVL144 PDB Main Power Enable, transition to PowerState::waitForPDBMainPowerOk
-            //  if yes, log that Run Power is already enabled, and transition to PowerState::On
-            auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
-            auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
-            auto nvl144pdbMainPowerEnable = powerSignalMap.find("NVL144PDBMainPowerEnable");
-
-            if(board0RunPowerPG->second->gpioLine.get_value() == board0RunPowerPG->second->polarity 
-                && nvl144pdbMainPowerOk->second->gpioLine.get_value() == nvl144pdbMainPowerOk->second->polarity)
-            {
-                lg2::info("PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
-                setGPIOsForHostStateOn(); // TODO: fill function implementation
-                powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
-                
-                setPowerState(PowerState::on);
-            }
-            else
-            {
-                lg2::info("Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
-
-                setGPIOOutput(nvl144pdbMainPowerEnable->second, nvl144pdbMainPowerEnable->second->polarity);
-                startTimer(TimerMap["PDBMainPowerOkWatchdogTimer"], pdbMainPowerOkWatchdogTimer, Event::pdbMainPowerOkWatchdogTimerExpired);
-                setPowerState(PowerState::waitForPDBMainPowerOk);
-            }
+            handlePowerOnRequest();
             break;
+            
         case Event::powerCycleRequest:
             break;
         case Event::powerButtonPressed:
@@ -121,57 +201,256 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
     }
 }
 
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForPDBMainPowerOk
+// ============================================================================
+
+// Helper function: Assert HPM board power sequence during power-on
+void NVL144PowerControl::assertHPMBoardPowerSequence()
+{
+    auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
+    auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
+
+    // Assert Pre System Reset for Board 0 and Board 1 (if present)
+    setGPIOOutput(board0PreSystemReset->second, board0PreSystemReset->second->polarity);
+    if(boardPresence.board1Present) 
+    {
+        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        setGPIOOutput(board1PreSystemReset->second, board1PreSystemReset->second->polarity);
+    }
+
+    // Assert peripheral power and de-assert BMC SSD Reset
+    setGPIOOutput(e1sPowerEnable->second, e1sPowerEnable->second->polarity);
+    setGPIOOutput(usbPowerEnable->second, usbPowerEnable->second->polarity);
+    setGPIOOutput(bmcSSDReset->second, !bmcSSDReset->second->polarity); // de-assert BMC SSD Reset
+
+    // Assert Run Power Enable for Board 0 and Board 1 (if present)
+    setGPIOOutput(board0RunPowerEnable->second, board0RunPowerEnable->second->polarity);
+    if(boardPresence.board1Present) 
+    {
+        auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
+        setGPIOOutput(board1RunPowerEnable->second, board1RunPowerEnable->second->polarity);
+    }
+}
+
+// Helper function: Transition to HPM Power Good assert wait state
+void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
+{
+    pdbMainPowerOkWatchdogTimer.cancel();
+    
+    lg2::info("NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
+    
+    assertHPMBoardPowerSequence();
+    startTimer(TimerMap["HPMPowerGoodWatchdogTimer"], hpmPowerGoodWatchdogTimer, Event::hpmPowerGoodWatchdogTimerExpired);
+    setPowerState(PowerState::waitForHPMPowerGoodAssert);
+}
+
+// ============================================================================
+// handleWaitForPDBMainPowerOk state handler
+// ============================================================================
+
 void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     switch (event)
     {
         case Event::nvl144pdbMainPowerOkAssert:
-            pdbMainPowerOkWatchdogTimer.cancel(); // Cancel the PDB Main Power OK watchdog timer
-            lg2::info("NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
-
-            auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
-            auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-            auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
-            auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
-            auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
-
-            std::map<std::string, std::shared_ptr<ConfigData>>::iterator board1RunPowerEnable;
-            std::map<std::string, std::shared_ptr<ConfigData>>::iterator board1PreSystemReset;
-
-            if (boardPresence.board1Present){
-                board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
-                board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-            }
-
-            setGPIOOutput(board0PreSystemReset->second, board0PreSystemReset->second->polarity);
-            if(boardPresence.board1Present) 
-            {
-                setGPIOOutput(board1PreSystemReset->second, board1PreSystemReset->second->polarity);
-            }
-
-            
-            setGPIOOutput(e1sPowerEnable->second, e1sPowerEnable->second->polarity);
-            setGPIOOutput(usbPowerEnable->second, usbPowerEnable->second->polarity);
-            setGPIOOutput(bmcSSDReset->second, !bmcSSDReset->second->polarity); // de-assert BMC SDD Reset
-
-            setGPIOOutput(board0RunPowerEnable->second, board0RunPowerEnable->second->polarity);
-            if(boardPresence.board1Present) 
-            {
-                setGPIOOutput(board1RunPowerEnable->second, board1RunPowerEnable->second->polarity);
-            }
-
-            startTimer(TimerMap["HPMPowerGoodWatchdogTimer"], hpmPowerGoodWatchdogTimer, Event::hpmPowerGoodWatchdogTimerExpired);
-            setPowerState(PowerState::waitForHPMPowerGoodAssert);
-           
+            transitionToHPMPowerGoodAssertState();
             break;
+            
         case Event::pdbMainPowerOkWatchdogTimerExpired:
             lg2::error("PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
             powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
             setGPIOsForHostStateOff(); // TODO: fill function implementation
-
             setPowerState(PowerState::off);
             break;
+            
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForPDBMainPowerOff
+// ============================================================================
+
+// Helper function: Complete shutdown and transition to off state
+void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
+{
+    pdbMainPowerOkWatchdogTimer.cancel();
+    
+    if (success)
+    {
+        // Log success based on shutdown type
+        if(powerContext.action == PowerAction::FORCE_OFF)
+        {
+            lg2::info("NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+        }
+        else if(powerContext.action == PowerAction::GRACE_OFF)
+        {
+            lg2::info("NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+        }
+    }
+    else
+    {
+        // Log failure
+        lg2::error("PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+    }
+
+    powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+    setGPIOsForHostStateOff(); // TODO: fill function implementation
+    setPowerState(PowerState::off);
+}
+
+// ============================================================================
+// handleWaitForPDBMainPowerOff state handler
+// ============================================================================
+
+void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
+{
+    switch (event)
+    {
+        case Event::nvl144pdbMainPowerOkDeAssert:
+            completeShutdownAndTransitionToOff(true);
+            break;
+            
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
+            completeShutdownAndTransitionToOff(false);
+            break;
+            
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForCPUResetAssert
+// ============================================================================
+
+// Helper function: De-assert HPM power and peripherals when CPUs are in reset
+void NVL144PowerControl::deassertHPMPowerAndPeripherals()
+{
+    auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
+    auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
+    auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
+
+    // De-assert Board 0 Run Power Enable
+    setGPIOOutput(board0RunPowerEnable->second, !board0RunPowerEnable->second->polarity);
+    
+    // De-assert Board 1 Run Power Enable if present
+    if (boardPresence.board1Present)
+    {
+        auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
+        setGPIOOutput(board1RunPowerEnable->second, !board1RunPowerEnable->second->polarity);
+    }
+
+    // De-assert peripheral power and assert BMC SSD Reset
+    setGPIOOutput(e1sPowerEnable->second, !e1sPowerEnable->second->polarity);
+    setGPIOOutput(usbPowerEnable->second, !usbPowerEnable->second->polarity);
+    setGPIOOutput(bmcSSDReset->second, bmcSSDReset->second->polarity);
+}
+
+// Helper function: Transition to HPM Power Good de-assert wait state
+void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
+{
+    cpuResetWatchdogTimer.cancel();
+    
+    lg2::info("CPU Reset Indicator Asserted. CPUs are in reset. De-asserting Run Power Enable, E1S Power Enable, USB Power Enable, and asserting BMC SSD Reset lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodDeAssert.");
+    
+    deassertHPMPowerAndPeripherals();
+    startTimer(TimerMap["HPMPowerGoodWatchdogTimer"], hpmPowerGoodWatchdogTimer, Event::hpmPowerGoodWatchdogTimerExpired);
+    setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
+}
+
+// ============================================================================
+// handleWaitForCPUResetAssert state handler
+// ============================================================================
+
+void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
+{
+    switch (event)
+    {
+        case Event::cpuResetIndicatorAssert:
+            transitionToHPMPowerGoodDeAssertState();
+            break;
+            
+        case Event::cpuResetWatchdogTimerExpired:
+            lg2::error("CPU Reset Watchdog Timer Expired. CPUs are not in reset. Host Shutdown sequence failed {reccomend checking CPLD  status}. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            setGPIOsForHostStateOff(); // TODO: fill function implementation
+            setPowerState(PowerState::off);
+            break;
+            
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
+}
+
+// ============================================================================
+// HELPER FUNCTIONS for handleWaitForHPMPowerGoodDeAssert
+// ============================================================================
+
+// Helper function: De-assert Pre System Resets and PDB Main Power
+void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
+{
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    auto nvl144pdbMainPowerEnable = powerSignalMap.find("NVL144PDBMainPowerEnable");
+
+    // De-assert Board 0 Pre System Reset
+    setGPIOOutput(board0PreSystemReset->second, !board0PreSystemReset->second->polarity);
+    
+    // De-assert Board 1 Pre System Reset if present
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        setGPIOOutput(board1PreSystemReset->second, !board1PreSystemReset->second->polarity);
+    }
+
+    // De-assert NVL144 PDB Main Power Enable
+    setGPIOOutput(nvl144pdbMainPowerEnable->second, !nvl144pdbMainPowerEnable->second->polarity);
+}
+
+// Helper function: Transition to PDB Main Power Off wait state
+void NVL144PowerControl::transitionToPDBMainPowerOffState()
+{
+    hpmPowerGoodWatchdogTimer.cancel();
+    
+    lg2::info("HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
+    
+    deassertPreSystemResetsAndPDBMainPower();
+    startTimer(TimerMap["PDBMainPowerOkWatchdogTimer"], pdbMainPowerOkWatchdogTimer, Event::pdbMainPowerOkWatchdogTimerExpired);
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+}
+
+// ============================================================================
+// handleWaitForHPMPowerGoodDeAssert state handler
+// ============================================================================
+
+void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
+{
+    switch (event)
+    {
+        case Event::board0RunPowerPGDeAssert:
+            transitionToPDBMainPowerOffState();
+            break;
+            
+        case Event::hpmPowerGoodWatchdogTimerExpired:
+            // TODO: determine if this is the correct fault handling for No Run Power Good De-assertion during shutdown sequences
+            lg2::error("HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: Setting GPIO states to match Host State ON. Setting Host Power State to On.");
+
+            powerContext.action = PowerAction::NONE; // TODO: replace with Aushim's implementation for tracking which power action is in effect
+            setGPIOsForHostStateOn(); // TODO: fill function implementation
+            setPowerState(PowerState::on);
+            break;
+            
         default:
             lg2::info("No action taken.");
             break;

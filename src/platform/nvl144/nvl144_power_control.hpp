@@ -59,23 +59,44 @@ protected:
     // Override only if NVL144 needs platform-specific variations
     
     /**
-     * @brief Handler for PowerState::on (NVL144 Override - optional)
+     * @brief Handler for PowerState::on (NVL144 Override)
      * Override if NVL144 needs platform-specific on-state monitoring.
      */
     void handlePowerStateOn(Event event) override;
 
     /**
-     * @brief Handler for PowerState::off (NVL144 Override - optional)
+     * @brief Handler for PowerState::off (NVL144 Override)
      * Override if NVL144 needs platform-specific off-state monitoring.
      */
     void handlePowerStateOff(Event event) override;
 
     /**
-     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL144 Override - optional)
+     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL144 Override )
      * 
      * Override if NVL144 needs platform-specific waitForPDBMainPowerOk monitoring.
      */
      void handleWaitForPDBMainPowerOk(Event event) override;
+
+    /**
+     * @brief Handler for PowerState::waitForPDBMainPowerOff (NVL144 Override)
+     * 
+     * Override if NVL144 needs platform-specific waitForPDBMainPowerOff monitoring.
+     */
+    void handleWaitForPDBMainPowerOff(Event event) override;
+
+    /**
+     * @brief Handler for PowerState::waitForCPUResetAssert (NVL144 Override)
+     * 
+     * Override if NVL144 needs platform-specific waitForCPUResetAssert monitoring.
+     */
+    void handleWaitForCPUResetAssert (Event event) override;
+
+    /**
+     * @brief Handler for PowerState::waitForHPMPowerGoodDeAssert (NVL144 Override)
+     * 
+     * Override if NVL144 needs platform-specific waitForHPMPowerGoodDeAssert monitoring.
+     */
+    void handleWaitForHPMPowerGoodDeAssert(Event event) override;
 
     /**
      * @brief Set all control GPIOs to match the host state "on" (NVL144 override)
@@ -93,6 +114,79 @@ protected:
      */
     void setGPIOsForHostStateOff() override;
 
+    /**
+     * @brief Handle shutdown request (forceful or graceful) from PowerState::on
+     * 
+     * Determines whether to assert CPU Shutdown Force or CPU Shutdown Request based
+     * on event type, checks if power is already off, and initiates shutdown sequence.
+     */
+    void handleShutdownRequest(Event event);
+
+    /**
+     * @brief Handle power on request from PowerState::off
+     * 
+     * Checks if power is already on, and initiates power-on sequence by asserting
+     * NVL144 PDB Main Power Enable if necessary.
+     */
+    void handlePowerOnRequest();
+
+    /**
+     * @brief Assert HPM board power sequence during power-on
+     * 
+     * Asserts Board 0/1 Pre System Reset, E1S/USB Power Enable, de-asserts BMC SSD Reset,
+     * and asserts Board 0/1 Run Power Enable.
+     */
+    void assertHPMBoardPowerSequence();
+
+    /**
+     * @brief Transition to HPM Power Good assert wait state
+     * 
+     * Cancels PDB power watchdog, logs transition, asserts HPM board power sequence,
+     * starts HPM power good watchdog, and transitions to waitForHPMPowerGoodAssert.
+     */
+    void transitionToHPMPowerGoodAssertState();
+
+    /**
+     * @brief Complete shutdown and transition to off state
+     * 
+     * Cancels PDB power watchdog, logs success/failure based on event, sets GPIOs
+     * for host state off, and transitions to PowerState::off.
+     * 
+     * @param success True if shutdown completed successfully, false if watchdog expired
+     */
+    void completeShutdownAndTransitionToOff(bool success);
+
+    /**
+     * @brief De-assert HPM power and peripheral power during shutdown
+     * 
+     * De-asserts Board 0/1 Run Power Enable, E1S Power Enable, USB Power Enable
+     * and asserts BMC SSD Reset when CPUs are in reset during shutdown sequence.
+     */
+    void deassertHPMPowerAndPeripherals();
+
+    /**
+     * @brief Transition to HPM Power Good de-assert wait state
+     * 
+     * Cancels CPU reset watchdog, logs transition, de-asserts HPM power/peripherals,
+     * starts HPM power good watchdog, and transitions to waitForHPMPowerGoodDeAssert.
+     */
+    void transitionToHPMPowerGoodDeAssertState();
+
+    /**
+     * @brief De-assert Pre System Resets and PDB Main Power during shutdown
+     * 
+     * De-asserts Board 0/1 Pre System Reset and NVL144 PDB Main Power Enable
+     * when HPM power good de-asserts during shutdown sequence.
+     */
+    void deassertPreSystemResetsAndPDBMainPower();
+
+    /**
+     * @brief Transition to PDB Main Power Off wait state
+     * 
+     * Cancels HPM power good watchdog, logs transition, de-asserts Pre System Resets
+     * and PDB main power, starts PDB power watchdog, and transitions to waitForPDBMainPowerOff.
+     */
+    void transitionToPDBMainPowerOffState();
 
 private:
     /**
