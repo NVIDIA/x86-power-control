@@ -9,7 +9,6 @@
 namespace power_control
 {
     extern PowerState powerState;
-    extern Context powerContext;
 }
 
 namespace power_control
@@ -22,10 +21,14 @@ E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext,
     : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
-    // E5010 has no platform-specific GPIOs (no PDB), so nothing to register here
+    // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
+    // E5010 has no platform-specific GPIOs (no PDB), so no handlers to add
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
+
+    // Register all GPIO handlers (from base and VR only)
+    registerGPIOHandlers();
 }
 
 std::function<void(Event)> E5010PowerControl::getPowerStateHandler(PowerState state)
