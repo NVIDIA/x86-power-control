@@ -86,6 +86,22 @@ void setRestartCauseProperty(const std::string& cause);
 void setRestartCause();
 
 /**
+ * @brief Input event configuration for gpio_keys_polled driver signals
+ * 
+ * This structure contains the parameters needed for monitoring Linux input events
+ * via the gpio_keys_polled driver, as an alternative to direct GPIO monitoring.
+ */
+struct InputEventConfig
+{
+    std::string deviceName;  // Input device name (e.g., "gpio_keys_gb300")
+    std::string signalName;  // Signal name for logging (e.g., "GB300_PDB_MAIN_PWR_OK_Mon")
+    uint16_t keyCode;        // Key code to filter events by (e.g., 0x102 for BTN_2)
+    int* stateTracker;       // Pointer to track the cached state value
+    
+    InputEventConfig() : keyCode(0), stateTracker(nullptr) {}
+};
+
+/**
  * @brief Upstream Configuration data for a single GPIO or D-Bus signal
  * 
  * This structure consolidates all resources needed for a signal:
@@ -108,9 +124,13 @@ struct ConfigData
     boost::asio::posix::stream_descriptor eventDescriptor; // Event descriptor for async monitoring
     std::function<void(bool)> gpioHandler;              // Handler function for GPIO events (initially null, populated after loadConfigValues)
     
+    // Input event monitoring (for gpio_keys_polled driver)
+    bool useInputEvents;                                // Use input event monitoring instead of direct GPIO
+    std::optional<InputEventConfig> inputEventConfig;   // Configuration for input event monitoring
+    
     // Constructor to initialize event descriptor with io_context
     ConfigData(boost::asio::io_context& io) 
-        : eventDescriptor(io), gpioHandler(nullptr) {}
+        : eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false) {}
 };
 
 
@@ -714,6 +734,55 @@ protected:
      * Sends a Redfish event log entry for reset button press.
      */
     void resetButtonPressLog();
+
+    // INPUT EVENT HANDLING (for gpio_keys_polled driver)
+    
+    /**
+     * @brief Find the correct input event device by name
+     * 
+     * Searches through /dev/input/eventX devices to find the one matching the given name.
+     * 
+     * @param deviceName The name of the input device to find
+     * @return The path to the event device (e.g., "/dev/input/event0"), or empty string if not found
+     */
+    std::string findInputEventDevice(const std::string& deviceName);
+
+    /**
+     * @brief Monitor Linux input events
+     * 
+     * Asynchronously waits for and processes Linux input events from a stream descriptor.
+     * This is used for handling GPIO events via the gpio_keys_polled driver.
+     * 
+     * @param name The name of the signal for logging purposes
+     * @param eventHandler The callback function to handle the event (receives bool state)
+     * @param keyCode The key code to filter events by
+     * @param event The stream descriptor for the input device
+     * @param stateTracker Optional pointer to track the current state
+     */
+    void waitForInputEvent(
+        const std::string& name, const std::function<void(bool)>& eventHandler,
+        uint16_t keyCode, boost::asio::posix::stream_descriptor& event,
+        int* stateTracker = nullptr);
+
+    /**
+     * @brief Request monitoring of Linux input events
+     * 
+     * Sets up monitoring for Linux input events from a gpio_keys_polled driver device.
+     * Opens the event device and starts asynchronous event monitoring.
+     * 
+     * @param deviceName The name of the input device to monitor
+     * @param signalName The name of the signal for logging purposes
+     * @param keyCode The key code to filter events by
+     * @param handler The callback function to handle events (receives bool state)
+     * @param eventDescriptor The stream descriptor to use for the input device
+     * @param stateTracker Optional pointer to track the current state
+     * @return true if setup was successful, false otherwise
+     */
+    bool requestInputEvents(
+        const std::string& deviceName, const std::string& signalName,
+        uint16_t keyCode, const std::function<void(bool)>& handler,
+        boost::asio::posix::stream_descriptor& eventDescriptor,
+        int* stateTracker = nullptr);
 
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior

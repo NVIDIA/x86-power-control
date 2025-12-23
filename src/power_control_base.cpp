@@ -5,6 +5,11 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <ctime>
+#include <linux/input.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
+#include <cerrno>
 
 
 namespace power_control
@@ -1471,17 +1476,51 @@ void PowerControl::registerGPIOHandlers()
         // Assign the handler to the ConfigData object
         it->second->gpioHandler = handler;
         
-        // Request GPIO events for this signal
-        if (!requestGPIOEvents(*it->second))
+        // Check if this signal uses input event monitoring (gpio_keys_polled driver)
+        if (it->second->useInputEvents)
         {
-            lg2::error("Failed to register GPIO events for '{SIGNAL}'", 
-                      "SIGNAL", signalName);
-            throw std::runtime_error("Failed to register GPIO events for '" + 
-                                    signalName + "'");
+            // Validate input event configuration
+            if (!it->second->inputEventConfig.has_value())
+            {
+                lg2::error("Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
+                          "SIGNAL", signalName);
+                throw std::runtime_error("Signal '" + signalName + 
+                                        "' missing inputEventConfig");
+            }
+            
+            auto& inputConfig = it->second->inputEventConfig.value();
+            
+            // Request input events for this signal
+            if (!requestInputEvents(inputConfig.deviceName,
+                                   inputConfig.signalName,
+                                   inputConfig.keyCode,
+                                   handler,
+                                   it->second->eventDescriptor,
+                                   inputConfig.stateTracker))
+            {
+                lg2::error("Failed to register input events for '{SIGNAL}'", 
+                          "SIGNAL", signalName);
+                throw std::runtime_error("Failed to register input events for '" + 
+                                        signalName + "'");
+            }
+            
+            lg2::info("Successfully registered input event handler for '{SIGNAL}'", 
+                     "SIGNAL", signalName);
         }
-        
-        lg2::info("Successfully registered GPIO handler for '{SIGNAL}'", 
-                 "SIGNAL", signalName);
+        else
+        {
+            // Request GPIO events for this signal (traditional method)
+            if (!requestGPIOEvents(*it->second))
+            {
+                lg2::error("Failed to register GPIO events for '{SIGNAL}'", 
+                          "SIGNAL", signalName);
+                throw std::runtime_error("Failed to register GPIO events for '" + 
+                                        signalName + "'");
+            }
+            
+            lg2::info("Successfully registered GPIO handler for '{SIGNAL}'", 
+                     "SIGNAL", signalName);
+        }
     }
     
     lg2::info("All GPIO handlers registered successfully");
@@ -1688,6 +1727,124 @@ void setRestartCause()
     }
 
     setRestartCauseProperty(restartCause);
+}
+
+// INPUT EVENT HANDLING (for gpio_keys_polled driver)
+
+std::string PowerControl::findInputEventDevice(const std::string& deviceName)
+{
+    // Search through /dev/input/eventX devices to find the one matching our name
+    for (int i = 0; i < 32; i++)
+    {
+        std::string eventPath = "/dev/input/event" + std::to_string(i);
+        std::string namePath = "/sys/class/input/event" + std::to_string(i) + "/device/name";
+        
+        std::ifstream nameFile(namePath);
+        if (nameFile.is_open())
+        {
+            std::string name;
+            std::getline(nameFile, name);
+            if (name == deviceName)
+            {
+                lg2::info("Found input device {DEVICE_NAME} at {EVENT_PATH}",
+                         "DEVICE_NAME", deviceName, "EVENT_PATH", eventPath);
+                return eventPath;
+            }
+        }
+    }
+    return "";
+}
+
+void PowerControl::waitForInputEvent(
+    const std::string& name, const std::function<void(bool)>& eventHandler,
+    uint16_t keyCode, boost::asio::posix::stream_descriptor& event,
+    int* stateTracker)
+{
+    event.async_wait(
+        boost::asio::posix::stream_descriptor::wait_read,
+        [this, name, eventHandler, keyCode, &event, stateTracker](const boost::system::error_code ec) {
+            if (ec)
+            {
+                lg2::error("{INPUT_NAME} fd handler error: {ERROR_MSG}",
+                           "INPUT_NAME", name, "ERROR_MSG", ec.message());
+                return;
+            }
+            
+            struct input_event inputEvent;
+            ssize_t bytesRead = read(event.native_handle(), &inputEvent, sizeof(inputEvent));
+            
+            if (bytesRead != sizeof(inputEvent))
+            {
+                if (bytesRead < 0)
+                {
+                    lg2::error("{INPUT_NAME} read error: {ERROR}",
+                               "INPUT_NAME", name, "ERROR", strerror(errno));
+                }
+                else
+                {
+                    lg2::error("{INPUT_NAME} read error: incomplete event (got {BYTES} bytes)",
+                               "INPUT_NAME", name, "BYTES", bytesRead);
+                }
+                waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
+                return;
+            }
+            
+            // We only care about EV_KEY events with our specific key code
+            if (inputEvent.type == EV_KEY && inputEvent.code == keyCode)
+            {
+                lg2::info("{INPUT_NAME} event: code={KEY_CODE:#x} value={VALUE}",
+                         "INPUT_NAME", name, "KEY_CODE", inputEvent.code, 
+                         "VALUE", inputEvent.value);
+                
+                // Update state tracker if provided
+                if (stateTracker != nullptr)
+                {
+                    *stateTracker = inputEvent.value;
+                }
+                
+                // Value 1 = pressed (high), 0 = released (low)
+                eventHandler(inputEvent.value == 1);
+            }
+            
+            // Continue waiting for next event
+            waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
+        });
+}
+
+bool PowerControl::requestInputEvents(
+    const std::string& deviceName, const std::string& signalName,
+    uint16_t keyCode, const std::function<void(bool)>& handler,
+    boost::asio::posix::stream_descriptor& eventDescriptor,
+    int* stateTracker)
+{
+    // Find the input device
+    std::string eventPath = findInputEventDevice(deviceName);
+    if (eventPath.empty())
+    {
+        lg2::error("Failed to find input device {DEVICE_NAME}",
+                   "DEVICE_NAME", deviceName);
+        return false;
+    }
+    
+    // Open the event device
+    int fd = open(eventPath.c_str(), O_RDONLY | O_NONBLOCK);
+    if (fd < 0)
+    {
+        lg2::error("Failed to open {EVENT_PATH}: {ERROR}",
+                   "EVENT_PATH", eventPath, "ERROR", strerror(errno));
+        return false;
+    }
+    
+    // Assign to the stream descriptor
+    eventDescriptor.assign(fd);
+    
+    // Start waiting for events
+    waitForInputEvent(signalName, handler, keyCode, eventDescriptor, stateTracker);
+    
+    lg2::info("Successfully set up input event monitoring for {SIGNAL_NAME} on {EVENT_PATH} with key code {KEY_CODE:#x}",
+             "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE", keyCode);
+    
+    return true;
 }
 
 } // namespace power_control
