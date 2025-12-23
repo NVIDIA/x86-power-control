@@ -204,86 +204,64 @@ static constexpr const char* powerACBootIface =
     "xyz.openbmc_project.Common.ACBoot";
 #endif // USE_ACBOOT
 
+namespace match_rules = sdbusplus::bus::match::rules;
 
-static int setMaskedGPIOOutputForMs(gpiod::line& maskedGPIOLine,
-                                    const std::string& name, const int value,
-                                    const int durationMs)
+static int powerRestoreConfigHandler(sd_bus_message* m, void* context,
+                                     sd_bus_error*)
 {
-    // Set the masked GPIO line to the specified value
-    maskedGPIOLine.set_value(value);
-    lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME", name,
-              "GPIO_VALUE", value);
-    gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
-    gpioAssertTimer.async_wait(
-        [maskedGPIOLine, value, name](const boost::system::error_code ec) {
-            // Set the masked GPIO line back to the opposite value
-            maskedGPIOLine.set_value(!value);
-            lg2::info("{GPIO_NAME} released", "GPIO_NAME", name);
-            if (ec)
+    if (context == nullptr || m == nullptr)
+    {
+        throw std::runtime_error("Invalid match");
+    }
+    sdbusplus::message_t message(m);
+    PowerRestoreController* powerRestore =
+        static_cast<PowerRestoreController*>(context);
+
+    if (std::string(message.get_member()) == "InterfacesAdded")
+    {
+        sdbusplus::message::object_path path;
+        boost::container::flat_map<std::string, dbusPropertiesList> data;
+
+        message.read(path, data);
+
+        for (auto& [iface, properties] : data)
+        {
+            if ((iface == powerRestorePolicyIface)
+#ifdef USE_ACBOOT
+                || (iface == powerACBootIface)
+#endif // USE_ACBOOT
+            )
             {
-                // operation_aborted is expected if timer is canceled before
-                // completion.
-                if (ec != boost::asio::error::operation_aborted)
-                {
-                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                               "GPIO_NAME", name, "ERROR_MSG", ec.message());
-                }
+                powerRestore->setProperties(properties);
             }
-        });
-    return 0;
+        }
+    }
+    else if (std::string(message.get_member()) == "PropertiesChanged")
+    {
+        std::string interfaceName;
+        dbusPropertiesList propertiesChanged;
+
+        message.read(interfaceName, propertiesChanged);
+
+        powerRestore->setProperties(propertiesChanged);
+    }
+    return 1;
 }
 
-static int setGPIOOutputForMs(const ConfigData& config, const int value,
-                              const int durationMs)
-{
-    // If the requested GPIO is masked, use the mask line to set the output
-    if (powerButtonMask && config.lineName == powerOutConfig.lineName)
-    {
-        return setMaskedGPIOOutputForMs(powerButtonMask, config.lineName, value,
-                                        durationMs);
-    }
-    if (resetButtonMask && config.lineName == resetOutConfig.lineName)
-    {
-        return setMaskedGPIOOutputForMs(resetButtonMask, config.lineName, value,
-                                        durationMs);
-    }
-
-    // No mask set, so request and set the GPIO normally
-    gpiod::line gpioLine;
-    if (!setGPIOOutput(config.lineName, value, gpioLine))
-    {
-        return -1;
-    }
-    const std::string name = config.lineName;
-
-    gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
-    gpioAssertTimer.async_wait(
-        [gpioLine, value, name](const boost::system::error_code ec) {
-            // Set the GPIO line back to the opposite value
-            gpioLine.set_value(!value);
-            lg2::info("{GPIO_NAME} released", "GPIO_NAME", name);
-            if (ec)
-            {
-                // operation_aborted is expected if timer is canceled before
-                // completion.
-                if (ec != boost::asio::error::operation_aborted)
-                {
-                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                               "GPIO_NAME", name, "ERROR_MSG", ec.message());
-                }
-            }
-        });
-    return 0;
-}
-
-static int assertGPIOForMs(const ConfigData& config, const int durationMs)
-{
-    return setGPIOOutputForMs(config, config.polarity, durationMs);
-}
+// GPIO timing functions (setMaskedGPIOOutputForMs, setGPIOOutputForMs, assertGPIOForMs)
+// have been moved to PowerControl base class
 
 static void powerOn()
 {
-    assertGPIOForMs(powerOutConfig, TimerMap["PowerPulseMs"]);
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+    }
+    else
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+    }
 }
 #ifdef CHASSIS_SYSTEM_RESET
 static int slotPowerOn()
@@ -359,12 +337,27 @@ static void slotPowerCycle()
 #endif
 static void gracefulPowerOff()
 {
-    assertGPIOForMs(powerOutConfig, TimerMap["PowerPulseMs"]);
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+    }
+    else
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+    }
 }
 
 static void forcePowerOff()
 {
-    if (assertGPIOForMs(powerOutConfig, TimerMap["ForceOffPulseMs"]) < 0)
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt == powerSignalMap.end())
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+        return;
+    }
+    
+    if (assertGPIOForMs(powerOutIt->second, TimerMap["ForceOffPulseMs"]) < 0)
     {
         return;
     }
@@ -389,7 +382,15 @@ static void forcePowerOff()
 
 static void reset()
 {
-    assertGPIOForMs(resetOutConfig, TimerMap["ResetPulseMs"]);
+    auto resetOutIt = powerSignalMap.find("ResetOut");
+    if (resetOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(resetOutIt->second, TimerMap["ResetPulseMs"]);
+    }
+    else
+    {
+        lg2::error("ResetOut not found in powerSignalMap");
+    }
 }
 
 

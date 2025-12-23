@@ -832,92 +832,92 @@ void PowerControl::initializeHostInterface()
             if (requested == "xyz.openbmc_project.State.Host.Transition.Off")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     // Use member function sendPowerControlEvent
                     sendPowerControlEvent(Event::gracefulPowerOffRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Off requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
 
-                // sendPowerControlEvent(Event::gracefulPowerOffRequest);
-                // addRestartCause(RestartCause::command);
+                sendPowerControlEvent(Event::gracefulPowerOffRequest);
+                addRestartCause(RestartCause::command);
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Host.Transition.On")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     sendPowerControlEvent(Event::powerOnRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to On requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Host.Transition.Reboot")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     sendPowerControlEvent(Event::powerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Reboot requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else if (
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.GracefulWarmReboot")
             {
-                // TODO: Check reset button mask when implemented
-                // if (!resetButtonMask)
-                // {
+                TODO: Check reset button mask when implemented
+                if (!resetButtonMask)
+                {
                     sendPowerControlEvent(Event::gracefulPowerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to GracefulWarmReboot requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Reset Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Reset Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else if (
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.ForceWarmReboot")
             {
-                // TODO: Check reset button mask when implemented
-                // if (!resetButtonMask)
-                // {
+                TODO: Check reset button mask when implemented
+                if (!resetButtonMask)
+                {
                     sendPowerControlEvent(Event::resetRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to ForceWarmReboot requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Reset Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Reset Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else
             {
@@ -957,52 +957,52 @@ void PowerControl::initializeChassisInterface()
             if (requested == "xyz.openbmc_project.State.Chassis.Transition.Off")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     sendPowerControlEvent(Event::powerOffRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to Off requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Chassis.Transition.On")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     sendPowerControlEvent(Event::powerOnRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to On requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Chassis.Transition.PowerCycle")
             {
                 // TODO: Check power button mask when implemented
-                // if (!powerButtonMask)
-                // {
+                if (!powerButtonMask)
+                {
                     sendPowerControlEvent(Event::powerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to PowerCycle requested");
-                // }
-                // else
-                // {
-                //     lg2::info("Power Button Masked.");
-                //     throw std::invalid_argument("Transition Request Masked");
-                //     return 0;
-                // }
+                }
+                else
+                {
+                    lg2::info("Power Button Masked.");
+                    throw std::invalid_argument("Transition Request Masked");
+                    return 0;
+                }
             }
             else
             {
@@ -1043,7 +1043,7 @@ void PowerControl::initializeChassisSystemInterface()
             {
                 // TODO: systemReset() needs to be moved or made virtual
                 // systemReset();
-                // addRestartCause(RestartCause::command);
+                addRestartCause(RestartCause::command);
                 lg2::info("Chassis system PowerCycle requested");
             }
             else
@@ -1442,6 +1442,119 @@ bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int v
     lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME", config->lineName,
               "GPIO_VALUE", value);
     return true;
+}
+
+// GPIO Timing Functions
+
+int PowerControl::setMaskedGPIOOutputForMs(std::shared_ptr<ConfigData> config, 
+                                           const int value, const int durationMs)
+{
+    if (!config)
+    {
+        lg2::error("setMaskedGPIOOutputForMs called with null ConfigData pointer");
+        return -1;
+    }
+    
+    if (!config->gpioLine)
+    {
+        lg2::error("setMaskedGPIOOutputForMs: GPIO line for {GPIO_NAME} is not initialized",
+                  "GPIO_NAME", config->lineName);
+        return -1;
+    }
+    
+    // Set the masked GPIO line to the specified value
+    config->gpioLine.set_value(value);
+    lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME", config->lineName,
+              "GPIO_VALUE", value);
+    
+    gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
+    gpioAssertTimer.async_wait(
+        [config, value](const boost::system::error_code ec) mutable {
+            // Set the masked GPIO line back to the opposite value
+            if (config && config->gpioLine)
+            {
+                config->gpioLine.set_value(!value);
+                lg2::info("{GPIO_NAME} released", "GPIO_NAME", config->lineName);
+            }
+            if (ec)
+            {
+                // operation_aborted is expected if timer is canceled before completion.
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
+                              "GPIO_NAME", config->lineName, "ERROR_MSG", ec.message());
+                }
+            }
+        });
+    return 0;
+}
+
+int PowerControl::setGPIOOutputForMs(std::shared_ptr<ConfigData> config, 
+                                     const int value, const int durationMs)
+{
+    if (!config)
+    {
+        lg2::error("setGPIOOutputForMs called with null ConfigData pointer");
+        return -1;
+    }
+    
+    // Check if the requested GPIO is masked
+    // If PowerOut is being controlled and powerButtonMask is set, use masked version
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerButtonMask && powerOutIt != powerSignalMap.end() && 
+        config->lineName == powerOutIt->second->lineName)
+    {
+        return setMaskedGPIOOutputForMs(powerOutIt->second, value, durationMs);
+    }
+    
+    // If ResetOut is being controlled and resetButtonMask is set, use masked version
+    auto resetOutIt = powerSignalMap.find("ResetOut");
+    if (resetButtonMask && resetOutIt != powerSignalMap.end() && 
+        config->lineName == resetOutIt->second->lineName)
+    {
+        return setMaskedGPIOOutputForMs(resetOutIt->second, value, durationMs);
+    }
+    
+    // No mask set, so request and set the GPIO normally
+    if (!setGPIOOutput(config, value))
+    {
+        return -1;
+    }
+    
+    const std::string name = config->lineName;
+    
+    gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
+    gpioAssertTimer.async_wait(
+        [config, value, name](const boost::system::error_code ec) mutable {
+            // Set the GPIO line back to the opposite value
+            if (config && config->gpioLine)
+            {
+                config->gpioLine.set_value(!value);
+                lg2::info("{GPIO_NAME} released", "GPIO_NAME", name);
+            }
+            if (ec)
+            {
+                // operation_aborted is expected if timer is canceled before completion.
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
+                              "GPIO_NAME", name, "ERROR_MSG", ec.message());
+                }
+            }
+        });
+    return 0;
+}
+
+int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config, 
+                                  const int durationMs)
+{
+    if (!config)
+    {
+        lg2::error("assertGPIOForMs called with null ConfigData pointer");
+        return -1;
+    }
+    
+    return setGPIOOutputForMs(config, config->polarity, durationMs);
 }
 
 void PowerControl::startTimer(const std::string& timerName,

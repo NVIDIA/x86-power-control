@@ -406,6 +406,47 @@ public:
     bool setGPIOOutput(std::shared_ptr<ConfigData> config, const int value);
 
     /**
+     * @brief Set a masked GPIO output for a specified duration
+     * 
+     * Sets a masked GPIO line (powerButtonMask or resetButtonMask) to a value
+     * for a specified duration, then automatically releases it back to the opposite value.
+     * Uses the ConfigData to access the GPIO line and name.
+     * 
+     * @param config Shared pointer to ConfigData containing the masked GPIO line
+     * @param value The value to set
+     * @param durationMs Duration in milliseconds to hold the value
+     * @return 0 on success, -1 on failure
+     */
+    int setMaskedGPIOOutputForMs(std::shared_ptr<ConfigData> config, const int value,
+                                 const int durationMs);
+
+    /**
+     * @brief Set a GPIO output for a specified duration
+     * 
+     * Sets a GPIO to a value for a specified duration, then automatically releases
+     * it back to the opposite value. Respects button masking for PowerOut and ResetOut.
+     * 
+     * @param config Shared pointer to ConfigData containing GPIO information
+     * @param value The value to set
+     * @param durationMs Duration in milliseconds to hold the value
+     * @return 0 on success, -1 on failure
+     */
+    int setGPIOOutputForMs(std::shared_ptr<ConfigData> config, const int value,
+                          const int durationMs);
+
+    /**
+     * @brief Assert a GPIO according to its polarity for a specified duration
+     * 
+     * Helper function that asserts a GPIO to its configured active polarity
+     * for the specified duration.
+     * 
+     * @param config Shared pointer to ConfigData containing GPIO information and polarity
+     * @param durationMs Duration in milliseconds to hold the assertion
+     * @return 0 on success, -1 on failure
+     */
+    int assertGPIOForMs(std::shared_ptr<ConfigData> config, const int durationMs);
+
+    /**
      * @brief Start a timer with timeout from TimerMap
      * 
      * Looks up the timeout value from TimerMap and starts the timer.
