@@ -78,7 +78,7 @@ public:
      * 
      * @return D-Bus host state string
      */
-    std::string_view getHostState() override;
+    std::string_view getHostState() const override;
 
     /**
      * @brief Get the chassis state dbus property value for current power state (VR override)
@@ -88,7 +88,7 @@ public:
      * 
      * @return D-Bus chassis state string
      */
-    std::string_view getChassisState() override;
+    std::string_view getChassisState() const override;
 
     /**
      * @brief Get a human-readable name for a power state (VR override)

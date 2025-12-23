@@ -394,7 +394,7 @@ static void reset()
 
 
 // Unique POH TImer to base class
-static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> conn, PowerControl& powerControl)
+static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> conn, const PowerControl& powerControl)
 {
     lg2::info("POH timer started");
     // Set the time-out as 1 hour, to align with POH command in ipmid
@@ -420,7 +420,7 @@ static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> co
         }
 
         conn->async_method_call(
-            [](boost::system::error_code ec,
+            [conn](boost::system::error_code ec,
                const std::variant<uint32_t>& pohCounterProperty) {
                 if (ec)
                 {
@@ -457,7 +457,7 @@ static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> co
     });
 }
 
-static void currentHostStateMonitor(std::shared_ptr<sdbusplus::asio::connection> conn, PowerControl& powerControl)
+static void currentHostStateMonitor(std::shared_ptr<sdbusplus::asio::connection> conn, const PowerControl& powerControl)
 {
     if (powerControl.getHostState() ==
         "xyz.openbmc_project.State.Host.HostState.Running")
@@ -575,10 +575,10 @@ void systemReset()
 }
 #endif
 
-static void nmiSetEnableProperty(bool value)
+static void nmiSetEnableProperty(std::shared_ptr<sdbusplus::asio::connection> conn, bool value)
 {
     conn->async_method_call(
-        [](boost::system::error_code ec) {
+        [conn](boost::system::error_code ec) {
             if (ec)
             {
                 lg2::error("failed to set NMI source");
@@ -591,7 +591,7 @@ static void nmiSetEnableProperty(bool value)
         std::variant<bool>{value});
 }
 
-static void nmiReset(void)
+static void nmiReset()
 {
     const static constexpr int nmiOutPulseTimeMs = 200;
 
@@ -984,7 +984,7 @@ int main(int argc, char* argv[])
     PersistentState appState;
 
     static std::string node = "0";
-    static const std::string appName = "power-control";\
+    static const std::string appName = "power-control";
 
     if (argc > 1)
     {

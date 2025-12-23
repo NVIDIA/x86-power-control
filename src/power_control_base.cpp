@@ -621,7 +621,7 @@ void PowerControl::handleCheckForWarmReset(Event event)
     // - If power off detected → transition to transitionToOff
 }
 
-std::string_view PowerControl::getHostState()
+std::string_view PowerControl::getHostState() const
 {
     // Upstream implementation - maps PowerState to D-Bus host state
     switch (powerState)
@@ -646,7 +646,7 @@ std::string_view PowerControl::getHostState()
     }
 }
 
-std::string_view PowerControl::getChassisState()
+std::string_view PowerControl::getChassisState() const
 {
     // Upstream implementation - maps PowerState to D-Bus chassis state
     switch (powerState)

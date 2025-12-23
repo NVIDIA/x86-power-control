@@ -510,7 +510,7 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
     }
 }
 
-std::string_view VRPowerControl::getHostState()
+std::string_view VRPowerControl::getHostState() const
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus host state
     switch (powerState)
@@ -547,7 +547,7 @@ std::string_view VRPowerControl::getHostState()
     return PowerControl::getHostState();
 }
 
-std::string_view VRPowerControl::getChassisState()
+std::string_view VRPowerControl::getChassisState() const
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus chassis state
     switch (powerState)

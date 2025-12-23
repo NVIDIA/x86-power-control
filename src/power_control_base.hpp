@@ -343,7 +343,7 @@ public:
      * @param state The power state
      * @return D-Bus host state string
      */
-    virtual std::string_view getHostState();
+    virtual std::string_view getHostState() const;
 
     /**
      * @brief Get the chassis state string for current power state (virtual)
@@ -353,7 +353,7 @@ public:
      * 
      * @return D-Bus chassis state string
      */
-    virtual std::string_view getChassisState();
+    virtual std::string_view getChassisState() const;
 
     /**
      * @brief Get the current power state
