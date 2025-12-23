@@ -174,48 +174,6 @@ static constexpr const char* powerACBootIface =
 
 namespace match_rules = sdbusplus::bus::match::rules;
 
-static int powerRestoreConfigHandler(sd_bus_message* m, void* context,
-                                     sd_bus_error*)
-{
-    if (context == nullptr || m == nullptr)
-    {
-        throw std::runtime_error("Invalid match");
-    }
-    sdbusplus::message_t message(m);
-    PowerRestoreController* powerRestore =
-        static_cast<PowerRestoreController*>(context);
-
-    if (std::string(message.get_member()) == "InterfacesAdded")
-    {
-        sdbusplus::message::object_path path;
-        boost::container::flat_map<std::string, dbusPropertiesList> data;
-
-        message.read(path, data);
-
-        for (auto& [iface, properties] : data)
-        {
-            if ((iface == powerRestorePolicyIface)
-#ifdef USE_ACBOOT
-                || (iface == powerACBootIface)
-#endif // USE_ACBOOT
-            )
-            {
-                powerRestore->setProperties(properties);
-            }
-        }
-    }
-    else if (std::string(message.get_member()) == "PropertiesChanged")
-    {
-        std::string interfaceName;
-        dbusPropertiesList propertiesChanged;
-
-        message.read(interfaceName, propertiesChanged);
-
-        powerRestore->setProperties(propertiesChanged);
-    }
-    return 1;
-}
-
 // GPIO timing functions (setMaskedGPIOOutputForMs, setGPIOOutputForMs, assertGPIOForMs)
 // have been moved to PowerControl base class
 
