@@ -110,8 +110,6 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
               stateHandler, "EVENT", getEventName(event));
 }
 
-<<<<<<< HEAD
-=======
 // Initialize static members
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
 std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::bootProgressIface = nullptr;
@@ -138,7 +136,6 @@ bool PowerControl::nmiEnabled = false;
 bool PowerControl::nmiWhenPoweredOff = false;
 bool PowerControl::sioEnabled = false;
 
->>>>>>> 754235c (PowerControl: Fix Compilation Issues)
 PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
     : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),

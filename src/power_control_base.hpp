@@ -217,19 +217,11 @@ public:
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
 
-<<<<<<< HEAD
-    gpiod::line powerButtonMask;
-    gpiod::line resetButtonMask;
-    bool nmiButtonMasked = false;
-    #if IGNORE_SOFT_RESETS_DURING_POST
-    bool ignoreNextSoftReset = false;
-=======
     static gpiod::line powerButtonMask;
     static gpiod::line resetButtonMask;
     static bool nmiButtonMasked;
     #if IGNORE_SOFT_RESETS_DURING_POST
     static bool ignoreNextSoftReset;
->>>>>>> 754235c (PowerControl: Fix Compilation Issues)
     #endif
 
     // Changed from default true to false
