@@ -773,6 +773,36 @@ protected:
      */
     void resetButtonPressLog();
 
+    /**
+     * @brief Log a system power good failure
+     * 
+     * Sends a Redfish event log entry for system power good failure (VR failure).
+     * Uses SioPowerGoodWatchdogMs from TimerMap.
+     */
+    void systemPowerGoodFailedLog();
+
+    /**
+     * @brief Log a power supply power OK failure
+     * 
+     * Sends a Redfish event log entry for power supply power good failure.
+     * Uses PsPowerOKWatchdogMs from TimerMap.
+     */
+    void psPowerOKFailedLog();
+
+    /**
+     * @brief Log an NMI button press event
+     * 
+     * Sends a Redfish event log entry for NMI button press.
+     */
+    void nmiButtonPressLog();
+
+    /**
+     * @brief Log an NMI diagnostic interrupt event
+     * 
+     * Sends a Redfish event log entry for NMI diagnostic interrupt.
+     */
+    void nmiDiagIntLog();
+
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior
 

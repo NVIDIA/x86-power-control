@@ -165,38 +165,6 @@ static void resetACBootProperty()
 #endif // USE_ACBOOT
 
 
-static void systemPowerGoodFailedLog()
-{
-    sd_journal_send(
-        "MESSAGE=PowerControl: system power good failed to assert (VR failure)",
-        "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-        "OpenBMC.0.1.SystemPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
-        TimerMap["SioPowerGoodWatchdogMs"], NULL);
-}
-
-static void psPowerOKFailedLog()
-{
-    sd_journal_send(
-        "MESSAGE=PowerControl: power supply power good failed to assert",
-        "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-        "OpenBMC.0.1.PowerSupplyPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
-        TimerMap["PsPowerOKWatchdogMs"], NULL);
-}
-
-static void nmiButtonPressLog()
-{
-    sd_journal_send("MESSAGE=PowerControl: NMI button pressed", "PRIORITY=%i",
-                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.NMIButtonPressed", NULL);
-}
-
-static void nmiDiagIntLog()
-{
-    sd_journal_send("MESSAGE=PowerControl: NMI Diagnostic Interrupt",
-                    "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.NMIDiagnosticInterrupt", NULL);
-}
-
 #ifdef USE_ACBOOT
 static constexpr const char* powerACBootObject =
     "/xyz/openbmc_project/control/host0/ac_boot";

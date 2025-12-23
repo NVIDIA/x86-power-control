@@ -1794,6 +1794,38 @@ void PowerControl::resetButtonPressLog()
                     "OpenBMC.0.1.ResetButtonPressed", NULL);
 }
 
+void PowerControl::systemPowerGoodFailedLog()
+{
+    sd_journal_send(
+        "MESSAGE=PowerControl: system power good failed to assert (VR failure)",
+        "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+        "OpenBMC.0.1.SystemPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
+        TimerMap["SioPowerGoodWatchdogMs"], NULL);
+}
+
+void PowerControl::psPowerOKFailedLog()
+{
+    sd_journal_send(
+        "MESSAGE=PowerControl: power supply power good failed to assert",
+        "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+        "OpenBMC.0.1.PowerSupplyPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
+        TimerMap["PsPowerOKWatchdogMs"], NULL);
+}
+
+void PowerControl::nmiButtonPressLog()
+{
+    sd_journal_send("MESSAGE=PowerControl: NMI button pressed", "PRIORITY=%i",
+                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+                    "OpenBMC.0.1.NMIButtonPressed", NULL);
+}
+
+void PowerControl::nmiDiagIntLog()
+{
+    sd_journal_send("MESSAGE=PowerControl: NMI Diagnostic Interrupt",
+                    "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+                    "OpenBMC.0.1.NMIDiagnosticInterrupt", NULL);
+}
+
 // RestartCause Implementation (available in the power_control namespace)
 
 // Initialize the global causeSet
