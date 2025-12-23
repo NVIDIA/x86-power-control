@@ -621,10 +621,10 @@ void PowerControl::handleCheckForWarmReset(Event event)
     // - If power off detected → transition to transitionToOff
 }
 
-std::string_view PowerControl::getHostState(const PowerState state)
+std::string_view PowerControl::getHostState()
 {
     // Upstream implementation - maps PowerState to D-Bus host state
-    switch (state)
+    switch (powerState)
     {
         case PowerState::on:
         case PowerState::gracefulTransitionToOff:
@@ -646,10 +646,10 @@ std::string_view PowerControl::getHostState(const PowerState state)
     }
 }
 
-std::string_view PowerControl::getChassisState(const PowerState state)
+std::string_view PowerControl::getChassisState()
 {
     // Upstream implementation - maps PowerState to D-Bus chassis state
-    switch (state)
+    switch (powerState)
     {
         case PowerState::on:
         case PowerState::transitionToOff:
@@ -769,11 +769,11 @@ void PowerControl::setPowerState(const PowerState state)
 
     // Update D-Bus host state (uses virtual dispatch)
     hostIface->set_property("CurrentHostState",
-                            std::string(this->getHostState(powerState)));
+                            std::string(this->getHostState()));
 
     // Update D-Bus chassis state (uses virtual dispatch)
     chassisIface->set_property("CurrentPowerState",
-                               std::string(this->getChassisState(powerState)));
+                               std::string(this->getChassisState()));
     chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 
     // Reset boot progress to Unspecified when host powers off
@@ -804,7 +804,7 @@ void PowerControl::savePowerState(const PowerState state)
             return;
         }
         appState.set(PersistentState::Params::PowerState,
-                     std::string{getChassisState(state)});
+                     std::string{getChassisState()});
     });
 }
 
@@ -930,7 +930,7 @@ void PowerControl::initializeHostInterface()
         });
     
     hostIface->register_property("CurrentHostState",
-                                 std::string(getHostState(powerState)));
+                                 std::string(getHostState()));
 
     hostIface->initialize();
 
@@ -1015,7 +1015,7 @@ void PowerControl::initializeChassisInterface()
         });
     
     chassisIface->register_property("CurrentPowerState",
-                                    std::string(getChassisState(powerState)));
+                                    std::string(getChassisState()));
     chassisIface->register_property("LastStateChangeTime", getCurrentTimeMs());
 
     chassisIface->initialize();
@@ -1056,7 +1056,7 @@ void PowerControl::initializeChassisSystemInterface()
             return 1;
         });
     chassisSysIface->register_property(
-        "CurrentPowerState", std::string(getChassisState(powerState)));
+        "CurrentPowerState", std::string(getChassisState()));
     chassisSysIface->register_property("LastStateChangeTime", getCurrentTimeMs());
 
     chassisSysIface->initialize();

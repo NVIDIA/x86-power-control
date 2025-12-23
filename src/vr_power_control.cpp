@@ -510,10 +510,10 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
     }
 }
 
-std::string_view VRPowerControl::getHostState(const PowerState state)
+std::string_view VRPowerControl::getHostState()
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus host state
-    switch (state)
+    switch (powerState)
     {
         case PowerState::waitForPDBMainPowerOk:
         case PowerState::waitForHPMPowerGoodAssert:
@@ -544,13 +544,13 @@ std::string_view VRPowerControl::getHostState(const PowerState state)
     }
     
     // Fall through to base class for upstream states
-    return PowerControl::getHostState(state);
+    return PowerControl::getHostState();
 }
 
-std::string_view VRPowerControl::getChassisState(const PowerState state)
+std::string_view VRPowerControl::getChassisState()
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus chassis state
-    switch (state)
+    switch (powerState)
     {
         case PowerState::waitForPDBMainPowerOk:
         case PowerState::waitForHPMPowerGoodAssert:
@@ -581,7 +581,7 @@ std::string_view VRPowerControl::getChassisState(const PowerState state)
     }
     
     // Fall through to base class for upstream states
-    return PowerControl::getChassisState(state);
+    return PowerControl::getChassisState();
 }
 
 std::string VRPowerControl::getPowerStateName(const PowerState state)

@@ -76,21 +76,19 @@ public:
      * Converts VR-specific PowerState enums to D-Bus host state property string value.
      * Falls back to base class for upstream states.
      * 
-     * @param state The power state
      * @return D-Bus host state string
      */
-    std::string_view getHostState(const PowerState state) override;
+    std::string_view getHostState() override;
 
     /**
-     * @brief Get the chassis state dbus property value for a given power state (VR override)
+     * @brief Get the chassis state dbus property value for current power state (VR override)
      * 
      * Converts VR-specific PowerState enums to D-Bus chassis state property string value.
      * Falls back to base class for upstream states.
      * 
-     * @param state The power state
      * @return D-Bus chassis state string
      */
-    std::string_view getChassisState(const PowerState state) override;
+    std::string_view getChassisState() override;
 
     /**
      * @brief Get a human-readable name for a power state (VR override)

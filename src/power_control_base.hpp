@@ -343,18 +343,17 @@ public:
      * @param state The power state
      * @return D-Bus host state string
      */
-    virtual std::string_view getHostState(const PowerState state);
+    virtual std::string_view getHostState();
 
     /**
-     * @brief Get the chassis state string for a given power state (virtual)
+     * @brief Get the chassis state string for current power state (virtual)
      * 
-     * Converts a PowerState enum to the corresponding D-Bus chassis state string.
+     * Converts the internal powerState to the corresponding D-Bus chassis state string.
      * Derived classes can override this to provide platform-specific mappings.
      * 
-     * @param state The power state
      * @return D-Bus chassis state string
      */
-    virtual std::string_view getChassisState(const PowerState state);
+    virtual std::string_view getChassisState();
 
     /**
      * @brief Get the current power state

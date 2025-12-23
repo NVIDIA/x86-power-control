@@ -394,12 +394,12 @@ static void reset()
 
 
 // Unique POH TImer to base class
-static void pohCounterTimerStart()
+static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> conn, PowerControl& powerControl)
 {
     lg2::info("POH timer started");
     // Set the time-out as 1 hour, to align with POH command in ipmid
     pohCounterTimer.expires_after(std::chrono::hours(1));
-    pohCounterTimer.async_wait([](const boost::system::error_code& ec) {
+    pohCounterTimer.async_wait([conn, powerControl](const boost::system::error_code& ec) {
         if (ec)
         {
             // operation_aborted is expected if timer is canceled before
@@ -413,7 +413,7 @@ static void pohCounterTimerStart()
             return;
         }
 
-        if (getHostState(powerState) !=
+        if (powerControl.getHostState() !=
             "xyz.openbmc_project.State.Host.HostState.Running")
         {
             return;
@@ -453,16 +453,16 @@ static void pohCounterTimerStart()
             "org.freedesktop.DBus.Properties", "Get",
             "xyz.openbmc_project.State.PowerOnHours", "POHCounter");
 
-        pohCounterTimerStart();
+        pohCounterTimerStart(conn, powerControl);
     });
 }
 
-static void currentHostStateMonitor()
+static void currentHostStateMonitor(std::shared_ptr<sdbusplus::asio::connection> conn, PowerControl& powerControl)
 {
-    if (getHostState(powerState) ==
+    if (powerControl.getHostState() ==
         "xyz.openbmc_project.State.Host.HostState.Running")
     {
-        pohCounterTimerStart();
+        pohCounterTimerStart(conn, powerControl);
         // Clear the restart cause set for the next restart
         clearRestartCause();
     }
@@ -478,7 +478,7 @@ static void currentHostStateMonitor()
         "type='signal',member='PropertiesChanged', "
         "interface='org.freedesktop.DBus.Properties', "
         "arg0='xyz.openbmc_project.State.Host'",
-        [](sdbusplus::message_t& message) {
+        [conn](sdbusplus::message_t& message) {
             std::string intfName;
             std::map<std::string, std::variant<std::string>> properties;
 
@@ -514,7 +514,7 @@ static void currentHostStateMonitor()
             if (*currentHostState ==
                 "xyz.openbmc_project.State.Host.HostState.Running")
             {
-                pohCounterTimerStart();
+                pohCounterTimerStart(conn, powerControl);
                 // Clear the restart cause set for the next restart
                 clearRestartCause();
                 sd_journal_send("MESSAGE=Host system DC power is on",
@@ -685,31 +685,32 @@ static void setNmiSource()
     nmiSetEnableProperty(true);
 }
 
-static void nmiButtonHandler(bool state)
-{
-    // Don't handle event if host not running and config doesn't force it
-    if (!nmiWhenPoweredOff &&
-        getHostState(powerState) !=
-            "xyz.openbmc_project.State.Host.HostState.Running")
-    {
-        return;
-    }
-
-    bool asserted = state == nmiButtonConfig.polarity;
-    nmiButtonIface->set_property("ButtonPressed", asserted);
-    if (asserted)
-    {
-        nmiButtonPressLog();
-        if (nmiButtonMasked)
-        {
-            lg2::info("NMI button press masked");
-        }
-        else
-        {
-            setNmiSource();
-        }
-    }
-}
+// TODO: nmiButtonHandler is dead code - never called. Remove or refactor to use PowerControl class.
+// static void nmiButtonHandler(bool state)
+// {
+//     // Don't handle event if host not running and config doesn't force it
+//     if (!nmiWhenPoweredOff &&
+//         powerControl.getHostState() !=
+//             "xyz.openbmc_project.State.Host.HostState.Running")
+//     {
+//         return;
+//     }
+// 
+//     bool asserted = state == nmiButtonConfig.polarity;
+//     nmiButtonIface->set_property("ButtonPressed", asserted);
+//     if (asserted)
+//     {
+//         nmiButtonPressLog();
+//         if (nmiButtonMasked)
+//         {
+//             lg2::info("NMI button press masked");
+//         }
+//         else
+//         {
+//             setNmiSource();
+//         }
+//     }
+// }
 
 static void idButtonHandler(bool state)
 {
@@ -897,9 +898,12 @@ void setInitialValue(const ConfigData& configData, bool initialValue)
 {
     if (configData.name == "PowerOk")
     {
-        powerState = (initialValue ? PowerState::on : PowerState::off);
-        hostIface->set_property("CurrentHostState",
-                                std::string(getHostState(powerState)));
+        // TODO: Refactor - powerState and hostIface are now in PowerControl class
+        // This function needs PowerControl& parameter to access these
+        // powerState = (initialValue ? PowerState::on : PowerState::off);
+        // hostIface->set_property("CurrentHostState",
+        //                         std::string(powerControl.getHostState()));
+        lg2::info("PowerOk initial value: {VALUE}", "VALUE", initialValue);
     }
     else if (configData.name == "PowerButton")
     {
@@ -1014,7 +1018,7 @@ int main(int argc, char* argv[])
     // D-Bus interfaces (host, chassis, boot progress, buttons, OS state, restart cause)
     // are now initialized by the PowerControl base class constructor
 
-    currentHostStateMonitor();
+    currentHostStateMonitor(conn);
 
     if (!hpmStbyEnConfig.lineName.empty())
     {

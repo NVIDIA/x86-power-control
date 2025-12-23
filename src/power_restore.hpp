@@ -532,7 +532,7 @@ class PowerRestoreController
      */
      void savePowerState()
      {
-         std::string chassisState = std::string(powerControl.getChassisState(powerControl.getPowerState()));
+         std::string chassisState = std::string(powerControl.getChassisState());
          appState.set(PersistentState::Params::PowerState, chassisState);
      }
     /**
