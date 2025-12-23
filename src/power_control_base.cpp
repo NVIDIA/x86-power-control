@@ -1,4 +1,5 @@
 #include "power_control_base.hpp"
+#include "power_restore.hpp"
 #include <phosphor-logging/lg2.hpp>
 #include <systemd/sd-journal.h>
 #include <chrono>
@@ -118,8 +119,10 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& node)
-    : ioContext(ioContext), conn(conn), nodeId(node), appName("power-control"),
+                           const std::string& node,
+                           PersistentState& appState)
+    : ioContext(ioContext), conn(conn), nodeId(node), appState(appState), 
+      appName("power-control"),
       gpioAssertTimer(ioContext),
       powerCycleTimer(ioContext),
       gracefulPowerOffTimer(ioContext),
@@ -715,6 +718,32 @@ void PowerControl::logStateTransition(const PowerState state)
               this->getPowerStateName(state));
 }
 
+void PowerControl::setBootProgress(const std::string& bootProgressStage)
+{
+    if (bootProgressIface)
+    {
+        bootProgressIface->set_property("BootProgress", bootProgressStage);
+        
+        // Update timestamp
+        auto now = std::chrono::system_clock::now();
+        auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+            now.time_since_epoch()).count();
+        bootProgressIface->set_property("BootProgressLastUpdate", 
+                                       static_cast<uint64_t>(timestamp));
+        
+        lg2::info("Boot progress updated to: {PROGRESS}", "PROGRESS", bootProgressStage);
+    }
+}
+
+void PowerControl::setBootProgressOem(const std::string& oemProgress)
+{
+    if (bootProgressIface)
+    {
+        bootProgressIface->set_property("BootProgressOem", oemProgress);
+        lg2::info("Boot progress OEM updated to: {OEM_PROGRESS}", "OEM_PROGRESS", oemProgress);
+    }
+}
+
 uint64_t PowerControl::getCurrentTimeMs()
 {
     struct timespec time = {};
@@ -755,9 +784,28 @@ void PowerControl::setPowerState(const PowerState state)
     // }
 
     // Save the power state for the restore policy
-    // TODO: Commented out for now - will be implemented when powerStateSaveTimer 
-    // and appState are moved to the base PowerControl class
-    // savePowerState(state);
+    savePowerState(state);
+}
+
+void PowerControl::savePowerState(const PowerState state)
+{
+    powerStateSaveTimer.expires_after(
+        std::chrono::milliseconds(TimerMap["PowerOffSaveMs"]));
+    powerStateSaveTimer.async_wait([this, state](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Power-state save async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            return;
+        }
+        appState.set(PersistentState::Params::PowerState,
+                     std::string{getChassisState(state)});
+    });
 }
 
 void PowerControl::initializeHostInterface()

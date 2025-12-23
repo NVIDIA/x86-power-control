@@ -17,8 +17,10 @@ namespace power_control
 // Constructor: E5010 has no platform-specific GPIOs (no PDB)
 E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext,
                                      std::shared_ptr<sdbusplus::asio::connection> conn,
-                                     const std::string& node)
-    : VRPowerControl(ioContext, conn, node)  // Call parent constructor (registers VR GPIOs)
+                                     const std::string& configFilePath,
+                                     const std::string& node,
+                                     PersistentState& appState)
+    : VRPowerControl(ioContext, conn, configFilePath, node, appState)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
     // VR handlers already added to gpioHandlerMap by VRPowerControl constructor

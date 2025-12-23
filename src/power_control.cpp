@@ -54,7 +54,7 @@ using Event = PowerControl::Event;
 
 static constexpr uint8_t beepPowerFail = 8;
 
-static void beep(const uint8_t& beepPriority)
+static void beep(const uint8_t& beepPriority, std::shared_ptr<sdbusplus::asio::connection> conn)
 {
     lg2::info("Beep with priority: {BEEP_PRIORITY}", "BEEP_PRIORITY",
               beepPriority);
@@ -95,52 +95,6 @@ static constexpr std::string_view getOperatingSystemStateStage(
             break;
     }
 };
-static void setOperatingSystemState(const OperatingSystemStateStage stage)
-{
-    operatingSystemState = stage;
-#if IGNORE_SOFT_RESETS_DURING_POST
-    // If POST complete has asserted set ignoreNextSoftReset to false to avoid
-    // masking soft resets after POST
-    if (operatingSystemState == OperatingSystemStateStage::Standby)
-    {
-        ignoreNextSoftReset = false;
-    }
-#endif
-    osIface->set_property("OperatingSystemState",
-                          std::string(getOperatingSystemStateStage(stage)));
-
-    lg2::info("Moving os state to {STATE} stage", "STATE",
-              getOperatingSystemStateStage(stage));
-}
-
-// Helper function to set boot progress
-static void setBootProgress(const std::string& bootProgressStage)
-{
-    if (bootProgressIface)
-    {
-        bootProgressIface->set_property("BootProgress", bootProgressStage);
-        
-        // Update timestamp
-        auto now = std::chrono::system_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-            now.time_since_epoch()).count();
-        bootProgressIface->set_property("BootProgressLastUpdate", 
-                                       static_cast<uint64_t>(timestamp));
-        
-        lg2::info("Boot progress updated to: {PROGRESS}", "PROGRESS", bootProgressStage);
-    }
-}
-
-// Helper function to set OEM boot progress
-static void setBootProgressOem(const std::string& oemProgress)
-{
-    if (bootProgressIface)
-    {
-        bootProgressIface->set_property("BootProgressOem", oemProgress);
-        lg2::info("Boot progress OEM updated to: {OEM_PROGRESS}", "OEM_PROGRESS", oemProgress);
-    }
-}
-
 
 static uint64_t getCurrentTimeMs()
 {
@@ -188,27 +142,6 @@ static void setSlotPowerState(const SlotPowerState state)
     chassisSlotIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 }
 #endif
-static void savePowerState(const PowerState state)
-{
-    powerStateSaveTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["PowerOffSaveMs"]));
-    powerStateSaveTimer.async_wait([state](const boost::system::error_code ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("Power-state save async_wait failed: {ERROR_MSG}",
-                           "ERROR_MSG", ec.message());
-            }
-            return;
-        }
-        appState.set(PersistentState::Params::PowerState,
-                     std::string{getChassisState(state)});
-    });
-}
-
 #ifdef USE_ACBOOT
 static void resetACBootProperty()
 {
@@ -1057,8 +990,8 @@ int main(int argc, char* argv[])
               node);
     
     std::shared_ptr<sdbusplus::asio::connection> conn = std::make_shared<sdbusplus::asio::connection>(io);
-    NVL144PowerControl powerControl(io, conn, "config/power-config-host0.json", node);
-    PowerRestoreController powerRestore(io, conn, node, powerControl);
+    NVL144PowerControl powerControl(io, conn, "config/power-config-host0.json", node, appState);
+    PowerRestoreController powerRestore(io, conn, node, powerControl, appState);
 
 #ifdef USE_PLT_RST
     sdbusplus::bus::match_t pltRstMatch(

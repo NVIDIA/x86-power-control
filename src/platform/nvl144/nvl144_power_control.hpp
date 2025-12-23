@@ -31,7 +31,8 @@ public:
     NVL144PowerControl(boost::asio::io_context& ioContext,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
                        const std::string& configFilePath,
-                       const std::string& node = "0");
+                       const std::string& node,
+                       PersistentState& appState);
 
     virtual ~NVL144PowerControl() = default;
 

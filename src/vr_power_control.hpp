@@ -55,7 +55,8 @@ public:
     VRPowerControl(boost::asio::io_context& ioContext,
                    std::shared_ptr<sdbusplus::asio::connection> conn,
                    const std::string& configFilePath,
-                   const std::string& node);
+                   const std::string& node,
+                   PersistentState& appState);
     virtual ~VRPowerControl() = default;
 
     /**

@@ -18,8 +18,9 @@ namespace power_control
 VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext,
                                std::shared_ptr<sdbusplus::asio::connection> conn,
                                const std::string& configFilePath,
-                               const std::string& node)
-    : PowerControl(ioContext, conn, node), 
+                               const std::string& node,
+                               PersistentState& appState)
+    : PowerControl(ioContext, conn, node, appState), 
       pdbMainPowerOkWatchdogTimer(ioContext),
       hpmPowerGoodWatchdogTimer(ioContext),
       cpuResetWatchdogTimer(ioContext),

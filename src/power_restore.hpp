@@ -218,9 +218,11 @@ class PowerRestoreController
     PowerRestoreController(boost::asio::io_context& io,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& node,
-                           PowerControl& powerControlRef) :
+                           PowerControl& powerControlRef,
+                           PersistentState& appStateRef) :
         policyInvoked(false), powerRestoreDelay(-1), powerRestoreTimer(io),
-        timerFired(false), conn(conn), node(node), powerControl(powerControlRef)
+        timerFired(false), conn(conn), node(node), powerControl(powerControlRef),
+        appState(appStateRef)
     {}
     /**
      * @brief Power Restore entry point.
@@ -348,7 +350,7 @@ class PowerRestoreController
     std::shared_ptr<sdbusplus::asio::connection> conn;
     std::string node;
     PowerControl& powerControl;
-    PersistentState appState;
+    PersistentState& appState;
     
     /**
      * @brief Log that power restore policy was applied

@@ -10,6 +10,16 @@ namespace power_control
 {
     // External global variables (runtime variables, not types)
     extern PowerState powerState;
+    
+    // TODO: Implement the requestInputEvents function in the Base PowerControl class
+    // extern bool requestInputEvents(
+    //     const std::string& deviceName,
+    //     const std::string& signalName,
+    //     uint16_t keyCode,
+    //     const std::function<void(bool)>& handler,
+    //     boost::asio::posix::stream_descriptor& eventDescriptor,
+    //     int* stateTracker
+    // );
 }
 
 namespace power_control
@@ -18,8 +28,10 @@ namespace power_control
 // Constructor: Adds Parsec-specific ConfigData entries to powerSignalMap
 ParsecPowerControl::ParsecPowerControl(boost::asio::io_context& ioContext,
                                        std::shared_ptr<sdbusplus::asio::connection> conn,
-                                       const std::string& node)
-    : VRPowerControl(ioContext, conn, node) // Call parent constructor (registers VR GPIOs)
+                                       const std::string& configFilePath,
+                                       const std::string& node,
+                                       PersistentState& appState)
+    : VRPowerControl(ioContext, conn, configFilePath, node, appState) // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
     // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
@@ -88,25 +100,6 @@ void ParsecPowerControl::validateRequiredSignals()
                       "SIGNAL", signalName);
             throw std::runtime_error("Parsec: Required GB300 PDB signal missing from config: " + signalName);
         }
-    }
-    
-    // Configure GB300PDBMainPowerOk for input event monitoring (gpio_keys_polled driver)
-    auto gb300pdbMainPowerOkIt = powerSignalMap.find("GB300PDBMainPowerOk");
-    if (gb300pdbMainPowerOkIt != powerSignalMap.end())
-    {
-        auto& configData = gb300pdbMainPowerOkIt->second;
-        
-        // Enable input event monitoring
-        configData->useInputEvents = true;
-        
-        // Configure input event parameters
-        InputEventConfig inputConfig;
-        inputConfig.deviceName = "gpio_keys_gb300";
-        inputConfig.signalName = "GB300_PDB_MAIN_PWR_OK_Mon";
-        inputConfig.keyCode = 0x102;  // BTN_2 key code
-        inputConfig.stateTracker = &gb300pdbMainPowerOkState;
-        
-        configData->inputEventConfig = inputConfig;
     }
     
     // Call VRPowerControl to validate common VR signals

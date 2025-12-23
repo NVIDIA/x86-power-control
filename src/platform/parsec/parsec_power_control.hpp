@@ -30,7 +30,9 @@ class ParsecPowerControl : public VRPowerControl
 public:
     ParsecPowerControl(boost::asio::io_context& ioContext,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
-                       const std::string& node);
+                       const std::string& configFilePath,
+                       const std::string& node,
+                       PersistentState& appState);
     virtual ~ParsecPowerControl() = default;
 
     /**
@@ -64,14 +66,6 @@ private:
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void gb300pdbMainPowerOkHandler(bool state);
-
-    /**
-     * @brief Cached state for GB300 PDB Main Power OK signal
-     * 
-     * Since gpio_keys_polled has exclusive control of the GPIO, we can't request
-     * the GPIO state directly. Instead, we track the state based on input events.
-     */
-    int gb300pdbMainPowerOkState = 0;
 
 protected:
     /**
