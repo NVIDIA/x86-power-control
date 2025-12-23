@@ -1,5 +1,6 @@
 #include "power_control_base.hpp"
 #include <phosphor-logging/lg2.hpp>
+#include <systemd/sd-journal.h>
 #include <chrono>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -8,7 +9,7 @@
 
 namespace power_control
 {
-
+// TODO: define virtual method
 std::string PowerControl::getEventName(Event event)
 {
     switch (event)
@@ -110,32 +111,6 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
               stateHandler, "EVENT", getEventName(event));
 }
 
-// Initialize static members
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::bootProgressIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
-#ifdef CHASSIS_SYSTEM_RESET
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisSysIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisSlotIface = nullptr;
-#endif
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::powerButtonIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::resetButtonIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::nmiButtonIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::osIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::idButtonIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::nmiOutIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::restartCauseIface = nullptr;
-
-gpiod::line PowerControl::powerButtonMask;
-gpiod::line PowerControl::resetButtonMask;
-bool PowerControl::nmiButtonMasked = false;
-#if IGNORE_SOFT_RESETS_DURING_POST
-bool PowerControl::ignoreNextSoftReset = false;
-#endif
-bool PowerControl::nmiEnabled = false;
-bool PowerControl::nmiWhenPoweredOff = false;
-bool PowerControl::sioEnabled = false;
-
 PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
     : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),
@@ -151,8 +126,14 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues(ioContext, configFilePath);
-    
-    // Load configuration from JSON file and populate powerSignalMap
+
+    // Register base class GPIO handlers
+    // These handlers are available in all platforms and can be overridden by derived classes
+    gpioHandlerMap["PowerOk"] = [this](bool state) { this->psPowerOKHandler(state); };
+    gpioHandlerMap["SioPowerGood"] = [this](bool state) { this->sioPowerGoodHandler(state); };
+    gpioHandlerMap["SIOS5"] = [this](bool state) { this->sioS5Handler(state); };
+    gpioHandlerMap["PowerButton"] = [this](bool state) { this->powerButtonHandler(state); };
+    gpioHandlerMap["ResetButton"] = [this](bool state) { this->resetButtonHandler(state); };
 
     hostDbusName += node;
     chassisDbusName += node;
@@ -1504,6 +1485,209 @@ void PowerControl::registerGPIOHandlers()
     }
     
     lg2::info("All GPIO handlers registered successfully");
+}
+
+// ===========================================================================
+// GPIO Event Handlers
+// ===========================================================================
+
+void PowerControl::psPowerOKHandler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["PowerOk"];
+    
+    Event powerControlEvent = (state == config.polarity)
+                                  ? Event::psPowerOKAssert
+                                  : Event::psPowerOKDeAssert;
+    sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void PowerControl::sioPowerGoodHandler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["SioPowerGood"];
+    
+    Event powerControlEvent = (state == config.polarity)
+                                  ? Event::sioPowerGoodAssert
+                                  : Event::sioPowerGoodDeAssert;
+    sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void PowerControl::sioS5Handler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["SIOS5"];
+    
+    Event powerControlEvent = (state == config.polarity)
+                                  ? Event::sioS5Assert
+                                  : Event::sioS5DeAssert;
+    sendPowerControlEvent(powerControlEvent, powerState);
+}
+
+void PowerControl::powerButtonHandler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["PowerButton"];
+    
+    bool asserted = state == config.polarity;
+    powerButtonIface->set_property("ButtonPressed", asserted);
+    if (asserted)
+    {
+        powerButtonPressLog();
+        if (!powerButtonMask)
+        {
+            sendPowerControlEvent(Event::powerButtonPressed, powerState);
+            addRestartCause(RestartCause::powerButton);
+        }
+        else
+        {
+            lg2::info("power button press masked");
+        }
+    }
+#if USE_BUTTON_PASSTHROUGH
+    // Note: powerOutConfig is not in base class yet, this will need to be handled
+    // by derived classes if they use button passthrough
+    lg2::info("Button passthrough not implemented in base class");
+#endif
+}
+
+void PowerControl::resetButtonHandler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto& config = *powerSignalMap["ResetButton"];
+    
+    bool asserted = state == config.polarity;
+    resetButtonIface->set_property("ButtonPressed", asserted);
+    if (asserted)
+    {
+        resetButtonPressLog();
+        if (!resetButtonMask)
+        {
+            sendPowerControlEvent(Event::resetButtonPressed, powerState);
+            addRestartCause(RestartCause::resetButton);
+        }
+        else
+        {
+            lg2::info("reset button press masked");
+        }
+    }
+#if USE_BUTTON_PASSTHROUGH
+    // Note: resetOutConfig is not in base class yet, this will need to be handled
+    // by derived classes if they use button passthrough
+    lg2::info("Button passthrough not implemented in base class");
+#endif
+}
+
+void PowerControl::powerButtonPressLog()
+{
+    sd_journal_send("MESSAGE=PowerControl: power button pressed", "PRIORITY=%i",
+                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+                    "OpenBMC.0.1.PowerButtonPressed", NULL);
+}
+
+void PowerControl::resetButtonPressLog()
+{
+    sd_journal_send("MESSAGE=PowerControl: reset button pressed", "PRIORITY=%i",
+                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
+                    "OpenBMC.0.1.ResetButtonPressed", NULL);
+}
+
+// RestartCause Implementation (available in the power_control namespace)
+
+// Initialize the global causeSet
+boost::container::flat_set<RestartCause> causeSet;
+
+std::string getRestartCause(RestartCause cause)
+{
+    switch (cause)
+    {
+        case RestartCause::command:
+            return "xyz.openbmc_project.State.Host.RestartCause.IpmiCommand";
+            break;
+        case RestartCause::resetButton:
+            return "xyz.openbmc_project.State.Host.RestartCause.ResetButton";
+            break;
+        case RestartCause::powerButton:
+            return "xyz.openbmc_project.State.Host.RestartCause.PowerButton";
+            break;
+        case RestartCause::watchdog:
+            return "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer";
+            break;
+        case RestartCause::powerPolicyOn:
+            return "xyz.openbmc_project.State.Host.RestartCause.PowerPolicyAlwaysOn";
+            break;
+        case RestartCause::powerPolicyRestore:
+            return "xyz.openbmc_project.State.Host.RestartCause.PowerPolicyPreviousState";
+            break;
+        case RestartCause::softReset:
+            return "xyz.openbmc_project.State.Host.RestartCause.SoftReset";
+            break;
+        default:
+            return "xyz.openbmc_project.State.Host.RestartCause.Unknown";
+            break;
+    }
+}
+
+void addRestartCause(const RestartCause cause)
+{
+    // Add this to the set of causes for this restart
+    causeSet.insert(cause);
+}
+
+void clearRestartCause()
+{
+    // Clear the set for the next restart
+    causeSet.clear();
+}
+
+void setRestartCauseProperty(const std::string& cause)
+{
+    lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
+    PowerControl::restartCauseIface->set_property("RestartCause", cause);
+}
+
+void setRestartCause()
+{
+    // Determine the actual restart cause based on the set of causes
+    std::string restartCause =
+        "xyz.openbmc_project.State.Host.RestartCause.Unknown";
+    if (causeSet.contains(RestartCause::watchdog))
+    {
+        restartCause = getRestartCause(RestartCause::watchdog);
+    }
+    else if (causeSet.contains(RestartCause::command))
+    {
+        restartCause = getRestartCause(RestartCause::command);
+    }
+    else if (causeSet.contains(RestartCause::resetButton))
+    {
+        restartCause = getRestartCause(RestartCause::resetButton);
+    }
+    else if (causeSet.contains(RestartCause::powerButton))
+    {
+        restartCause = getRestartCause(RestartCause::powerButton);
+    }
+    else if (causeSet.contains(RestartCause::powerPolicyOn))
+    {
+        restartCause = getRestartCause(RestartCause::powerPolicyOn);
+    }
+    else if (causeSet.contains(RestartCause::powerPolicyRestore))
+    {
+        restartCause = getRestartCause(RestartCause::powerPolicyRestore);
+    }
+    else if (causeSet.contains(RestartCause::softReset))
+    {
+#if IGNORE_SOFT_RESETS_DURING_POST
+        if (PowerControl::ignoreNextSoftReset)
+        {
+            PowerControl::ignoreNextSoftReset = false;
+            return;
+        }
+#endif
+        restartCause = getRestartCause(RestartCause::softReset);
+    }
+
+    setRestartCauseProperty(restartCause);
 }
 
 } // namespace power_control

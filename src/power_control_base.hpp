@@ -10,6 +10,7 @@
 #include <gpiod.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/container/flat_map.hpp>
+#include <boost/container/flat_set.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
 // Forward declarations (these enums are defined in power_control.cpp)
@@ -23,6 +24,66 @@ namespace power_control
 {
 
 // TODO: Add the Upsteram ConfigType enum to the class
+
+/**
+ * @brief Restart Cause enumeration
+ * 
+ * Tracks the reason for a host restart/reboot.
+ * Used to set the RestartCause D-Bus property.
+ */
+enum class RestartCause
+{
+    command,
+    resetButton,
+    powerButton,
+    watchdog,
+    powerPolicyOn,
+    powerPolicyRestore,
+    softReset,
+};
+
+/**
+ * @brief Global set of restart causes for the current restart
+ * 
+ * Multiple causes can be added during a restart sequence.
+ * The highest priority cause is selected and reported.
+ */
+extern boost::container::flat_set<RestartCause> causeSet;
+
+/**
+ * @brief Convert RestartCause enum to D-Bus string
+ * 
+ * @param cause The restart cause to convert
+ * @return D-Bus RestartCause property string
+ */
+std::string getRestartCause(RestartCause cause);
+
+/**
+ * @brief Add a restart cause to the set
+ * 
+ * @param cause The restart cause to add
+ */
+void addRestartCause(const RestartCause cause);
+
+/**
+ * @brief Clear the restart cause set for next restart
+ */
+void clearRestartCause();
+
+/**
+ * @brief Set the RestartCause D-Bus property
+ * 
+ * @param cause The restart cause string to set
+ */
+void setRestartCauseProperty(const std::string& cause);
+
+/**
+ * @brief Determine and set the restart cause from causeSet
+ * 
+ * Evaluates the set of causes and selects the highest priority
+ * cause to report via the D-Bus RestartCause property.
+ */
+void setRestartCause();
 
 /**
  * @brief Upstream Configuration data for a single GPIO or D-Bus signal
@@ -51,6 +112,8 @@ struct ConfigData
     ConfigData(boost::asio::io_context& io) 
         : eventDescriptor(io), gpioHandler(nullptr) {}
 };
+
+
 
 /**
  * @brief Base Power Control class - Upstream functionality
@@ -217,17 +280,17 @@ public:
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
 
-    static gpiod::line powerButtonMask;
-    static gpiod::line resetButtonMask;
-    static bool nmiButtonMasked;
+    gpiod::line powerButtonMask;
+    gpiod::line resetButtonMask;
+    bool nmiButtonMasked;
     #if IGNORE_SOFT_RESETS_DURING_POST
-    static bool ignoreNextSoftReset;
+    bool ignoreNextSoftReset;
     #endif
 
     // Changed from default true to false
-    static bool nmiEnabled;
-    static bool nmiWhenPoweredOff;
-    static bool sioEnabled;
+    bool nmiEnabled;
+    bool nmiWhenPoweredOff;
+    bool sioEnabled;
 
     /**
      * @brief Get the handler function for the current power state
@@ -572,17 +635,85 @@ protected:
      */
     void waitForGPIOEvent(ConfigData& config);
 
-    // TODO: Add the Upstream Event Descriptors to the class
-    // TODO: Add the Upstream ConfigData to the class
-    // TODO: Add the Upstream GPIO Lines to the class
-    // TODO: Add the Upstream GPIO Event Handlers
-
 protected:
 
-    // TODO: Add the Upstream Event Descriptors to the class
-    // TODO: Add the Upstream ConfigData to the class
-    // TODO: Add the Upstream GPIO Lines to the class
-    // TODO: Add the Upstream GPIO Event Handlers
+    /**
+     * @brief Handler for PS Power OK GPIO signal
+     * 
+     * Called when the power supply power OK signal changes state.
+     * Sends psPowerOKAssert or psPowerOKDeAssert event based on polarity.
+     * 
+     * Signal key in powerSignalMap: "PowerOk"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void psPowerOKHandler(bool state);
+
+    /**
+     * @brief Handler for SIO Power Good GPIO signal
+     * 
+     * Called when the SIO power good signal changes state.
+     * Sends sioPowerGoodAssert or sioPowerGoodDeAssert event based on polarity.
+     * 
+     * Signal key in powerSignalMap: "SioPowerGood"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void sioPowerGoodHandler(bool state);
+
+    /**
+     * @brief Handler for SIO S5 GPIO signal
+     * 
+     * Called when the SIO S5 signal changes state.
+     * Sends sioS5Assert or sioS5DeAssert event based on polarity.
+     * 
+     * Signal key in powerSignalMap: "SIOS5"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void sioS5Handler(bool state);
+
+    /**
+     * @brief Handler for Power Button GPIO signal
+     * 
+     * Called when the power button signal changes state.
+     * Updates D-Bus ButtonPressed property and sends powerButtonPressed event.
+     * Adds RestartCause::powerButton when button is pressed.
+     * Respects powerButtonMask for masking button presses.
+     * 
+     * Signal key in powerSignalMap: "PowerButton"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void powerButtonHandler(bool state);
+
+    /**
+     * @brief Handler for Reset Button GPIO signal
+     * 
+     * Called when the reset button signal changes state.
+     * Updates D-Bus ButtonPressed property and sends resetButtonPressed event.
+     * Adds RestartCause::resetButton when button is pressed.
+     * Respects resetButtonMask for masking button presses.
+     * 
+     * Signal key in powerSignalMap: "ResetButton"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void resetButtonHandler(bool state);
+
+    /**
+     * @brief Log a power button press event
+     * 
+     * Sends a Redfish event log entry for power button press.
+     */
+    void powerButtonPressLog();
+
+    /**
+     * @brief Log a reset button press event
+     * 
+     * Sends a Redfish event log entry for reset button press.
+     */
+    void resetButtonPressLog();
 
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior

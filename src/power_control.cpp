@@ -210,63 +210,6 @@ static void savePowerState(const PowerState state)
     });
 }
 
-enum class RestartCause
-{
-    command,
-    resetButton,
-    powerButton,
-    watchdog,
-    powerPolicyOn,
-    powerPolicyRestore,
-    softReset,
-};
-static boost::container::flat_set<RestartCause> causeSet;
-static std::string getRestartCause(RestartCause cause)
-{
-    switch (cause)
-    {
-        case RestartCause::command:
-            return "xyz.openbmc_project.State.Host.RestartCause.IpmiCommand";
-            break;
-        case RestartCause::resetButton:
-            return "xyz.openbmc_project.State.Host.RestartCause.ResetButton";
-            break;
-        case RestartCause::powerButton:
-            return "xyz.openbmc_project.State.Host.RestartCause.PowerButton";
-            break;
-        case RestartCause::watchdog:
-            return "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer";
-            break;
-        case RestartCause::powerPolicyOn:
-            return "xyz.openbmc_project.State.Host.RestartCause.PowerPolicyAlwaysOn";
-            break;
-        case RestartCause::powerPolicyRestore:
-            return "xyz.openbmc_project.State.Host.RestartCause.PowerPolicyPreviousState";
-            break;
-        case RestartCause::softReset:
-            return "xyz.openbmc_project.State.Host.RestartCause.SoftReset";
-            break;
-        default:
-            return "xyz.openbmc_project.State.Host.RestartCause.Unknown";
-            break;
-    }
-}
-static void addRestartCause(const RestartCause cause)
-{
-    // Add this to the set of causes for this restart
-    causeSet.insert(cause);
-}
-static void clearRestartCause()
-{
-    // Clear the set for the next restart
-    causeSet.clear();
-}
-static void setRestartCauseProperty(const std::string& cause)
-{
-    lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
-    restartCauseIface->set_property("RestartCause", cause);
-}
-
 #ifdef USE_ACBOOT
 static void resetACBootProperty()
 {
@@ -289,49 +232,6 @@ static void resetACBootProperty()
 }
 #endif // USE_ACBOOT
 
-static void setRestartCause()
-{
-    // Determine the actual restart cause based on the set of causes
-    std::string restartCause =
-        "xyz.openbmc_project.State.Host.RestartCause.Unknown";
-    if (causeSet.contains(RestartCause::watchdog))
-    {
-        restartCause = getRestartCause(RestartCause::watchdog);
-    }
-    else if (causeSet.contains(RestartCause::command))
-    {
-        restartCause = getRestartCause(RestartCause::command);
-    }
-    else if (causeSet.contains(RestartCause::resetButton))
-    {
-        restartCause = getRestartCause(RestartCause::resetButton);
-    }
-    else if (causeSet.contains(RestartCause::powerButton))
-    {
-        restartCause = getRestartCause(RestartCause::powerButton);
-    }
-    else if (causeSet.contains(RestartCause::powerPolicyOn))
-    {
-        restartCause = getRestartCause(RestartCause::powerPolicyOn);
-    }
-    else if (causeSet.contains(RestartCause::powerPolicyRestore))
-    {
-        restartCause = getRestartCause(RestartCause::powerPolicyRestore);
-    }
-    else if (causeSet.contains(RestartCause::softReset))
-    {
-#if IGNORE_SOFT_RESETS_DURING_POST
-        if (ignoreNextSoftReset)
-        {
-            ignoreNextSoftReset = false;
-            return;
-        }
-#endif
-        restartCause = getRestartCause(RestartCause::softReset);
-    }
-
-    setRestartCauseProperty(restartCause);
-}
 
 static void systemPowerGoodFailedLog()
 {
@@ -356,20 +256,6 @@ static void powerRestorePolicyLog()
     sd_journal_send("MESSAGE=PowerControl: power restore policy applied",
                     "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
                     "OpenBMC.0.1.PowerRestorePolicyApplied", NULL);
-}
-
-static void powerButtonPressLog()
-{
-    sd_journal_send("MESSAGE=PowerControl: power button pressed", "PRIORITY=%i",
-                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.PowerButtonPressed", NULL);
-}
-
-static void resetButtonPressLog()
-{
-    sd_journal_send("MESSAGE=PowerControl: reset button pressed", "PRIORITY=%i",
-                    LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.ResetButtonPressed", NULL);
 }
 
 static void nmiButtonPressLog()
@@ -1000,97 +886,13 @@ static void currentHostStateMonitor()
 }
 
 
-// ToDo: Move this to base class
-//HERE
-static void psPowerOKHandler(bool state)
-{
-    Event powerControlEvent = (state == powerOkConfig.polarity)
-                                  ? Event::psPowerOKAssert
-                                  : Event::psPowerOKDeAssert;
-    sendPowerControlEvent(powerControlEvent);
-}
 
-static void sioPowerGoodHandler(bool state)
-{
-    Event powerControlEvent = (state == sioPwrGoodConfig.polarity)
-                                  ? Event::sioPowerGoodAssert
-                                  : Event::sioPowerGoodDeAssert;
-    sendPowerControlEvent(powerControlEvent);
-}
 
 static void sioOnControlHandler(bool state)
 {
     lg2::info("SIO_ONCONTROL value changed: {VALUE}", "VALUE",
               static_cast<int>(state));
 }
-
-static void sioS5Handler(bool state)
-{
-    Event powerControlEvent = (state == sioS5Config.polarity)
-                                  ? Event::sioS5Assert
-                                  : Event::sioS5DeAssert;
-    sendPowerControlEvent(powerControlEvent);
-}
-
-static void powerButtonHandler(bool state)
-{
-    bool asserted = state == powerButtonConfig.polarity;
-    powerButtonIface->set_property("ButtonPressed", asserted);
-    if (asserted)
-    {
-        powerButtonPressLog();
-        if (!powerButtonMask)
-        {
-            sendPowerControlEvent(Event::powerButtonPressed);
-            addRestartCause(RestartCause::powerButton);
-        }
-        else
-        {
-            lg2::info("power button press masked");
-        }
-    }
-#if USE_BUTTON_PASSTHROUGH
-    gpiod::line gpioLine;
-    bool outputState =
-        asserted ? powerOutConfig.polarity : (!powerOutConfig.polarity);
-    if (!setGPIOOutput(powerOutConfig.lineName, outputState, gpioLine))
-    {
-        lg2::error("{GPIO_NAME} power button passthrough failed", "GPIO_NAME",
-                   powerOutConfig.lineName);
-    }
-#endif
-}
-
-static void resetButtonHandler(bool state)
-{
-    bool asserted = state == resetButtonConfig.polarity;
-    resetButtonIface->set_property("ButtonPressed", asserted);
-    if (asserted)
-    {
-        resetButtonPressLog();
-        if (!resetButtonMask)
-        {
-            sendPowerControlEvent(Event::resetButtonPressed);
-            addRestartCause(RestartCause::resetButton);
-        }
-        else
-        {
-            lg2::info("reset button press masked");
-        }
-    }
-#if USE_BUTTON_PASSTHROUGH
-    gpiod::line gpioLine;
-    bool outputState =
-        asserted ? resetOutConfig.polarity : (!resetOutConfig.polarity);
-    if (!setGPIOOutput(resetOutConfig.lineName, outputState, gpioLine))
-    {
-        lg2::error("{GPIO_NAME} reset button passthrough failed", "GPIO_NAME",
-                   resetOutConfig.lineName);
-    }
-#endif
-}
-
-// HERE: end
 
 #ifdef CHASSIS_SYSTEM_RESET
 static constexpr auto systemdBusname = "org.freedesktop.systemd1";

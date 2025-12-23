@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "power_control_base.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
