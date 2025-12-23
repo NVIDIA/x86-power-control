@@ -1,5 +1,6 @@
 #include "power_control_base.hpp"
 #include <phosphor-logging/lg2.hpp>
+#include <chrono>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <ctime>
@@ -109,10 +110,6 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
               stateHandler, "EVENT", getEventName(event));
 }
 
-// Initialize static members
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
-std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
-
 PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
     : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),
@@ -147,7 +144,12 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string
     conn->request_name(rstCauseDbusName.c_str());
 
     // Initialize D-Bus interfaces
-    initializeDBusInterfaces(conn, nodeId);
+    initializeHostInterface();
+    initializeChassisInterface();
+    initializeBootProgressInterface();
+#ifdef CHASSIS_SYSTEM_RESET
+    initializeChassisSystemInterface();
+#endif
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler()
@@ -741,11 +743,9 @@ void PowerControl::setPowerState(const PowerState state)
     // savePowerState(state);
 }
 
-void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::connection> conn,
-                                             const std::string& node)
+void PowerControl::initializeHostInterface()
 {
-    // Note: This function still references the external global powerState variable
-    // Button masking (powerButtonMask, resetButtonMask) and restart cause tracking
+    // Note: Button masking (powerButtonMask, resetButtonMask) and restart cause tracking
     // (addRestartCause) are not yet moved to the class, so those checks are commented out.
     
     // Create Host Interface
@@ -753,7 +753,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
         sdbusplus::asio::object_server(*conn);
 
     hostIface =
-        hostServer.add_interface("/xyz/openbmc_project/state/host" + node,
+        hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                  "xyz.openbmc_project.State.Host");
     
     // Interface for IPMI/Redfish initiated host state transitions
@@ -870,13 +870,16 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
     hostIface->initialize();
 
     lg2::info("Created the host interface successfully");
+}
 
+void PowerControl::initializeChassisInterface()
+{
     // Create Chassis Interface
     sdbusplus::asio::object_server chassisServer =
         sdbusplus::asio::object_server(*conn);
 
     chassisIface =
-        chassisServer.add_interface("/xyz/openbmc_project/state/chassis" + node,
+        chassisServer.add_interface("/xyz/openbmc_project/state/chassis" + nodeId,
                                     "xyz.openbmc_project.State.Chassis");
 
     chassisIface->register_property(
@@ -953,6 +956,101 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
     chassisIface->initialize();
 
     lg2::info("Created the chassis interface successfully");
+}
+
+#ifdef CHASSIS_SYSTEM_RESET
+void PowerControl::initializeChassisSystemInterface()
+{
+    // Chassis System Interface
+    sdbusplus::asio::object_server chassisSysServer =
+        sdbusplus::asio::object_server(*conn);
+
+    chassisSysIface = chassisSysServer.add_interface(
+        "/xyz/openbmc_project/state/chassis_system0",
+        "xyz.openbmc_project.State.Chassis");
+
+    chassisSysIface->register_property(
+        "RequestedPowerTransition",
+        std::string("xyz.openbmc_project.State.Chassis.Transition.On"),
+        [this](const std::string& requested, std::string& resp) {
+            if (requested ==
+                "xyz.openbmc_project.State.Chassis.Transition.PowerCycle")
+            {
+                // TODO: systemReset() needs to be moved or made virtual
+                // systemReset();
+                // addRestartCause(RestartCause::command);
+                lg2::info("Chassis system PowerCycle requested");
+            }
+            else
+            {
+                lg2::error("Unrecognized chassis system state transition request.");
+                throw std::invalid_argument("Unrecognized Transition Request");
+                return 0;
+            }
+            resp = requested;
+            return 1;
+        });
+    chassisSysIface->register_property(
+        "CurrentPowerState", std::string(getChassisState(powerState)));
+    chassisSysIface->register_property("LastStateChangeTime", getCurrentTimeMs());
+
+    chassisSysIface->initialize();
+
+    lg2::info("Created the chassis system interface successfully");
+}
+#endif
+
+void PowerControl::initializeBootProgressInterface()
+{
+    // Boot Progress Interface
+    // This interface allows external entities (IPMI, PLDM, etc.) to update boot progress
+    sdbusplus::asio::object_server hostServer =
+        sdbusplus::asio::object_server(*conn);
+    
+    bootProgressIface = 
+        hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
+                                 "xyz.openbmc_project.State.Boot.Progress");
+    
+    // BootProgress property - indicates the current boot stage
+    bootProgressIface->register_property(
+        "BootProgress",
+        std::string("xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified"),
+        [this](const std::string& requested, std::string& resp) {
+            lg2::info("BootProgress updated to: {BOOT_PROGRESS}", "BOOT_PROGRESS", requested);
+            resp = requested;
+            
+            // Update the timestamp when BootProgress changes
+            auto now = std::chrono::system_clock::now();
+            auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+                now.time_since_epoch()).count();
+            
+            if (bootProgressIface)
+            {
+                bootProgressIface->set_property("BootProgressLastUpdate", 
+                                               static_cast<uint64_t>(timestamp));
+            }
+            
+            return 1;
+        });
+    
+    // BootProgressLastUpdate property - timestamp of last update (microseconds since epoch)
+    bootProgressIface->register_property(
+        "BootProgressLastUpdate",
+        static_cast<uint64_t>(0));
+    
+    // BootProgressOem property - OEM-specific boot progress information
+    bootProgressIface->register_property(
+        "BootProgressOem",
+        std::string(""),
+        [](const std::string& requested, std::string& resp) {
+            lg2::info("BootProgressOem updated to: {OEM_PROGRESS}", "OEM_PROGRESS", requested);
+            resp = requested;
+            return 1;
+        });
+    
+    bootProgressIface->initialize();
+    
+    lg2::info("Created the Boot.Progress interface successfully");
 }
 
 bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int value)

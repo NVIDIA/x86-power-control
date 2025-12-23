@@ -201,26 +201,26 @@ public:
     std::string target_state = "HostOff";
 
 
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> bootProgressIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> bootProgressIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
     #ifdef CHASSIS_SYSTEM_RESET
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSysIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSlotIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSysIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> chassisSlotIface;
     #endif
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> powerButtonIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> resetButtonIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> nmiButtonIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> powerButtonIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> resetButtonIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> nmiButtonIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
 
-    static gpiod::line powerButtonMask;
-    static gpiod::line resetButtonMask;
-    static bool nmiButtonMasked = false;
+    gpiod::line powerButtonMask;
+    gpiod::line resetButtonMask;
+    bool nmiButtonMasked = false;
     #if IGNORE_SOFT_RESETS_DURING_POST
-    static bool ignoreNextSoftReset = false;
+    bool ignoreNextSoftReset = false;
     #endif
 
     // Changed from default true to false
@@ -435,18 +435,6 @@ protected:
      */
     std::string appName;
     
-    /**
-     * @brief Static D-Bus interface for host state
-     * 
-     */
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
-    
-    /**
-     * @brief Static D-Bus interface for chassis state
-     * 
-     */
-    static std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
-    
     // UPSTREAM TIMERS
     // These timers are used by the upstream (OpenBMC x86-power-control) functionality
     
@@ -513,15 +501,34 @@ protected:
     void loadConfigValues(boost::asio::io_context& io);
     
     /**
-     * @brief Initialize D-Bus interfaces
+     * @brief Initialize Host D-Bus interface
      * 
-     * Creates and registers the host, chassis D-Bus interfaces, and other upstream D-Bus interfaces.
-     * 
-     * @param conn The D-Bus connection
-     * @param node The node identifier (e.g., "0" for host0)
+     * Creates and registers the host state D-Bus interface for host power transitions.
      */
-    void initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::connection> conn,
-                                   const std::string& node);
+    void initializeHostInterface();
+    
+    /**
+     * @brief Initialize Chassis D-Bus interface
+     * 
+     * Creates and registers the chassis state D-Bus interface for chassis power transitions.
+     */
+    void initializeChassisInterface();
+    
+    /**
+     * @brief Initialize Chassis System D-Bus interface (CHASSIS_SYSTEM_RESET)
+     * 
+     * Creates and registers the chassis system interface for system-level power control.
+     * Only available when CHASSIS_SYSTEM_RESET is defined.
+     */
+    void initializeChassisSystemInterface();
+    
+    /**
+     * @brief Initialize Boot Progress D-Bus interface
+     * 
+     * Creates and registers the Boot.Progress interface for tracking boot stages.
+     * This allows external entities (IPMI, PLDM, etc.) to update boot progress.
+     */
+    void initializeBootProgressInterface();
     
     /**
      * @brief Request GPIO events for a signal
