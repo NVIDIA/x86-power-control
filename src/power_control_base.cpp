@@ -110,6 +110,35 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
               stateHandler, "EVENT", getEventName(event));
 }
 
+<<<<<<< HEAD
+=======
+// Initialize static members
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::hostIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::bootProgressIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisIface = nullptr;
+#ifdef CHASSIS_SYSTEM_RESET
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisSysIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::chassisSlotIface = nullptr;
+#endif
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::powerButtonIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::resetButtonIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::nmiButtonIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::osIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::idButtonIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::nmiOutIface = nullptr;
+std::shared_ptr<sdbusplus::asio::dbus_interface> PowerControl::restartCauseIface = nullptr;
+
+gpiod::line PowerControl::powerButtonMask;
+gpiod::line PowerControl::resetButtonMask;
+bool PowerControl::nmiButtonMasked = false;
+#if IGNORE_SOFT_RESETS_DURING_POST
+bool PowerControl::ignoreNextSoftReset = false;
+#endif
+bool PowerControl::nmiEnabled = false;
+bool PowerControl::nmiWhenPoweredOff = false;
+bool PowerControl::sioEnabled = false;
+
+>>>>>>> 754235c (PowerControl: Fix Compilation Issues)
 PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
     : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),

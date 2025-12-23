@@ -9,6 +9,7 @@
 #include <string_view>
 #include <gpiod.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/container/flat_map.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
 // Forward declarations (these enums are defined in power_control.cpp)
@@ -216,17 +217,25 @@ public:
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
 
+<<<<<<< HEAD
     gpiod::line powerButtonMask;
     gpiod::line resetButtonMask;
     bool nmiButtonMasked = false;
     #if IGNORE_SOFT_RESETS_DURING_POST
     bool ignoreNextSoftReset = false;
+=======
+    static gpiod::line powerButtonMask;
+    static gpiod::line resetButtonMask;
+    static bool nmiButtonMasked;
+    #if IGNORE_SOFT_RESETS_DURING_POST
+    static bool ignoreNextSoftReset;
+>>>>>>> 754235c (PowerControl: Fix Compilation Issues)
     #endif
 
     // Changed from default true to false
-    static bool nmiEnabled = false;
-    static bool nmiWhenPoweredOff = false;
-    static bool sioEnabled = false;
+    static bool nmiEnabled;
+    static bool nmiWhenPoweredOff;
+    static bool sioEnabled;
 
     /**
      * @brief Get the handler function for the current power state
@@ -406,14 +415,6 @@ protected:
      *                            or if requestGPIOEvents() fails for any signal
      */
     void registerGPIOHandlers();
-    
-    /**
-     * @brief Timer map - maps timer names to timeout values in milliseconds
-     * 
-     * This map is dynamically populated from the JSON config file during loadConfigValues().
-     * Contains timeout values for all timers used.
-     */
-    std::map<std::string, int> TimerMap;
     
     /**
      * @brief Reference to the io_context for async operations
