@@ -368,7 +368,7 @@ static void pohCounterTimerStart(std::shared_ptr<sdbusplus::asio::connection> co
     lg2::info("POH timer started");
     // Set the time-out as 1 hour, to align with POH command in ipmid
     pohCounterTimer.expires_after(std::chrono::hours(1));
-    pohCounterTimer.async_wait([conn, powerControl](const boost::system::error_code& ec) {
+    pohCounterTimer.async_wait([conn, &powerControl](const boost::system::error_code& ec) {
         if (ec)
         {
             // operation_aborted is expected if timer is canceled before
@@ -447,7 +447,7 @@ static void currentHostStateMonitor(std::shared_ptr<sdbusplus::asio::connection>
         "type='signal',member='PropertiesChanged', "
         "interface='org.freedesktop.DBus.Properties', "
         "arg0='xyz.openbmc_project.State.Host'",
-        [conn](sdbusplus::message_t& message) {
+        [conn, &powerControl](sdbusplus::message_t& message) {
             std::string intfName;
             std::map<std::string, std::variant<std::string>> properties;
 
@@ -592,7 +592,7 @@ static void nmiReset()
     nmiSetEnableProperty(false);
 }
 
-static void nmiSourcePropertyMonitor(void)
+static void nmiSourcePropertyMonitor(std::shared_ptr<sdbusplus::asio::connection> conn)
 {
     lg2::info("NMI Source Property Monitor");
 
@@ -635,7 +635,7 @@ static void nmiSourcePropertyMonitor(void)
             });
 }
 
-static void setNmiSource()
+static void setNmiSource(std::shared_ptr<sdbusplus::asio::connection> conn)
 {
     conn->async_method_call(
         [](boost::system::error_code ec) {
