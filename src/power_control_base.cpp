@@ -179,6 +179,9 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string
 #ifdef CHASSIS_SYSTEM_RESET
     initializeChassisSystemInterface();
 #endif
+    initializeButtonInterfaces();
+    initializeOSInterface();
+    initializeRestartCauseInterface();
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler()
@@ -1080,6 +1083,279 @@ void PowerControl::initializeBootProgressInterface()
     bootProgressIface->initialize();
     
     lg2::info("Created the Boot.Progress interface successfully");
+}
+
+void PowerControl::initializeButtonInterfaces()
+{
+    // Buttons Service
+    sdbusplus::asio::object_server buttonsServer =
+        sdbusplus::asio::object_server(*conn);
+
+    // Power Button Interface
+    auto powerButtonConfig = powerSignalMap.find("PowerButton");
+    if (powerButtonConfig != powerSignalMap.end() && 
+        !powerButtonConfig->second->lineName.empty())
+    {
+        powerButtonIface = buttonsServer.add_interface(
+            "/xyz/openbmc_project/chassis/buttons/power",
+            "xyz.openbmc_project.Chassis.Buttons");
+
+        powerButtonIface->register_property(
+            "ButtonMasked", false, [this](const bool requested, bool& current) {
+                if (requested)
+                {
+                    if (powerButtonMask)
+                    {
+                        return 1;
+                    }
+                    auto powerOutConfig = powerSignalMap.find("PowerOut");
+                    if (powerOutConfig != powerSignalMap.end())
+                    {
+                        if (!setGPIOOutput(powerOutConfig->second,
+                                           !powerOutConfig->second->polarity))
+                        {
+                            throw std::runtime_error("Failed to request GPIO");
+                            return 0;
+                        }
+                        powerButtonMask = powerOutConfig->second->gpioLine;
+                    }
+                    lg2::info("Power Button Masked.");
+                }
+                else
+                {
+                    if (!powerButtonMask)
+                    {
+                        return 1;
+                    }
+                    lg2::info("Power Button Un-masked");
+                    powerButtonMask.reset();
+                }
+                // Update the mask setting
+                current = requested;
+                return 1;
+            });
+
+        // Check power button state - default to not pressed
+        bool powerButtonPressed = false;
+        if (powerButtonConfig->second->gpioLine)
+        {
+            powerButtonPressed = powerButtonConfig->second->gpioLine.get_value() == 0;
+        }
+
+        powerButtonIface->register_property("ButtonPressed", powerButtonPressed);
+        powerButtonIface->initialize();
+        
+        lg2::info("Created the power button interface successfully");
+    }
+
+    // Reset Button Interface
+    auto resetButtonConfig = powerSignalMap.find("ResetButton");
+    if (resetButtonConfig != powerSignalMap.end() && 
+        !resetButtonConfig->second->lineName.empty())
+    {
+        resetButtonIface = buttonsServer.add_interface(
+            "/xyz/openbmc_project/chassis/buttons/reset",
+            "xyz.openbmc_project.Chassis.Buttons");
+
+        resetButtonIface->register_property(
+            "ButtonMasked", false, [this](const bool requested, bool& current) {
+                if (requested)
+                {
+                    if (resetButtonMask)
+                    {
+                        return 1;
+                    }
+                    auto resetOutConfig = powerSignalMap.find("ResetOut");
+                    if (resetOutConfig != powerSignalMap.end())
+                    {
+                        if (!setGPIOOutput(resetOutConfig->second,
+                                           !resetOutConfig->second->polarity))
+                        {
+                            throw std::runtime_error("Failed to request GPIO");
+                            return 0;
+                        }
+                        resetButtonMask = resetOutConfig->second->gpioLine;
+                    }
+                    lg2::info("Reset Button Masked.");
+                }
+                else
+                {
+                    if (!resetButtonMask)
+                    {
+                        return 1;
+                    }
+                    lg2::info("Reset Button Un-masked");
+                    resetButtonMask.reset();
+                }
+                // Update the mask setting
+                current = requested;
+                return 1;
+            });
+
+        // Check reset button state - default to not pressed
+        bool resetButtonPressed = false;
+        if (resetButtonConfig->second->gpioLine)
+        {
+            resetButtonPressed = resetButtonConfig->second->gpioLine.get_value() == 0;
+        }
+
+        resetButtonIface->register_property("ButtonPressed", resetButtonPressed);
+        resetButtonIface->initialize();
+        
+        lg2::info("Created the reset button interface successfully");
+    }
+
+    // NMI Button Interface
+    auto nmiButtonConfig = powerSignalMap.find("NMIButton");
+    if (nmiButtonConfig != powerSignalMap.end() && 
+        nmiButtonConfig->second->gpioLine)
+    {
+        nmiButtonIface = buttonsServer.add_interface(
+            "/xyz/openbmc_project/chassis/buttons/nmi",
+            "xyz.openbmc_project.Chassis.Buttons");
+
+        nmiButtonIface->register_property(
+            "ButtonMasked", false, [this](const bool requested, bool& current) {
+                if (nmiButtonMasked == requested)
+                {
+                    // NMI button mask is already set as requested, so no change
+                    return 1;
+                }
+                if (requested)
+                {
+                    lg2::info("NMI Button Masked.");
+                    nmiButtonMasked = true;
+                }
+                else
+                {
+                    lg2::info("NMI Button Un-masked.");
+                    nmiButtonMasked = false;
+                }
+                // Update the mask setting
+                current = nmiButtonMasked;
+                return 1;
+            });
+
+        // Check NMI button state
+        bool nmiButtonPressed = false;
+        if (nmiButtonConfig->second->gpioLine)
+        {
+            nmiButtonPressed = nmiButtonConfig->second->gpioLine.get_value() == 0;
+        }
+
+        nmiButtonIface->register_property("ButtonPressed", nmiButtonPressed);
+        nmiButtonIface->initialize();
+        
+        lg2::info("Created the NMI button interface successfully");
+    }
+
+    // NMI Out Interface
+    auto nmiOutConfig = powerSignalMap.find("NMIOut");
+    if (nmiOutConfig != powerSignalMap.end() && 
+        nmiOutConfig->second->gpioLine)
+    {
+        sdbusplus::asio::object_server nmiOutServer =
+            sdbusplus::asio::object_server(*conn);
+
+        nmiOutIface = nmiOutServer.add_interface(
+            "/xyz/openbmc_project/control/host" + nodeId + "/nmi",
+            "xyz.openbmc_project.Control.Host.NMI");
+        
+        // Note: nmiReset method would need to be implemented in the class
+        // For now, register a placeholder that logs a message
+        nmiOutIface->register_method("NMI", [this]() {
+            lg2::info("NMI method called - not yet implemented in base class");
+        });
+        nmiOutIface->initialize();
+        
+        lg2::info("Created the NMI out interface successfully");
+    }
+
+    // ID Button Interface
+    auto idButtonConfig = powerSignalMap.find("IdButton");
+    if (idButtonConfig != powerSignalMap.end() && 
+        idButtonConfig->second->gpioLine)
+    {
+        idButtonIface = buttonsServer.add_interface(
+            "/xyz/openbmc_project/chassis/buttons/id",
+            "xyz.openbmc_project.Chassis.Buttons");
+
+        // Check ID button state
+        bool idButtonPressed = false;
+        if (idButtonConfig->second->gpioLine)
+        {
+            idButtonPressed = idButtonConfig->second->gpioLine.get_value() == 0;
+        }
+
+        idButtonIface->register_property("ButtonPressed", idButtonPressed);
+        idButtonIface->initialize();
+        
+        lg2::info("Created the ID button interface successfully");
+    }
+}
+
+void PowerControl::initializeOSInterface()
+{
+    // OS State Service
+    sdbusplus::asio::object_server osServer =
+        sdbusplus::asio::object_server(*conn);
+
+    // OS State Interface
+    osIface = osServer.add_interface(
+        "/xyz/openbmc_project/state/host" + nodeId,
+        "xyz.openbmc_project.State.OperatingSystem.Status");
+
+    // Default to Inactive state
+    osIface->register_property(
+        "OperatingSystemState",
+        std::string("xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive"));
+
+    osIface->initialize();
+
+    lg2::info("Created the OS state interface successfully");
+}
+
+void PowerControl::initializeRestartCauseInterface()
+{
+    // Restart Cause Service
+    sdbusplus::asio::object_server restartCauseServer =
+        sdbusplus::asio::object_server(*conn);
+
+    // Restart Cause Interface
+    restartCauseIface = restartCauseServer.add_interface(
+        "/xyz/openbmc_project/control/host" + nodeId + "/restart_cause",
+        "xyz.openbmc_project.Control.Host.RestartCause");
+
+    restartCauseIface->register_property(
+        "RestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"));
+
+    restartCauseIface->register_property(
+        "RequestedRestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"),
+        [this](const std::string& requested, std::string& resp) {
+            if (requested ==
+                "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer")
+            {
+                // TODO: addRestartCause(RestartCause::watchdog);
+                lg2::info("Restart cause watchdog requested");
+            }
+            else
+            {
+                throw std::invalid_argument(
+                    "Unrecognized RestartCause Request");
+                return 0;
+            }
+
+            lg2::info("RestartCause requested: {RESTART_CAUSE}",
+                      "RESTART_CAUSE", requested);
+            resp = requested;
+            return 1;
+        });
+
+    restartCauseIface->initialize();
+
+    lg2::info("Created the restart cause interface successfully");
 }
 
 bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int value)

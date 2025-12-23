@@ -532,6 +532,33 @@ protected:
     void initializeBootProgressInterface();
     
     /**
+     * @brief Initialize Button D-Bus interfaces
+     * 
+     * Creates and registers D-Bus interfaces for all button controls:
+     * - Power button interface
+     * - Reset button interface
+     * - NMI button interface
+     * - ID button interface
+     * - NMI out interface
+     */
+    void initializeButtonInterfaces();
+    
+    /**
+     * @brief Initialize OS State D-Bus interface
+     * 
+     * Creates and registers the Operating System Status interface.
+     */
+    void initializeOSInterface();
+    
+    /**
+     * @brief Initialize Restart Cause D-Bus interface
+     * 
+     * Creates and registers the Restart Cause interface for tracking
+     * why the host was restarted.
+     */
+    void initializeRestartCauseInterface();
+    
+    /**
      * @brief Request GPIO events for a signal
      * 
      * Registers async event monitoring for a GPIO signal. The handler function
