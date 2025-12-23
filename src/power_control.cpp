@@ -157,6 +157,30 @@ static uint64_t getCurrentTimeMs()
     return currentTimeMs;
 }
 
+
+#ifdef CHASSIS_SYSTEM_RESET
+enum class SlotPowerState
+{
+    on,
+    off,
+};
+static SlotPowerState slotPowerState;
+static constexpr std::string_view getSlotState(const SlotPowerState state)
+{
+    switch (state)
+    {
+        case SlotPowerState::on:
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            break;
+        case SlotPowerState::off:
+            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            break;
+        default:
+            return "";
+            break;
+    }
+};
+
 static void setSlotPowerState(const SlotPowerState state)
 {
     slotPowerState = state;
@@ -3345,7 +3369,7 @@ int main(int argc, char* argv[])
         hostMiscHandler);
 #endif
 
-    if (powerState != PowerState::on)
+    if (powerControl.getPowerStateName() != "on")
     {
         powerRestore.run();
     }
