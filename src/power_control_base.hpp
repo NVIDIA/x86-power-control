@@ -143,8 +143,6 @@ public:
      */
     static void logEvent(std::string_view stateHandler, Event event);
 
-    PowerState powerState;
-
     std::string hostDbusName = "xyz.openbmc_project.State.Host";
     std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
@@ -231,16 +229,15 @@ public:
     static bool sioEnabled = false;
 
     /**
-     * @brief Get the handler function for a given power state
+     * @brief Get the handler function for the current power state
      * 
      * This virtual function maps PowerState enum values to their corresponding
      * handler functions. Derived classes can override this to add handlers for
      * additional states.
      * 
-     * @param state The power state to get a handler for
-     * @return Function that handles events in the given state, or nullptr if unknown
+     * @return Function that handles events in the current state, or nullptr if unknown
      */
-    virtual std::function<void(Event)> getPowerStateHandler(PowerState state);
+    virtual std::function<void(Event)> getPowerStateHandler();
 
     /**
      * @brief Send an event to the appropriate power state handler
@@ -249,9 +246,8 @@ public:
      * the event to it. If no handler is found, an error is logged.
      * 
      * @param event The event to dispatch
-     * @param currentState The current power state (used to look up the handler)
      */
-    void sendPowerControlEvent(Event event, PowerState currentState);
+    void sendPowerControlEvent(Event event);
 
     /**
      * @brief Set the power state and update D-Bus interfaces
@@ -382,6 +378,11 @@ protected:
     std::string configFilePath;
     std::shared_ptr<sdbusplus::asio::connection> conn;
     std::string node;
+    
+    /**
+     * @brief Current power state
+     */
+    PowerState powerState;
 
     /**
      * @brief Map of GPIO signal names to their handler functions

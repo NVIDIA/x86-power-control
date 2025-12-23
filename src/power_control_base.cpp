@@ -150,10 +150,10 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string
     initializeDBusInterfaces(conn, nodeId);
 }
 
-std::function<void(Event)> PowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> PowerControl::getPowerStateHandler()
 {
     // Map upstream PowerState values to their handler functions
-    switch (state)
+    switch (powerState)
     {
         case PowerState::on:
             return [this](Event e) { this->handlePowerStateOn(e); };
@@ -192,15 +192,15 @@ std::function<void(Event)> PowerControl::getPowerStateHandler(PowerState state)
     }
 }
 
-void PowerControl::sendPowerControlEvent(Event event, PowerState currentState)
+void PowerControl::sendPowerControlEvent(Event event)
 {
     // Use the virtual getPowerStateHandler to get the correct handler
-    std::function<void(Event)> handler = this->getPowerStateHandler(currentState);
+    std::function<void(Event)> handler = this->getPowerStateHandler();
     
     if (handler == nullptr)
     {
         lg2::error("Failed to find handler for power state: {STATE}", "STATE",
-                   static_cast<int>(currentState));
+                   static_cast<int>(powerState));
         return;
     }
     
@@ -770,7 +770,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // if (!powerButtonMask)
                 // {
                     // Use member function sendPowerControlEvent
-                    sendPowerControlEvent(Event::gracefulPowerOffRequest, powerState);
+                    sendPowerControlEvent(Event::gracefulPowerOffRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Off requested");
                 // }
@@ -781,7 +781,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 //     return 0;
                 // }
 
-                // sendPowerControlEvent(Event::gracefulPowerOffRequest, powerState);
+                // sendPowerControlEvent(Event::gracefulPowerOffRequest);
                 // addRestartCause(RestartCause::command);
             }
             else if (requested ==
@@ -790,7 +790,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check power button mask when implemented
                 // if (!powerButtonMask)
                 // {
-                    sendPowerControlEvent(Event::powerOnRequest, powerState);
+                    sendPowerControlEvent(Event::powerOnRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to On requested");
                 // }
@@ -807,7 +807,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check power button mask when implemented
                 // if (!powerButtonMask)
                 // {
-                    sendPowerControlEvent(Event::powerCycleRequest, powerState);
+                    sendPowerControlEvent(Event::powerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Reboot requested");
                 // }
@@ -825,7 +825,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check reset button mask when implemented
                 // if (!resetButtonMask)
                 // {
-                    sendPowerControlEvent(Event::gracefulPowerCycleRequest, powerState);
+                    sendPowerControlEvent(Event::gracefulPowerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to GracefulWarmReboot requested");
                 // }
@@ -843,7 +843,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check reset button mask when implemented
                 // if (!resetButtonMask)
                 // {
-                    sendPowerControlEvent(Event::resetRequest, powerState);
+                    sendPowerControlEvent(Event::resetRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to ForceWarmReboot requested");
                 // }
@@ -891,7 +891,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check power button mask when implemented
                 // if (!powerButtonMask)
                 // {
-                    sendPowerControlEvent(Event::powerOffRequest, powerState);
+                    sendPowerControlEvent(Event::powerOffRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to Off requested");
                 // }
@@ -908,7 +908,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check power button mask when implemented
                 // if (!powerButtonMask)
                 // {
-                    sendPowerControlEvent(Event::powerOnRequest, powerState);
+                    sendPowerControlEvent(Event::powerOnRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to On requested");
                 // }
@@ -925,7 +925,7 @@ void PowerControl::initializeDBusInterfaces(std::shared_ptr<sdbusplus::asio::con
                 // TODO: Check power button mask when implemented
                 // if (!powerButtonMask)
                 // {
-                    sendPowerControlEvent(Event::powerCycleRequest, powerState);
+                    sendPowerControlEvent(Event::powerCycleRequest);
                     // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to PowerCycle requested");
                 // }
@@ -1047,7 +1047,7 @@ void PowerControl::startTimer(int timeoutMs,
         }
         
         lg2::info("Timer expired");
-        sendPowerControlEvent(eventOnExpiry, powerState);
+        sendPowerControlEvent(eventOnExpiry);
     });
 }
 
