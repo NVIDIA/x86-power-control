@@ -17,7 +17,6 @@
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
 
-#include <sys/sysinfo.h>
 #include <systemd/sd-journal.h>
 
 #include <boost/asio/io_context.hpp>
@@ -251,13 +250,6 @@ static void psPowerOKFailedLog()
         TimerMap["PsPowerOKWatchdogMs"], NULL);
 }
 
-static void powerRestorePolicyLog()
-{
-    sd_journal_send("MESSAGE=PowerControl: power restore policy applied",
-                    "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.PowerRestorePolicyApplied", NULL);
-}
-
 static void nmiButtonPressLog()
 {
     sd_journal_send("MESSAGE=PowerControl: NMI button pressed", "PRIORITY=%i",
@@ -272,150 +264,12 @@ static void nmiDiagIntLog()
                     "OpenBMC.0.1.NMIDiagnosticInterrupt", NULL);
 }
 
-PersistentState::PersistentState()
-{
-    // create the power control directory if it doesn't exist
-    std::error_code ec;
-    if (!(std::filesystem::create_directories(powerControlDir, ec)))
-    {
-        if (ec.value() != 0)
-        {
-            lg2::error("failed to create {DIR_NAME}: {ERROR_MSG}", "DIR_NAME",
-                       powerControlDir.string(), "ERROR_MSG", ec.message());
-            throw std::runtime_error("Failed to create state directory");
-        }
-    }
-
-    // read saved state, it's ok, if the file doesn't exists
-    std::ifstream appStateStream(powerControlDir / stateFile);
-    if (!appStateStream.is_open())
-    {
-        lg2::info("Cannot open state file \'{PATH}\'", "PATH",
-                  std::string(powerControlDir / stateFile));
-        stateData = nlohmann::json({});
-        return;
-    }
-    try
-    {
-        appStateStream >> stateData;
-        if (stateData.is_discarded())
-        {
-            lg2::info("Cannot parse state file \'{PATH}\'", "PATH",
-                      std::string(powerControlDir / stateFile));
-            stateData = nlohmann::json({});
-            return;
-        }
-    }
-    catch (const std::exception& ex)
-    {
-        lg2::info("Cannot read state file \'{PATH}\'", "PATH",
-                  std::string(powerControlDir / stateFile));
-        stateData = nlohmann::json({});
-        return;
-    }
-}
-PersistentState::~PersistentState()
-{
-    saveState();
-}
-const std::string PersistentState::get(Params parameter)
-{
-    auto val = stateData.find(getName(parameter));
-    if (val != stateData.end())
-    {
-        return val->get<std::string>();
-    }
-    return getDefault(parameter);
-}
-void PersistentState::set(Params parameter, const std::string& value)
-{
-    stateData[getName(parameter)] = value;
-    saveState();
-}
-
-const std::string PersistentState::getName(const Params parameter)
-{
-    switch (parameter)
-    {
-        case Params::PowerState:
-            return "PowerState";
-    }
-    return "";
-}
-const std::string PersistentState::getDefault(const Params parameter)
-{
-    switch (parameter)
-    {
-        case Params::PowerState:
-            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
-    }
-    return "";
-}
-void PersistentState::saveState()
-{
-    std::ofstream appStateStream(powerControlDir / stateFile, std::ios::trunc);
-    if (!appStateStream.is_open())
-    {
-        lg2::error("Cannot write state file \'{PATH}\'", "PATH",
-                   std::string(powerControlDir / stateFile));
-        return;
-    }
-    appStateStream << stateData.dump(indentationSize);
-}
-
-static constexpr const char* setingsService = "xyz.openbmc_project.Settings";
-static constexpr const char* powerRestorePolicyIface =
-    "xyz.openbmc_project.Control.Power.RestorePolicy";
 #ifdef USE_ACBOOT
 static constexpr const char* powerACBootObject =
     "/xyz/openbmc_project/control/host0/ac_boot";
 static constexpr const char* powerACBootIface =
     "xyz.openbmc_project.Common.ACBoot";
 #endif // USE_ACBOOT
-
-namespace match_rules = sdbusplus::bus::match::rules;
-
-static int powerRestoreConfigHandler(sd_bus_message* m, void* context,
-                                     sd_bus_error*)
-{
-    if (context == nullptr || m == nullptr)
-    {
-        throw std::runtime_error("Invalid match");
-    }
-    sdbusplus::message_t message(m);
-    PowerRestoreController* powerRestore =
-        static_cast<PowerRestoreController*>(context);
-
-    if (std::string(message.get_member()) == "InterfacesAdded")
-    {
-        sdbusplus::message::object_path path;
-        boost::container::flat_map<std::string, dbusPropertiesList> data;
-
-        message.read(path, data);
-
-        for (auto& [iface, properties] : data)
-        {
-            if ((iface == powerRestorePolicyIface)
-#ifdef USE_ACBOOT
-                || (iface == powerACBootIface)
-#endif // USE_ACBOOT
-            )
-            {
-                powerRestore->setProperties(properties);
-            }
-        }
-    }
-    else if (std::string(message.get_member()) == "PropertiesChanged")
-    {
-        std::string interfaceName;
-        dbusPropertiesList propertiesChanged;
-
-        message.read(interfaceName, propertiesChanged);
-
-        powerRestore->setProperties(propertiesChanged);
-    }
-    return 1;
-}
 
 
 static int setMaskedGPIOOutputForMs(gpiod::line& maskedGPIOLine,
@@ -1191,7 +1045,6 @@ int main(int argc, char* argv[])
     using namespace power_control;
     static boost::asio::io_context io;
     PersistentState appState;
-    PowerRestoreController powerRestore(io);
 
     static std::string node = "0";
     static const std::string appName = "power-control";\
@@ -1202,9 +1055,10 @@ int main(int argc, char* argv[])
     }
     lg2::info("Start Chassis power control service for host : {NODE}", "NODE",
               node);
-
-
-    NVL144PowerControl powerControl(io, "config/power-config-host0.json", node);
+    
+    std::shared_ptr<sdbusplus::asio::connection> conn = std::make_shared<sdbusplus::asio::connection>(io);
+    NVL144PowerControl powerControl(io, conn, "config/power-config-host0.json", node);
+    PowerRestoreController powerRestore(io, conn, node, powerControl);
 
 #ifdef USE_PLT_RST
     sdbusplus::bus::match_t pltRstMatch(

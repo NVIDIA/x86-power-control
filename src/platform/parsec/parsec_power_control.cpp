@@ -48,17 +48,17 @@ void ParsecPowerControl::gb300pdbMainPowerOkHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent, powerState);
 }
 
-std::function<void(Event)> ParsecPowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> ParsecPowerControl::getPowerStateHandler()
 {
     // Parsec does not define new PowerState values, so delegate everything
     // to VRPowerControl which handles all VR and upstream states
-    switch (state)
+    switch (powerState)
     {
-        // TODO: Add Parsec-specific states here, that are overriden by ParsecPowerControl
+        // TODO: Add Parsec-specific states here, that are overridden by ParsecPowerControl
         
         // Delegate all states to parent VRPowerControl
         default:
-            return VRPowerControl::getPowerStateHandler(state);
+            return VRPowerControl::getPowerStateHandler();
     }
 }
 

@@ -28,7 +28,10 @@ namespace power_control
 class NVL144PowerControl : public VRPowerControl
 {
 public:
-    NVL144PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0");
+    NVL144PowerControl(boost::asio::io_context& ioContext,
+                       std::shared_ptr<sdbusplus::asio::connection> conn,
+                       const std::string& configFilePath,
+                       const std::string& node = "0");
 
     virtual ~NVL144PowerControl() = default;
 
@@ -40,7 +43,7 @@ public:
      * @param state The power state to get a handler for
      * @return Function that handles events in the given state
      */
-    std::function<void(Event)> getPowerStateHandler(PowerState state) override;
+    std::function<void(Event)> getPowerStateHandler() override;
 
 protected:
     /**

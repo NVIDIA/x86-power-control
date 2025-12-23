@@ -367,6 +367,13 @@ public:
     virtual std::string_view getChassisState(const PowerState state);
 
     /**
+     * @brief Get the current power state
+     * 
+     * @return Current PowerState enum value
+     */
+    PowerState getPowerState() const { return powerState; }
+
+    /**
      * @brief Get a human-readable name for a power state (virtual)
      * 
      * Converts a PowerState enum to a string for logging purposes.

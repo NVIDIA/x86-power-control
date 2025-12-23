@@ -116,8 +116,10 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
               stateHandler, "EVENT", getEventName(event));
 }
 
-PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
-    : ioContext(ioContext), conn(std::make_shared<sdbusplus::asio::connection>(ioContext)), nodeId(node), appName("power-control"),
+PowerControl::PowerControl(boost::asio::io_context& ioContext,
+                           std::shared_ptr<sdbusplus::asio::connection> conn,
+                           const std::string& node)
+    : ioContext(ioContext), conn(conn), nodeId(node), appName("power-control"),
       gpioAssertTimer(ioContext),
       powerCycleTimer(ioContext),
       gracefulPowerOffTimer(ioContext),
@@ -130,7 +132,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext, const std::string
       slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
-    loadConfigValues(ioContext, configFilePath);
+    loadConfigValues(ioContext);
 
     // Register base class GPIO handlers
     // These handlers are available in all platforms and can be overridden by derived classes

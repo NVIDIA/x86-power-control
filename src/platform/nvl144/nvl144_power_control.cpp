@@ -15,8 +15,11 @@ namespace power_control
 {
 
 // Constructor: Assigns handlers and registers events for NVL144-specific GPIOs
-NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
-    : VRPowerControl(ioContext, configFilePath, node)  // Call parent constructor (registers VR GPIOs)
+NVL144PowerControl::NVL144PowerControl(boost::asio::io_context& ioContext,
+                                       std::shared_ptr<sdbusplus::asio::connection> conn,
+                                       const std::string& configFilePath,
+                                       const std::string& node)
+    : VRPowerControl(ioContext, conn, configFilePath, node)  // Call parent constructor (registers VR GPIOs)
 {
     // powerSignalMap is now populated by base class PowerControl::loadConfigValues()
     // VR handlers already added to gpioHandlerMap by VRPowerControl constructor
@@ -44,11 +47,11 @@ void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent, powerState);
 }
 
-std::function<void(Event)> NVL144PowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
 {
     // NVL144 does not define new PowerState values, so delegate everything
     // to VRPowerControl which handles all VR and upstream states
-    switch (state)
+    switch (powerState)
     {
         // No NVL144-specific states (empty switch)
         case PowerState::off:
@@ -63,9 +66,9 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler(PowerState s
             return [this](Event e) { this->handleWaitForCPUResetAssert(e); };
         case PowerState::waitForHPMPowerGoodDeAssert:
             return [this](Event e) { this->handleWaitForHPMPowerGoodDeAssert(e); };
-        // Add more as Power State Handlers are overrident and implemented by NVL144PowerControl
+        // Add more as Power State Handlers are overridden and implemented by NVL144PowerControl
         default:
-            return VRPowerControl::getPowerStateHandler(state);
+            return VRPowerControl::getPowerStateHandler();
     }
 }
 

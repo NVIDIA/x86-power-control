@@ -15,8 +15,11 @@ namespace power_control
 {
 
 // Constructor: Assigns handlers and registers events for common VR/HPM GPIOs
-VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0")
-    : PowerControl(ioContext, configFilePath, node), 
+VRPowerControl::VRPowerControl(boost::asio::io_context& ioContext,
+                               std::shared_ptr<sdbusplus::asio::connection> conn,
+                               const std::string& configFilePath,
+                               const std::string& node)
+    : PowerControl(ioContext, conn, node), 
       pdbMainPowerOkWatchdogTimer(ioContext),
       hpmPowerGoodWatchdogTimer(ioContext),
       cpuResetWatchdogTimer(ioContext),
@@ -138,10 +141,10 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent, powerState);
 }
 
-std::function<void(Event)> VRPowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 {
     // Map VR-specific PowerState values to their handler functions
-    switch (state)
+    switch (powerState)
     {
         // VR-specific states
         case PowerState::waitForPDBMainPowerOk:
@@ -167,7 +170,7 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler(PowerState state
         
         // Delegate upstream states to base class
         default:
-            return PowerControl::getPowerStateHandler(state);
+            return PowerControl::getPowerStateHandler();
     }
 }
 

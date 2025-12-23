@@ -49,22 +49,21 @@ void C2PowerControl::c2pdbPSUPowerOkHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent, powerState);
 }
 
-std::function<void(Event)> C2PowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> C2PowerControl::getPowerStateHandler()
 {
-
-    switch (state)
+    switch (powerState)
     {
         // C2 modifies the handleWaitForHPMPowerGoodDeAssert and handlePowerStateOff handlers to handle the C2 PDB 12V rails.
-        case PowerState::handleWaitForHPMPowerGoodDeAssert:
+        case PowerState::waitForHPMPowerGoodDeAssert:
             return [this](Event e) { this->handleWaitForHPMPowerGoodDeAssert(e); };
-        case PowerState::handlePowerStateOff:
+        case PowerState::off:
             return [this](Event e) { this->handlePowerStateOff(e); };
         
         // TODO: Add any other C2-specific states here...
 
-        // Delegate all states note overridden by C2 to parent VRPowerControl
+        // Delegate all states not overridden by C2 to parent VRPowerControl
         default:
-            return VRPowerControl::getPowerStateHandler(state);
+            return VRPowerControl::getPowerStateHandler();
     }
 }
 

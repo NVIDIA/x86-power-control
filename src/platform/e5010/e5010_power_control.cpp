@@ -31,17 +31,17 @@ E5010PowerControl::E5010PowerControl(boost::asio::io_context& ioContext,
     registerGPIOHandlers();
 }
 
-std::function<void(Event)> E5010PowerControl::getPowerStateHandler(PowerState state)
+std::function<void(Event)> E5010PowerControl::getPowerStateHandler()
 {
     // E5010 does not define new PowerState values, so delegate everything
     // to VRPowerControl which handles all VR and upstream states
-    switch (state)
+    switch (powerState)
     {
-        // TODO: Add E5010-specific states here, that are overriden by E5010PowerControl
+        // TODO: Add E5010-specific states here, that are overridden by E5010PowerControl
         
         // Delegate all states to parent VRPowerControl
         default:
-            return VRPowerControl::getPowerStateHandler(state);
+            return VRPowerControl::getPowerStateHandler();
     }
 }
 

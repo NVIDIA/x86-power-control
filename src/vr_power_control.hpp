@@ -52,7 +52,10 @@ struct BoardPresence
 class VRPowerControl : public PowerControl
 {
 public:
-    VRPowerControl(boost::asio::io_context& ioContext, const std::string& configFilePath, std::string node = "0");
+    VRPowerControl(boost::asio::io_context& ioContext,
+                   std::shared_ptr<sdbusplus::asio::connection> conn,
+                   const std::string& configFilePath,
+                   const std::string& node);
     virtual ~VRPowerControl() = default;
 
     /**
@@ -64,7 +67,7 @@ public:
      * @param state The power state to get a handler for
      * @return Function that handles events in the given state, or nullptr if unknown
      */
-    std::function<void(Event)> getPowerStateHandler(PowerState state) override;
+    std::function<void(Event)> getPowerStateHandler() override;
 
     /**
      * @brief Get the host state dbus property value for a given power state (VR override)

@@ -41,7 +41,7 @@ public:
      * @param state The power state to get a handler for
      * @return Function that handles events in the given state
      */
-    std::function<void(Event)> getPowerStateHandler(PowerState state) override;
+    std::function<void(Event)> getPowerStateHandler() override;
 
 protected:
     /**
