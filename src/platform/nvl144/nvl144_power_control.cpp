@@ -5,6 +5,8 @@
 
 #include "nvl144_power_control.hpp"
 
+#include <phosphor-logging/lg2.hpp>
+
 // External references to global variables from power_control.cpp
 namespace power_control
 {
@@ -13,6 +15,8 @@ extern PowerState powerState;
 
 namespace power_control
 {
+// Type aliases for convenience
+using Event = PowerControl::Event;
 
 // Constructor: Assigns handlers and registers events for NVL144-specific GPIOs
 NVL144PowerControl::NVL144PowerControl(
@@ -50,7 +54,7 @@ void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::nvl144pdbMainPowerOkAssert
                                   : Event::nvl144pdbMainPowerOkDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
