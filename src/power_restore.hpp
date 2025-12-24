@@ -6,14 +6,16 @@
 #pragma once
 
 #include "power_control_base.hpp"
+
+#include <sys/sysinfo.h>
+#include <systemd/sd-journal.h>
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <nlohmann/json.hpp>
-#include <sdbusplus/asio/object_server.hpp>
 #include <phosphor-logging/lg2.hpp>
-#include <systemd/sd-journal.h>
-#include <sys/sysinfo.h>
+#include <sdbusplus/asio/object_server.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -41,8 +43,8 @@ using dbusPropertiesList =
  * @brief Persistent State Manager
  *
  * This manager stores runtime parameters that are supposed to be
- * persistent over BMC reboots. It provides a simple Get/Set interface and handles
- * default values, hardcoded in getDefault() method.
+ * persistent over BMC reboots. It provides a simple Get/Set interface and
+ * handles default values, hardcoded in getDefault() method.
  * @note: currently only string parameters supported
  */
 class PersistentState
@@ -69,8 +71,9 @@ class PersistentState
         {
             if (ec.value() != 0)
             {
-                lg2::error("failed to create {DIR_NAME}: {ERROR_MSG}", "DIR_NAME",
-                           powerControlDir.string(), "ERROR_MSG", ec.message());
+                lg2::error("failed to create {DIR_NAME}: {ERROR_MSG}",
+                           "DIR_NAME", powerControlDir.string(), "ERROR_MSG",
+                           ec.message());
                 throw std::runtime_error("Failed to create state directory");
             }
         }
@@ -103,7 +106,7 @@ class PersistentState
             return;
         }
     }
-    
+
     /**
      * @brief Persistent storage cleanup
      *
@@ -113,7 +116,7 @@ class PersistentState
     {
         saveState();
     }
-    
+
     /**
      * @brief Get parameter value from the storage
      *
@@ -131,7 +134,7 @@ class PersistentState
         }
         return getDefault(parameter);
     }
-    
+
     /**
      * @brief Store parameter value
      *
@@ -169,7 +172,7 @@ class PersistentState
         }
         return "";
     }
-    
+
     /**
      * @brief Get default parameter value
      *
@@ -186,13 +189,14 @@ class PersistentState
         }
         return "";
     }
-    
+
     /**
      * @brief Save cache to file on disk
      */
     void saveState()
     {
-        std::ofstream appStateStream(powerControlDir / stateFile, std::ios::trunc);
+        std::ofstream appStateStream(powerControlDir / stateFile,
+                                     std::ios::trunc);
         if (!appStateStream.is_open())
         {
             lg2::error("Cannot write state file \'{PATH}\'", "PATH",
@@ -221,70 +225,73 @@ class PowerRestoreController
                            PowerControl& powerControlRef,
                            PersistentState& appStateRef) :
         policyInvoked(false), powerRestoreDelay(-1), powerRestoreTimer(io),
-        timerFired(false), conn(conn), node(node), powerControl(powerControlRef),
-        appState(appStateRef)
+        timerFired(false), conn(conn), node(node),
+        powerControl(powerControlRef), appState(appStateRef)
     {}
     /**
      * @brief Power Restore entry point.
      *
      * Call this to start Power Restore algorithm.
      */
-     void run()
-     {
-         std::string powerRestorePolicyObject =
-             "/xyz/openbmc_project/control/host" + node + "/power_restore_policy";
-         powerRestorePolicyLog();
-         // this list only needs to be created once
-         if (matches.empty())
-         {
-             matches.emplace_back(
-                 *conn,
-                 match_rules::interfacesAdded() +
-                     match_rules::argNpath(0, powerRestorePolicyObject) +
-                     match_rules::sender(settingsService),
-                 powerRestoreConfigHandler, this);
-     #ifdef USE_ACBOOT
-             matches.emplace_back(*conn,
-                                  match_rules::interfacesAdded() +
-                                      match_rules::argNpath(0, powerACBootObject) +
-                                      match_rules::sender(settingsService),
-                                  powerRestoreConfigHandler, this);
-             matches.emplace_back(*conn,
-                                  match_rules::propertiesChanged(powerACBootObject,
-                                                                 powerACBootIface) +
-                                      match_rules::sender(settingsService),
-                                  powerRestoreConfigHandler, this);
-     #endif // USE_ACBOOT
-         }
-     
-         // Check if it's already on DBus
-         conn->async_method_call(
-             [this](boost::system::error_code ec,
-                    const dbusPropertiesList properties) {
-                 if (ec)
-                 {
-                     return;
-                 }
-                 setProperties(properties);
-             },
-             settingsService, powerRestorePolicyObject,
-             "org.freedesktop.DBus.Properties", "GetAll", powerRestorePolicyIface);
-     
-     #ifdef USE_ACBOOT
-         // Check if it's already on DBus
-         conn->async_method_call(
-             [this](boost::system::error_code ec,
-                    const dbusPropertiesList properties) {
-                 if (ec)
-                 {
-                     return;
-                 }
-                 setProperties(properties);
-             },
-             settingsService, powerACBootObject, "org.freedesktop.DBus.Properties",
-             "GetAll", powerACBootIface);
-     #endif
-     }
+    void run()
+    {
+        std::string powerRestorePolicyObject =
+            "/xyz/openbmc_project/control/host" + node +
+            "/power_restore_policy";
+        powerRestorePolicyLog();
+        // this list only needs to be created once
+        if (matches.empty())
+        {
+            matches.emplace_back(
+                *conn,
+                match_rules::interfacesAdded() +
+                    match_rules::argNpath(0, powerRestorePolicyObject) +
+                    match_rules::sender(settingsService),
+                powerRestoreConfigHandler, this);
+#ifdef USE_ACBOOT
+            matches.emplace_back(
+                *conn,
+                match_rules::interfacesAdded() +
+                    match_rules::argNpath(0, powerACBootObject) +
+                    match_rules::sender(settingsService),
+                powerRestoreConfigHandler, this);
+            matches.emplace_back(*conn,
+                                 match_rules::propertiesChanged(
+                                     powerACBootObject, powerACBootIface) +
+                                     match_rules::sender(settingsService),
+                                 powerRestoreConfigHandler, this);
+#endif // USE_ACBOOT
+        }
+
+        // Check if it's already on DBus
+        conn->async_method_call(
+            [this](boost::system::error_code ec,
+                   const dbusPropertiesList properties) {
+                if (ec)
+                {
+                    return;
+                }
+                setProperties(properties);
+            },
+            settingsService, powerRestorePolicyObject,
+            "org.freedesktop.DBus.Properties", "GetAll",
+            powerRestorePolicyIface);
+
+#ifdef USE_ACBOOT
+        // Check if it's already on DBus
+        conn->async_method_call(
+            [this](boost::system::error_code ec,
+                   const dbusPropertiesList properties) {
+                if (ec)
+                {
+                    return;
+                }
+                setProperties(properties);
+            },
+            settingsService, powerACBootObject,
+            "org.freedesktop.DBus.Properties", "GetAll", powerACBootIface);
+#endif
+    }
     /**
      * @brief Initialize configuration parameters.
      *
@@ -292,52 +299,53 @@ class PowerRestoreController
      * algorithm configuration.
      * @param props - map of property names and values
      */
-     void setProperties(const dbusPropertiesList& props)
-     {
-         for (auto& [property, propValue] : props)
-         {
-             if (property == "PowerRestorePolicy")
-             {
-                 const std::string* value = std::get_if<std::string>(&propValue);
-                 if (value == nullptr)
-                 {
-                     lg2::error("Unable to read Power Restore Policy");
-                     continue;
-                 }
-                 powerRestorePolicy = *value;
-             }
-             else if (property == "PowerRestoreDelay")
-             {
-                 const uint64_t* value = std::get_if<uint64_t>(&propValue);
-                 if (value == nullptr)
-                 {
-                     lg2::error("Unable to read Power Restore Delay");
-                     continue;
-                 }
-                 powerRestoreDelay = *value / 1000000; // usec to sec
-             }
-     #ifdef USE_ACBOOT
-             else if (property == "ACBoot")
-             {
-                 const std::string* value = std::get_if<std::string>(&propValue);
-                 if (value == nullptr)
-                 {
-                     lg2::error("Unable to read AC Boot status");
-                     continue;
-                 }
-                 acBoot = *value;
-             }
-     #endif // USE_ACBOOT
-         }
-         invokeIfReady();
-     }
+    void setProperties(const dbusPropertiesList& props)
+    {
+        for (auto& [property, propValue] : props)
+        {
+            if (property == "PowerRestorePolicy")
+            {
+                const std::string* value = std::get_if<std::string>(&propValue);
+                if (value == nullptr)
+                {
+                    lg2::error("Unable to read Power Restore Policy");
+                    continue;
+                }
+                powerRestorePolicy = *value;
+            }
+            else if (property == "PowerRestoreDelay")
+            {
+                const uint64_t* value = std::get_if<uint64_t>(&propValue);
+                if (value == nullptr)
+                {
+                    lg2::error("Unable to read Power Restore Delay");
+                    continue;
+                }
+                powerRestoreDelay = *value / 1000000; // usec to sec
+            }
+#ifdef USE_ACBOOT
+            else if (property == "ACBoot")
+            {
+                const std::string* value = std::get_if<std::string>(&propValue);
+                if (value == nullptr)
+                {
+                    lg2::error("Unable to read AC Boot status");
+                    continue;
+                }
+                acBoot = *value;
+            }
+#endif // USE_ACBOOT
+        }
+        invokeIfReady();
+    }
 
   private:
     // D-Bus service and interface constants
-    static constexpr const char* settingsService = "xyz.openbmc_project.Settings";
+    static constexpr const char* settingsService =
+        "xyz.openbmc_project.Settings";
     static constexpr const char* powerRestorePolicyIface =
         "xyz.openbmc_project.Control.Power.RestorePolicy";
-    
+
     bool policyInvoked;
     std::string powerRestorePolicy;
     int powerRestoreDelay;
@@ -351,10 +359,10 @@ class PowerRestoreController
     std::string node;
     PowerControl& powerControl;
     PersistentState& appState;
-    
+
     /**
      * @brief Log that power restore policy was applied
-     * 
+     *
      * Sends a Redfish event log entry for power restore policy application.
      */
     void powerRestorePolicyLog()
@@ -363,13 +371,13 @@ class PowerRestoreController
                         "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
                         "OpenBMC.0.1.PowerRestorePolicyApplied", NULL);
     }
-    
+
     /**
      * @brief D-Bus match callback for power restore configuration changes
-     * 
+     *
      * Handles InterfacesAdded and PropertiesChanged signals for power restore
      * policy configuration.
-     * 
+     *
      * @param m The sd_bus message
      * @param context Pointer to PowerRestoreController instance
      * @param error SD-Bus error (unused)
@@ -416,136 +424,141 @@ class PowerRestoreController
         }
         return 1;
     }
-    
+
     /**
      * @brief Check if all required algorithms parameters are set
      *
      * Call this after set any of Power Restore algorithm parameters. Once all
      * parameters are set this will run invoke() function.
      */
-     void invokeIfReady()
-     {
-         if ((powerRestorePolicy.empty()) || (powerRestoreDelay < 0))
-         {
-             return;
-         }
-     #ifdef USE_ACBOOT
-         if (acBoot.empty() || acBoot == "Unknown")
-         {
-             return;
-         }
-     #endif
-     
-         matches.clear();
-         if (!timerFired)
-         {
-             // Calculate the delay from now to meet the requested delay
-             // Subtract the approximate uboot time
-             static constexpr const int ubootSeconds = 20;
-             int delay = powerRestoreDelay - ubootSeconds;
-             // Subtract the time since boot
-             struct sysinfo info = {};
-             if (sysinfo(&info) == 0)
-             {
-                 delay -= info.uptime;
-             }
-     
-             if (delay > 0)
-             {
-                 powerRestoreTimer.expires_after(std::chrono::seconds(delay));
-                 lg2::info("Power Restore delay of {DELAY} seconds started", "DELAY",
-                           delay);
-                 powerRestoreTimer.async_wait([this](const boost::system::error_code
-                                                         ec) {
-                     if (ec)
-                     {
-                         // operation_aborted is expected if timer is canceled before
-                         // completion.
-                         if (ec == boost::asio::error::operation_aborted)
-                         {
-                             return;
-                         }
-                         lg2::error(
-                             "power restore policy async_wait failed: {ERROR_MSG}",
-                             "ERROR_MSG", ec.message());
-                     }
-                     else
-                     {
-                         lg2::info("Power Restore delay timer expired");
-                     }
-                     invoke();
-                 });
-                 timerFired = true;
-             }
-             else
-             {
-                 invoke();
-             }
-         }
-     }
+    void invokeIfReady()
+    {
+        if ((powerRestorePolicy.empty()) || (powerRestoreDelay < 0))
+        {
+            return;
+        }
+#ifdef USE_ACBOOT
+        if (acBoot.empty() || acBoot == "Unknown")
+        {
+            return;
+        }
+#endif
+
+        matches.clear();
+        if (!timerFired)
+        {
+            // Calculate the delay from now to meet the requested delay
+            // Subtract the approximate uboot time
+            static constexpr const int ubootSeconds = 20;
+            int delay = powerRestoreDelay - ubootSeconds;
+            // Subtract the time since boot
+            struct sysinfo info = {};
+            if (sysinfo(&info) == 0)
+            {
+                delay -= info.uptime;
+            }
+
+            if (delay > 0)
+            {
+                powerRestoreTimer.expires_after(std::chrono::seconds(delay));
+                lg2::info("Power Restore delay of {DELAY} seconds started",
+                          "DELAY", delay);
+                powerRestoreTimer.async_wait([this](
+                                                 const boost::system::error_code
+                                                     ec) {
+                    if (ec)
+                    {
+                        // operation_aborted is expected if timer is canceled
+                        // before completion.
+                        if (ec == boost::asio::error::operation_aborted)
+                        {
+                            return;
+                        }
+                        lg2::error(
+                            "power restore policy async_wait failed: {ERROR_MSG}",
+                            "ERROR_MSG", ec.message());
+                    }
+                    else
+                    {
+                        lg2::info("Power Restore delay timer expired");
+                    }
+                    invoke();
+                });
+                timerFired = true;
+            }
+            else
+            {
+                invoke();
+            }
+        }
+    }
     /**
      * @brief Actually perform power restore actions.
      *
      * Take Power Restore actions according to Policy and other parameters.
      */
-     void invoke()
-     {
-         // we want to run Power Restore only once
-         if (policyInvoked)
-         {
-             return;
-         }
-         policyInvoked = true;
-     
-         lg2::info("Invoking Power Restore Policy {POLICY}", "POLICY",
-                   powerRestorePolicy);
-         if (powerRestorePolicy ==
-             "xyz.openbmc_project.Control.Power.RestorePolicy.Policy.AlwaysOn")
-         {
-             powerControl.sendPowerControlEvent(PowerControl::Event::powerOnRequest);
-             setRestartCauseProperty(getRestartCause(RestartCause::powerPolicyOn));
-         }
-         else if (powerRestorePolicy ==
-                  "xyz.openbmc_project.Control.Power.RestorePolicy.Policy.Restore")
-         {
-             if (wasPowerDropped())
-             {
-                 lg2::info("Power was dropped, restoring Host On state");
-                 powerControl.sendPowerControlEvent(PowerControl::Event::powerOnRequest);
-                 setRestartCauseProperty(
-                     getRestartCause(RestartCause::powerPolicyRestore));
-             }
-             else
-             {
-                 lg2::info("No power drop, restoring Host Off state");
-             }
-         }
-         // We're done with the previous power state for the restore policy, so store
-         // the current state
-         savePowerState();
-     }
-     
+    void invoke()
+    {
+        // we want to run Power Restore only once
+        if (policyInvoked)
+        {
+            return;
+        }
+        policyInvoked = true;
+
+        lg2::info("Invoking Power Restore Policy {POLICY}", "POLICY",
+                  powerRestorePolicy);
+        if (powerRestorePolicy ==
+            "xyz.openbmc_project.Control.Power.RestorePolicy.Policy.AlwaysOn")
+        {
+            powerControl.sendPowerControlEvent(
+                PowerControl::Event::powerOnRequest);
+            setRestartCauseProperty(
+                getRestartCause(RestartCause::powerPolicyOn));
+        }
+        else if (
+            powerRestorePolicy ==
+            "xyz.openbmc_project.Control.Power.RestorePolicy.Policy.Restore")
+        {
+            if (wasPowerDropped())
+            {
+                lg2::info("Power was dropped, restoring Host On state");
+                powerControl.sendPowerControlEvent(
+                    PowerControl::Event::powerOnRequest);
+                setRestartCauseProperty(
+                    getRestartCause(RestartCause::powerPolicyRestore));
+            }
+            else
+            {
+                lg2::info("No power drop, restoring Host Off state");
+            }
+        }
+        // We're done with the previous power state for the restore policy, so
+        // store the current state
+        savePowerState();
+    }
+
     /**
      * @brief Save the current power state for restore policy
-     * 
+     *
      * Stores the current chassis power state to persistent storage.
      */
-     void savePowerState()
-     {
-         std::string chassisState = std::string(powerControl.getChassisState());
-         appState.set(PersistentState::Params::PowerState, chassisState);
-     }
+    void savePowerState()
+    {
+        std::string chassisState = std::string(powerControl.getChassisState());
+        appState.set(PersistentState::Params::PowerState, chassisState);
+    }
     /**
      * @brief Check if power was dropped.
      *
      * Read last saved power state to determine if host power was enabled before
      * last BMC reboot.
      */
-     bool wasPowerDropped()
-     {
-         std::string state = appState.get(PersistentState::Params::PowerState);
-         return state == "xyz.openbmc_project.State.Chassis.PowerState.On";
-     }
+    bool wasPowerDropped()
+    {
+        std::string state = appState.get(PersistentState::Params::PowerState);
+        return state == "xyz.openbmc_project.State.Chassis.PowerState.On";
+    }
 };
 
 } // namespace power_control

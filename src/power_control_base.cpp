@@ -1,17 +1,20 @@
 #include "power_control_base.hpp"
-#include "power_restore.hpp"
-#include <phosphor-logging/lg2.hpp>
-#include <systemd/sd-journal.h>
-#include <chrono>
-#include <fstream>
-#include <nlohmann/json.hpp>
-#include <ctime>
-#include <linux/input.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <cstring>
-#include <cerrno>
 
+#include "power_restore.hpp"
+
+#include <fcntl.h>
+#include <linux/input.h>
+#include <systemd/sd-journal.h>
+#include <unistd.h>
+
+#include <nlohmann/json.hpp>
+#include <phosphor-logging/lg2.hpp>
+
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <ctime>
+#include <fstream>
 
 namespace power_control
 {
@@ -119,31 +122,34 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& node,
-                           PersistentState& appState)
-    : ioContext(ioContext), conn(conn), nodeId(node), appState(appState), 
-      appName("power-control"),
-      gpioAssertTimer(ioContext),
-      powerCycleTimer(ioContext),
-      gracefulPowerOffTimer(ioContext),
-      warmResetCheckTimer(ioContext),
-      psPowerOKWatchdogTimer(ioContext),
-      sioPowerGoodWatchdogTimer(ioContext),
-      powerStateSaveTimer(ioContext),
-      pohCounterTimer(ioContext),
-      restartCauseTimer(ioContext),
-      slotPowerCycleTimer(ioContext)
+                           const std::string& node, PersistentState& appState) :
+    ioContext(ioContext), conn(conn), nodeId(node), appState(appState),
+    appName("power-control"), gpioAssertTimer(ioContext),
+    powerCycleTimer(ioContext), gracefulPowerOffTimer(ioContext),
+    warmResetCheckTimer(ioContext), psPowerOKWatchdogTimer(ioContext),
+    sioPowerGoodWatchdogTimer(ioContext), powerStateSaveTimer(ioContext),
+    pohCounterTimer(ioContext), restartCauseTimer(ioContext),
+    slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues(ioContext);
 
     // Register base class GPIO handlers
-    // These handlers are available in all platforms and can be overridden by derived classes
-    gpioHandlerMap["PowerOk"] = [this](bool state) { this->psPowerOKHandler(state); };
-    gpioHandlerMap["SioPowerGood"] = [this](bool state) { this->sioPowerGoodHandler(state); };
+    // These handlers are available in all platforms and can be overridden by
+    // derived classes
+    gpioHandlerMap["PowerOk"] = [this](bool state) {
+        this->psPowerOKHandler(state);
+    };
+    gpioHandlerMap["SioPowerGood"] = [this](bool state) {
+        this->sioPowerGoodHandler(state);
+    };
     gpioHandlerMap["SIOS5"] = [this](bool state) { this->sioS5Handler(state); };
-    gpioHandlerMap["PowerButton"] = [this](bool state) { this->powerButtonHandler(state); };
-    gpioHandlerMap["ResetButton"] = [this](bool state) { this->resetButtonHandler(state); };
+    gpioHandlerMap["PowerButton"] = [this](bool state) {
+        this->powerButtonHandler(state);
+    };
+    gpioHandlerMap["ResetButton"] = [this](bool state) {
+        this->resetButtonHandler(state);
+    };
 
     hostDbusName += node;
     chassisDbusName += node;
@@ -179,34 +185,36 @@ std::function<void(Event)> PowerControl::getPowerStateHandler()
     {
         case PowerState::on:
             return [this](Event e) { this->handlePowerStateOn(e); };
-        
+
         case PowerState::waitForPSPowerOK:
             return [this](Event e) { this->handleWaitForPSPowerOK(e); };
-        
+
         case PowerState::waitForSIOPowerGood:
             return [this](Event e) { this->handleWaitForSIOPowerGood(e); };
-        
+
         case PowerState::off:
             return [this](Event e) { this->handlePowerStateOff(e); };
-        
+
         case PowerState::transitionToOff:
             return [this](Event e) { this->handleTransitionToOff(e); };
-        
+
         case PowerState::gracefulTransitionToOff:
             return [this](Event e) { this->handleGracefulTransitionToOff(e); };
-        
+
         case PowerState::cycleOff:
             return [this](Event e) { this->handleCycleOff(e); };
-        
+
         case PowerState::transitionToCycleOff:
             return [this](Event e) { this->handleTransitionToCycleOff(e); };
-        
+
         case PowerState::gracefulTransitionToCycleOff:
-            return [this](Event e) { this->handleGracefulTransitionToCycleOff(e); };
-        
+            return [this](Event e) {
+                this->handleGracefulTransitionToCycleOff(e);
+            };
+
         case PowerState::checkForWarmReset:
             return [this](Event e) { this->handleCheckForWarmReset(e); };
-        
+
         // Unknown state - not an upstream state
         // check for nul pointer return
         default:
@@ -218,14 +226,14 @@ void PowerControl::sendPowerControlEvent(Event event)
 {
     // Use the virtual getPowerStateHandler to get the correct handler
     std::function<void(Event)> handler = this->getPowerStateHandler();
-    
+
     if (handler == nullptr)
     {
         lg2::error("Failed to find handler for power state: {STATE}", "STATE",
                    static_cast<int>(powerState));
         return;
     }
-    
+
     // Execute the handler (will use virtual dispatch)
     handler(event);
 }
@@ -233,28 +241,29 @@ void PowerControl::sendPowerControlEvent(Event event)
 void PowerControl::loadConfigValues(boost::asio::io_context& io)
 {
     // Dynamically build powerSignalMap from JSON config file
-    
+
     // Determine config file path
     const std::string configFilePath =
         "/usr/share/x86-power-control/power-config-host" + node + ".json";
-    
+
     std::ifstream configFile(configFilePath.c_str());
     if (!configFile.is_open())
     {
         lg2::error("loadConfigValues: Cannot open config path \'{PATH}\'",
                    "PATH", configFilePath);
-        throw std::runtime_error("Failed to open config file: " + configFilePath);
+        throw std::runtime_error(
+            "Failed to open config file: " + configFilePath);
     }
-    
+
     auto jsonData = nlohmann::json::parse(configFile, nullptr, true, true);
     if (jsonData.is_discarded())
     {
         lg2::error("Power config readings JSON parser failure");
         throw std::runtime_error("JSON parser failure");
     }
-    
+
     auto gpios = jsonData["gpio_configs"];
-    
+
     // Dynamically create ConfigData entries from JSON
     for (nlohmann::json& gpioConfig : gpios)
     {
@@ -263,20 +272,21 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
             lg2::error("The 'Name' field must be defined in Json file");
             throw std::runtime_error("Missing 'Name' field in JSON config");
         }
-        
+
         std::string gpioName = gpioConfig["Name"];
-        
+
         // Create a new ConfigData object (dynamically allocated)
         auto configPtr = std::make_shared<ConfigData>(io);
         configPtr->name = gpioName;
-        
+
         // Parse Type
         if (!gpioConfig.contains("Type"))
         {
             lg2::error("The \'Type\' field must be defined in Json file");
-            throw std::runtime_error("Missing 'Type' field for signal: " + gpioName);
+            throw std::runtime_error(
+                "Missing 'Type' field for signal: " + gpioName);
         }
-        
+
         std::string signalType = gpioConfig["Type"];
         if (signalType == "GPIO")
         {
@@ -292,7 +302,7 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
                        "TYPE", signalType);
             throw std::runtime_error("Invalid signal type: " + signalType);
         }
-        
+
         // Parse GPIO-specific fields
         if (configPtr->type == ConfigType::GPIO)
         {
@@ -304,9 +314,10 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
             {
                 lg2::error(
                     "The \'LineName\' field must be defined for GPIO configuration");
-                throw std::runtime_error("Missing 'LineName' for GPIO: " + gpioName);
+                throw std::runtime_error(
+                    "Missing 'LineName' for GPIO: " + gpioName);
             }
-            
+
             if (gpioConfig.contains("Polarity"))
             {
                 std::string polarity = gpioConfig["Polarity"];
@@ -323,26 +334,27 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
                     lg2::error(
                         "Polarity defined but not properly setup. Please only ActiveHigh or ActiveLow. Currently set to {POLARITY}",
                         "POLARITY", polarity);
-                    throw std::runtime_error("Invalid polarity for: " + gpioName);
+                    throw std::runtime_error(
+                        "Invalid polarity for: " + gpioName);
                 }
             }
             else
             {
                 lg2::error("Polarity field not found for {GPIO_NAME}",
                            "GPIO_NAME", configPtr->lineName);
-                throw std::runtime_error("Missing 'Polarity' for GPIO: " + gpioName);
+                throw std::runtime_error(
+                    "Missing 'Polarity' for GPIO: " + gpioName);
             }
         }
-        else  // DBUS type
+        else // DBUS type
         {
             // Parse D-Bus specific fields
             std::map<std::string, std::string> dbusParams = {
                 {"DbusName", "DbusName"},
                 {"Path", "Path"},
                 {"Interface", "Interface"},
-                {"Property", "Property"}
-            };
-            
+                {"Property", "Property"}};
+
             for (auto& [key, dbusParamName] : dbusParams)
             {
                 if (!gpioConfig.contains(dbusParamName))
@@ -350,18 +362,20 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
                     lg2::error(
                         "The {DBUS_NAME} field must be defined for Dbus configuration ",
                         "DBUS_NAME", dbusParamName);
-                    throw std::runtime_error("Missing D-Bus field: " + dbusParamName);
+                    throw std::runtime_error(
+                        "Missing D-Bus field: " + dbusParamName);
                 }
             }
-            
+
             configPtr->dbusName = gpioConfig["DbusName"];
             configPtr->path = gpioConfig["Path"];
             configPtr->interface = gpioConfig["Interface"];
-            configPtr->lineName = gpioConfig["Property"];  // Property name stored in lineName
-            
+            configPtr->lineName =
+                gpioConfig["Property"]; // Property name stored in lineName
+
             // dbus-based inputs must be active-high
             configPtr->polarity = true;
-            
+
             // MatchRegex is optional
             auto item = gpioConfig.find("MatchRegex");
             if (item != gpioConfig.end())
@@ -374,18 +388,19 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
                 {
                     lg2::error("Invalid MatchRegex for {NAME}: {ERR}", "NAME",
                                gpioName, "ERR", e.what());
-                    throw std::runtime_error("Invalid MatchRegex for: " + gpioName);
+                    throw std::runtime_error(
+                        "Invalid MatchRegex for: " + gpioName);
                 }
             }
         }
-        
+
         // Add to powerSignalMap
         powerSignalMap[gpioName] = configPtr;
     }
-    
+
     lg2::info("Successfully loaded {COUNT} signal configurations from JSON",
               "COUNT", powerSignalMap.size());
-    
+
     // Load timer values from JSON config
     if (jsonData.contains("timers"))
     {
@@ -400,39 +415,45 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
                 }
                 else
                 {
-                    lg2::warning("Timer '{TIMER}' has non-integer value, skipping", 
-                                 "TIMER", key);
+                    lg2::warning(
+                        "Timer '{TIMER}' has non-integer value, skipping",
+                        "TIMER", key);
                 }
             }
-            lg2::info("Successfully loaded {COUNT} timer configurations from JSON",
-                      "COUNT", TimerMap.size());
+            lg2::info(
+                "Successfully loaded {COUNT} timer configurations from JSON",
+                "COUNT", TimerMap.size());
         }
         else
         {
-            lg2::warning("'timers' field in JSON is not an object, skipping timer loading");
+            lg2::warning(
+                "'timers' field in JSON is not an object, skipping timer loading");
         }
     }
     else
     {
-        lg2::info("No 'timers' field found in JSON config, TimerMap will be empty");
+        lg2::info(
+            "No 'timers' field found in JSON config, TimerMap will be empty");
     }
 }
 
 bool PowerControl::requestGPIOEvents(ConfigData& config)
 {
     // Migrated from static function in power_control.cpp
-    
+
     // Find the GPIO line
     config.gpioLine = gpiod::find_line(config.lineName);
     if (!config.gpioLine)
     {
-        lg2::error("Failed to find the {GPIO_NAME} line", "GPIO_NAME", config.lineName);
+        lg2::error("Failed to find the {GPIO_NAME} line", "GPIO_NAME",
+                   config.lineName);
         return false;
     }
 
     try
     {
-        config.gpioLine.request({appName, gpiod::line_request::EVENT_BOTH_EDGES, {}});
+        config.gpioLine.request(
+            {appName, gpiod::line_request::EVENT_BOTH_EDGES, {}});
     }
     catch (const std::exception& e)
     {
@@ -444,7 +465,8 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
     int gpioLineFd = config.gpioLine.event_get_fd();
     if (gpioLineFd < 0)
     {
-        lg2::error("Failed to get {GPIO_NAME} fd", "GPIO_NAME", config.lineName);
+        lg2::error("Failed to get {GPIO_NAME} fd", "GPIO_NAME",
+                   config.lineName);
         return false;
     }
 
@@ -457,7 +479,7 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
 void PowerControl::waitForGPIOEvent(ConfigData& config)
 {
     // Migrated from static function in power_control.cpp
-    
+
     config.eventDescriptor.async_wait(
         boost::asio::posix::stream_descriptor::wait_read,
         [this, &config](const boost::system::error_code ec) {
@@ -469,14 +491,15 @@ void PowerControl::waitForGPIOEvent(ConfigData& config)
                 return;
             }
             gpiod::line_event line_event = config.gpioLine.event_read();
-            bool gpioState = (line_event.event_type == gpiod::line_event::RISING_EDGE);
-            
+            bool gpioState =
+                (line_event.event_type == gpiod::line_event::RISING_EDGE);
+
             // Call the handler if it's been assigned
             if (config.gpioHandler)
             {
                 config.gpioHandler(gpioState);
             }
-            
+
             // Recursively wait for next event
             waitForGPIOEvent(config);
         });
@@ -485,7 +508,7 @@ void PowerControl::waitForGPIOEvent(ConfigData& config)
 void PowerControl::handlePowerStateOn(Event event)
 {
     // TODO: Move upstream powerStateOn() implementation here
-    // 
+    //
     // PREVIOUS IMPLEMENTATION (from powerStateOn in power_control.cpp):
     // - logEvent(__FUNCTION__, event);
     // - switch (event):
@@ -514,11 +537,13 @@ void PowerControl::handlePowerStateOff(Event event)
 {
     // TODO: Move upstream powerStateOff() implementation here
     //
-    // PREVIOUS IMPLEMENTATION (from powerStateOff in power_control.cpp - UPSTREAM ONLY):
+    // PREVIOUS IMPLEMENTATION (from powerStateOff in power_control.cpp -
+    // UPSTREAM ONLY):
     // - logEvent(__FUNCTION__, event);
     // - switch (event):
     //     case Event::psPowerOKAssert:
-    //         - if (sioEnabled) → setPowerState(PowerState::waitForSIOPowerGood)
+    //         - if (sioEnabled) →
+    //         setPowerState(PowerState::waitForSIOPowerGood)
     //         - else → setPowerState(PowerState::on)
     //     case Event::sioS5DeAssert:
     //         - psPowerOKWatchdogTimerStart();
@@ -539,7 +564,8 @@ void PowerControl::handleWaitForPSPowerOK(Event event)
     // - switch (event):
     //     case Event::psPowerOKAssert:
     //         - psPowerOKWatchdogTimer.cancel();
-    //         - if (sioEnabled) → sioPowerGoodWatchdogTimerStart(), setPowerState(PowerState::waitForSIOPowerGood)
+    //         - if (sioEnabled) → sioPowerGoodWatchdogTimerStart(),
+    //         setPowerState(PowerState::waitForSIOPowerGood)
     //         - else → setPowerState(PowerState::on)
     //     case Event::psPowerOKWatchdogTimerExpired:
     //         - setPowerState(PowerState::off);
@@ -558,7 +584,8 @@ void PowerControl::handleWaitForSIOPowerGood(Event event)
     //         - setPowerState(PowerState::on);
     //     case Event::sioPowerGoodWatchdogTimerExpired:
     //         - setPowerState(PowerState::off);
-    //         - lg2::error("SIO Power Good signal did not assert within timeout");
+    //         - lg2::error("SIO Power Good signal did not assert within
+    //         timeout");
 }
 
 void PowerControl::handleTransitionToOff(Event event)
@@ -572,7 +599,8 @@ void PowerControl::handleTransitionToOff(Event event)
 
 void PowerControl::handleGracefulTransitionToOff(Event event)
 {
-    // TODO: Move upstream powerStateGracefulTransitionToOff() implementation here
+    // TODO: Move upstream powerStateGracefulTransitionToOff() implementation
+    // here
     //
     // PREVIOUS IMPLEMENTATION:
     // - Assert graceful shutdown request
@@ -602,7 +630,8 @@ void PowerControl::handleTransitionToCycleOff(Event event)
 
 void PowerControl::handleGracefulTransitionToCycleOff(Event event)
 {
-    // TODO: Move upstream powerStateGracefulTransitionToCycleOff() implementation here
+    // TODO: Move upstream powerStateGracefulTransitionToCycleOff()
+    // implementation here
     //
     // PREVIOUS IMPLEMENTATION:
     // - Assert graceful shutdown request
@@ -707,15 +736,16 @@ std::string PowerControl::getPowerStateName()
             return "Check for Warm Reset";
             break;
         default:
-            return "unknown state: " + std::to_string(static_cast<int>(powerState));
+            return "unknown state: " +
+                   std::to_string(static_cast<int>(powerState));
             break;
     }
 }
 
 void PowerControl::logStateTransition()
 {
-    lg2::info("Host{HOST}: Moving to \"{STATE}\" state", "HOST", nodeId, "STATE",
-              this->getPowerStateName());
+    lg2::info("Host{HOST}: Moving to \"{STATE}\" state", "HOST", nodeId,
+              "STATE", this->getPowerStateName());
 }
 
 void PowerControl::setBootProgress(const std::string& bootProgressStage)
@@ -723,15 +753,17 @@ void PowerControl::setBootProgress(const std::string& bootProgressStage)
     if (bootProgressIface)
     {
         bootProgressIface->set_property("BootProgress", bootProgressStage);
-        
+
         // Update timestamp
         auto now = std::chrono::system_clock::now();
         auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-            now.time_since_epoch()).count();
-        bootProgressIface->set_property("BootProgressLastUpdate", 
-                                       static_cast<uint64_t>(timestamp));
-        
-        lg2::info("Boot progress updated to: {PROGRESS}", "PROGRESS", bootProgressStage);
+                             now.time_since_epoch())
+                             .count();
+        bootProgressIface->set_property("BootProgressLastUpdate",
+                                        static_cast<uint64_t>(timestamp));
+
+        lg2::info("Boot progress updated to: {PROGRESS}", "PROGRESS",
+                  bootProgressStage);
     }
 }
 
@@ -740,7 +772,8 @@ void PowerControl::setBootProgressOem(const std::string& oemProgress)
     if (bootProgressIface)
     {
         bootProgressIface->set_property("BootProgressOem", oemProgress);
-        lg2::info("Boot progress OEM updated to: {OEM_PROGRESS}", "OEM_PROGRESS", oemProgress);
+        lg2::info("Boot progress OEM updated to: {OEM_PROGRESS}",
+                  "OEM_PROGRESS", oemProgress);
     }
 }
 
@@ -760,9 +793,9 @@ uint64_t PowerControl::getCurrentTimeMs()
 
 void PowerControl::setPowerState(const PowerState state)
 {
-    // Note: This function still references the external global powerState variable
-    // which will need to be refactored in the future.
-    
+    // Note: This function still references the external global powerState
+    // variable which will need to be refactored in the future.
+
     // Update global power state
     powerState = state;
     logStateTransition();
@@ -791,7 +824,8 @@ void PowerControl::savePowerState(const PowerState state)
 {
     powerStateSaveTimer.expires_after(
         std::chrono::milliseconds(TimerMap["PowerOffSaveMs"]));
-    powerStateSaveTimer.async_wait([this, state](const boost::system::error_code ec) {
+    powerStateSaveTimer.async_wait([this,
+                                    state](const boost::system::error_code ec) {
         if (ec)
         {
             // operation_aborted is expected if timer is canceled before
@@ -810,9 +844,10 @@ void PowerControl::savePowerState(const PowerState state)
 
 void PowerControl::initializeHostInterface()
 {
-    // Note: Button masking (powerButtonMask, resetButtonMask) and restart cause tracking
-    // (addRestartCause) are not yet moved to the class, so those checks are commented out.
-    
+    // Note: Button masking (powerButtonMask, resetButtonMask) and restart cause
+    // tracking (addRestartCause) are not yet moved to the class, so those
+    // checks are commented out.
+
     // Create Host Interface
     sdbusplus::asio::object_server hostServer =
         sdbusplus::asio::object_server(*conn);
@@ -820,15 +855,17 @@ void PowerControl::initializeHostInterface()
     hostIface =
         hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                  "xyz.openbmc_project.State.Host");
-    
+
     // Interface for IPMI/Redfish initiated host state transitions
     hostIface->register_property(
         "RequestedHostTransition",
         std::string("xyz.openbmc_project.State.Host.Transition.Off"),
         [this](const std::string& requested, std::string& resp) {
-            // Note: Button masking and restart cause tracking not yet implemented
-            // TODO: Uncomment when powerButtonMask, resetButtonMask, and addRestartCause are moved
-            
+            // Note: Button masking and restart cause tracking not yet
+            // implemented
+            // TODO: Uncomment when powerButtonMask, resetButtonMask, and
+            // addRestartCause are moved
+
             if (requested == "xyz.openbmc_project.State.Host.Transition.Off")
             {
                 // TODO: Check power button mask when implemented
@@ -887,12 +924,13 @@ void PowerControl::initializeHostInterface()
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.GracefulWarmReboot")
             {
-                TODO: Check reset button mask when implemented
-                if (!resetButtonMask)
+            TODO:
+                Check reset button mask when implemented if (!resetButtonMask)
                 {
                     sendPowerControlEvent(Event::gracefulPowerCycleRequest);
                     // addRestartCause(RestartCause::command);
-                    lg2::info("Host transition to GracefulWarmReboot requested");
+                    lg2::info(
+                        "Host transition to GracefulWarmReboot requested");
                 }
                 else
                 {
@@ -905,8 +943,8 @@ void PowerControl::initializeHostInterface()
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.ForceWarmReboot")
             {
-                TODO: Check reset button mask when implemented
-                if (!resetButtonMask)
+            TODO:
+                Check reset button mask when implemented if (!resetButtonMask)
                 {
                     sendPowerControlEvent(Event::resetRequest);
                     // addRestartCause(RestartCause::command);
@@ -928,7 +966,7 @@ void PowerControl::initializeHostInterface()
             resp = requested;
             return 1;
         });
-    
+
     hostIface->register_property("CurrentHostState",
                                  std::string(getHostState()));
 
@@ -943,17 +981,19 @@ void PowerControl::initializeChassisInterface()
     sdbusplus::asio::object_server chassisServer =
         sdbusplus::asio::object_server(*conn);
 
-    chassisIface =
-        chassisServer.add_interface("/xyz/openbmc_project/state/chassis" + nodeId,
-                                    "xyz.openbmc_project.State.Chassis");
+    chassisIface = chassisServer.add_interface(
+        "/xyz/openbmc_project/state/chassis" + nodeId,
+        "xyz.openbmc_project.State.Chassis");
 
     chassisIface->register_property(
         "RequestedPowerTransition",
         std::string("xyz.openbmc_project.State.Chassis.Transition.Off"),
         [this](const std::string& requested, std::string& resp) {
-            // Note: Button masking and restart cause tracking not yet implemented
-            // TODO: Uncomment when powerButtonMask and addRestartCause are moved
-            
+            // Note: Button masking and restart cause tracking not yet
+            // implemented
+            // TODO: Uncomment when powerButtonMask and addRestartCause are
+            // moved
+
             if (requested == "xyz.openbmc_project.State.Chassis.Transition.Off")
             {
                 // TODO: Check power button mask when implemented
@@ -1013,7 +1053,7 @@ void PowerControl::initializeChassisInterface()
             resp = requested;
             return 1;
         });
-    
+
     chassisIface->register_property("CurrentPowerState",
                                     std::string(getChassisState()));
     chassisIface->register_property("LastStateChangeTime", getCurrentTimeMs());
@@ -1048,16 +1088,18 @@ void PowerControl::initializeChassisSystemInterface()
             }
             else
             {
-                lg2::error("Unrecognized chassis system state transition request.");
+                lg2::error(
+                    "Unrecognized chassis system state transition request.");
                 throw std::invalid_argument("Unrecognized Transition Request");
                 return 0;
             }
             resp = requested;
             return 1;
         });
-    chassisSysIface->register_property(
-        "CurrentPowerState", std::string(getChassisState()));
-    chassisSysIface->register_property("LastStateChangeTime", getCurrentTimeMs());
+    chassisSysIface->register_property("CurrentPowerState",
+                                       std::string(getChassisState()));
+    chassisSysIface->register_property("LastStateChangeTime",
+                                       getCurrentTimeMs());
 
     chassisSysIface->initialize();
 
@@ -1068,53 +1110,58 @@ void PowerControl::initializeChassisSystemInterface()
 void PowerControl::initializeBootProgressInterface()
 {
     // Boot Progress Interface
-    // This interface allows external entities (IPMI, PLDM, etc.) to update boot progress
+    // This interface allows external entities (IPMI, PLDM, etc.) to update boot
+    // progress
     sdbusplus::asio::object_server hostServer =
         sdbusplus::asio::object_server(*conn);
-    
-    bootProgressIface = 
+
+    bootProgressIface =
         hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                  "xyz.openbmc_project.State.Boot.Progress");
-    
+
     // BootProgress property - indicates the current boot stage
     bootProgressIface->register_property(
         "BootProgress",
-        std::string("xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified"),
+        std::string(
+            "xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified"),
         [this](const std::string& requested, std::string& resp) {
-            lg2::info("BootProgress updated to: {BOOT_PROGRESS}", "BOOT_PROGRESS", requested);
+            lg2::info("BootProgress updated to: {BOOT_PROGRESS}",
+                      "BOOT_PROGRESS", requested);
             resp = requested;
-            
+
             // Update the timestamp when BootProgress changes
             auto now = std::chrono::system_clock::now();
-            auto timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-                now.time_since_epoch()).count();
-            
+            auto timestamp =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    now.time_since_epoch())
+                    .count();
+
             if (bootProgressIface)
             {
-                bootProgressIface->set_property("BootProgressLastUpdate", 
-                                               static_cast<uint64_t>(timestamp));
+                bootProgressIface->set_property(
+                    "BootProgressLastUpdate", static_cast<uint64_t>(timestamp));
             }
-            
+
             return 1;
         });
-    
-    // BootProgressLastUpdate property - timestamp of last update (microseconds since epoch)
-    bootProgressIface->register_property(
-        "BootProgressLastUpdate",
-        static_cast<uint64_t>(0));
-    
+
+    // BootProgressLastUpdate property - timestamp of last update (microseconds
+    // since epoch)
+    bootProgressIface->register_property("BootProgressLastUpdate",
+                                         static_cast<uint64_t>(0));
+
     // BootProgressOem property - OEM-specific boot progress information
     bootProgressIface->register_property(
-        "BootProgressOem",
-        std::string(""),
+        "BootProgressOem", std::string(""),
         [](const std::string& requested, std::string& resp) {
-            lg2::info("BootProgressOem updated to: {OEM_PROGRESS}", "OEM_PROGRESS", requested);
+            lg2::info("BootProgressOem updated to: {OEM_PROGRESS}",
+                      "OEM_PROGRESS", requested);
             resp = requested;
             return 1;
         });
-    
+
     bootProgressIface->initialize();
-    
+
     lg2::info("Created the Boot.Progress interface successfully");
 }
 
@@ -1126,7 +1173,7 @@ void PowerControl::initializeButtonInterfaces()
 
     // Power Button Interface
     auto powerButtonConfig = powerSignalMap.find("PowerButton");
-    if (powerButtonConfig != powerSignalMap.end() && 
+    if (powerButtonConfig != powerSignalMap.end() &&
         !powerButtonConfig->second->lineName.empty())
     {
         powerButtonIface = buttonsServer.add_interface(
@@ -1172,18 +1219,20 @@ void PowerControl::initializeButtonInterfaces()
         bool powerButtonPressed = false;
         if (powerButtonConfig->second->gpioLine)
         {
-            powerButtonPressed = powerButtonConfig->second->gpioLine.get_value() == 0;
+            powerButtonPressed =
+                powerButtonConfig->second->gpioLine.get_value() == 0;
         }
 
-        powerButtonIface->register_property("ButtonPressed", powerButtonPressed);
+        powerButtonIface->register_property("ButtonPressed",
+                                            powerButtonPressed);
         powerButtonIface->initialize();
-        
+
         lg2::info("Created the power button interface successfully");
     }
 
     // Reset Button Interface
     auto resetButtonConfig = powerSignalMap.find("ResetButton");
-    if (resetButtonConfig != powerSignalMap.end() && 
+    if (resetButtonConfig != powerSignalMap.end() &&
         !resetButtonConfig->second->lineName.empty())
     {
         resetButtonIface = buttonsServer.add_interface(
@@ -1229,18 +1278,20 @@ void PowerControl::initializeButtonInterfaces()
         bool resetButtonPressed = false;
         if (resetButtonConfig->second->gpioLine)
         {
-            resetButtonPressed = resetButtonConfig->second->gpioLine.get_value() == 0;
+            resetButtonPressed =
+                resetButtonConfig->second->gpioLine.get_value() == 0;
         }
 
-        resetButtonIface->register_property("ButtonPressed", resetButtonPressed);
+        resetButtonIface->register_property("ButtonPressed",
+                                            resetButtonPressed);
         resetButtonIface->initialize();
-        
+
         lg2::info("Created the reset button interface successfully");
     }
 
     // NMI Button Interface
     auto nmiButtonConfig = powerSignalMap.find("NMIButton");
-    if (nmiButtonConfig != powerSignalMap.end() && 
+    if (nmiButtonConfig != powerSignalMap.end() &&
         nmiButtonConfig->second->gpioLine)
     {
         nmiButtonIface = buttonsServer.add_interface(
@@ -1273,19 +1324,19 @@ void PowerControl::initializeButtonInterfaces()
         bool nmiButtonPressed = false;
         if (nmiButtonConfig->second->gpioLine)
         {
-            nmiButtonPressed = nmiButtonConfig->second->gpioLine.get_value() == 0;
+            nmiButtonPressed = nmiButtonConfig->second->gpioLine.get_value() ==
+                               0;
         }
 
         nmiButtonIface->register_property("ButtonPressed", nmiButtonPressed);
         nmiButtonIface->initialize();
-        
+
         lg2::info("Created the NMI button interface successfully");
     }
 
     // NMI Out Interface
     auto nmiOutConfig = powerSignalMap.find("NMIOut");
-    if (nmiOutConfig != powerSignalMap.end() && 
-        nmiOutConfig->second->gpioLine)
+    if (nmiOutConfig != powerSignalMap.end() && nmiOutConfig->second->gpioLine)
     {
         sdbusplus::asio::object_server nmiOutServer =
             sdbusplus::asio::object_server(*conn);
@@ -1293,18 +1344,16 @@ void PowerControl::initializeButtonInterfaces()
         nmiOutIface = nmiOutServer.add_interface(
             "/xyz/openbmc_project/control/host" + nodeId + "/nmi",
             "xyz.openbmc_project.Control.Host.NMI");
-        
-        nmiOutIface->register_method("NMI", [this]() {
-            nmiReset();
-        });
+
+        nmiOutIface->register_method("NMI", [this]() { nmiReset(); });
         nmiOutIface->initialize();
-        
+
         lg2::info("Created the NMI out interface successfully");
     }
 
     // ID Button Interface
     auto idButtonConfig = powerSignalMap.find("IdButton");
-    if (idButtonConfig != powerSignalMap.end() && 
+    if (idButtonConfig != powerSignalMap.end() &&
         idButtonConfig->second->gpioLine)
     {
         idButtonIface = buttonsServer.add_interface(
@@ -1320,7 +1369,7 @@ void PowerControl::initializeButtonInterfaces()
 
         idButtonIface->register_property("ButtonPressed", idButtonPressed);
         idButtonIface->initialize();
-        
+
         lg2::info("Created the ID button interface successfully");
     }
 }
@@ -1339,7 +1388,8 @@ void PowerControl::initializeOSInterface()
     // Default to Inactive state
     osIface->register_property(
         "OperatingSystemState",
-        std::string("xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive"));
+        std::string(
+            "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive"));
 
     osIface->initialize();
 
@@ -1389,50 +1439,52 @@ void PowerControl::initializeRestartCauseInterface()
     lg2::info("Created the restart cause interface successfully");
 }
 
-bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int value)
+bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config,
+                                 const int value)
 {
     if (!config)
     {
         lg2::error("setGPIOOutput called with null ConfigData pointer");
         return false;
     }
-    
+
     // Find the GPIO line
     if (!config->gpioLine)
     {
         config->gpioLine = gpiod::find_line(config->lineName);
         if (!config->gpioLine)
         {
-            lg2::error("Failed to find the {GPIO_NAME} line", "GPIO_NAME", config->lineName);
+            lg2::error("Failed to find the {GPIO_NAME} line", "GPIO_NAME",
+                       config->lineName);
             return false;
         }
     }
-    
+
     // Request GPIO output to specified value
     if (!config->gpioLine.is_requested())
     {
         try
         {
-            config->gpioLine.request({appName, gpiod::line_request::DIRECTION_OUTPUT, {}},
-                            value);
+            config->gpioLine.request(
+                {appName, gpiod::line_request::DIRECTION_OUTPUT, {}}, value);
         }
         catch (const std::exception& e)
         {
-            lg2::error("Failed to request {GPIO_NAME} output: {ERROR}", "GPIO_NAME",
-                    config->lineName, "ERROR", e);
+            lg2::error("Failed to request {GPIO_NAME} output: {ERROR}",
+                       "GPIO_NAME", config->lineName, "ERROR", e);
             return false;
         }
     }
     else
     {
-        try 
+        try
         {
             config->gpioLine.set_value(value);
         }
         catch (const std::exception& e)
         {
-            lg2::error("Failed to set {GPIO_NAME} value: {ERROR}",
-                       "GPIO_NAME", config->lineName, "ERROR", e);
+            lg2::error("Failed to set {GPIO_NAME} value: {ERROR}", "GPIO_NAME",
+                       config->lineName, "ERROR", e);
             return false;
         }
     }
@@ -1444,50 +1496,54 @@ bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config, const int v
 
 // GPIO Timing Functions
 
-int PowerControl::setMaskedGPIOOutputForMs(std::shared_ptr<ConfigData> config, 
-                                           const int value, const int durationMs)
+int PowerControl::setMaskedGPIOOutputForMs(
+    std::shared_ptr<ConfigData> config, const int value, const int durationMs)
 {
     if (!config)
     {
-        lg2::error("setMaskedGPIOOutputForMs called with null ConfigData pointer");
+        lg2::error(
+            "setMaskedGPIOOutputForMs called with null ConfigData pointer");
         return -1;
     }
-    
+
     if (!config->gpioLine)
     {
-        lg2::error("setMaskedGPIOOutputForMs: GPIO line for {GPIO_NAME} is not initialized",
-                  "GPIO_NAME", config->lineName);
+        lg2::error(
+            "setMaskedGPIOOutputForMs: GPIO line for {GPIO_NAME} is not initialized",
+            "GPIO_NAME", config->lineName);
         return -1;
     }
-    
+
     // Set the masked GPIO line to the specified value
     config->gpioLine.set_value(value);
     lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME", config->lineName,
               "GPIO_VALUE", value);
-    
+
     gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
-    gpioAssertTimer.async_wait(
-        [config, value](const boost::system::error_code ec) mutable {
-            // Set the masked GPIO line back to the opposite value
-            if (config && config->gpioLine)
+    gpioAssertTimer.async_wait([config, value](
+                                   const boost::system::error_code ec) mutable {
+        // Set the masked GPIO line back to the opposite value
+        if (config && config->gpioLine)
+        {
+            config->gpioLine.set_value(!value);
+            lg2::info("{GPIO_NAME} released", "GPIO_NAME", config->lineName);
+        }
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
             {
-                config->gpioLine.set_value(!value);
-                lg2::info("{GPIO_NAME} released", "GPIO_NAME", config->lineName);
+                lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
+                           "GPIO_NAME", config->lineName, "ERROR_MSG",
+                           ec.message());
             }
-            if (ec)
-            {
-                // operation_aborted is expected if timer is canceled before completion.
-                if (ec != boost::asio::error::operation_aborted)
-                {
-                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                              "GPIO_NAME", config->lineName, "ERROR_MSG", ec.message());
-                }
-            }
-        });
+        }
+    });
     return 0;
 }
 
-int PowerControl::setGPIOOutputForMs(std::shared_ptr<ConfigData> config, 
+int PowerControl::setGPIOOutputForMs(std::shared_ptr<ConfigData> config,
                                      const int value, const int durationMs)
 {
     if (!config)
@@ -1495,32 +1551,34 @@ int PowerControl::setGPIOOutputForMs(std::shared_ptr<ConfigData> config,
         lg2::error("setGPIOOutputForMs called with null ConfigData pointer");
         return -1;
     }
-    
+
     // Check if the requested GPIO is masked
-    // If PowerOut is being controlled and powerButtonMask is set, use masked version
+    // If PowerOut is being controlled and powerButtonMask is set, use masked
+    // version
     auto powerOutIt = powerSignalMap.find("PowerOut");
-    if (powerButtonMask && powerOutIt != powerSignalMap.end() && 
+    if (powerButtonMask && powerOutIt != powerSignalMap.end() &&
         config->lineName == powerOutIt->second->lineName)
     {
         return setMaskedGPIOOutputForMs(powerOutIt->second, value, durationMs);
     }
-    
-    // If ResetOut is being controlled and resetButtonMask is set, use masked version
+
+    // If ResetOut is being controlled and resetButtonMask is set, use masked
+    // version
     auto resetOutIt = powerSignalMap.find("ResetOut");
-    if (resetButtonMask && resetOutIt != powerSignalMap.end() && 
+    if (resetButtonMask && resetOutIt != powerSignalMap.end() &&
         config->lineName == resetOutIt->second->lineName)
     {
         return setMaskedGPIOOutputForMs(resetOutIt->second, value, durationMs);
     }
-    
+
     // No mask set, so request and set the GPIO normally
     if (!setGPIOOutput(config, value))
     {
         return -1;
     }
-    
+
     const std::string name = config->lineName;
-    
+
     gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
     gpioAssertTimer.async_wait(
         [config, value, name](const boost::system::error_code ec) mutable {
@@ -1532,18 +1590,19 @@ int PowerControl::setGPIOOutputForMs(std::shared_ptr<ConfigData> config,
             }
             if (ec)
             {
-                // operation_aborted is expected if timer is canceled before completion.
+                // operation_aborted is expected if timer is canceled before
+                // completion.
                 if (ec != boost::asio::error::operation_aborted)
                 {
                     lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                              "GPIO_NAME", name, "ERROR_MSG", ec.message());
+                               "GPIO_NAME", name, "ERROR_MSG", ec.message());
                 }
             }
         });
     return 0;
 }
 
-int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config, 
+int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config,
                                   const int durationMs)
 {
     if (!config)
@@ -1551,13 +1610,13 @@ int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config,
         lg2::error("assertGPIOForMs called with null ConfigData pointer");
         return -1;
     }
-    
+
     return setGPIOOutputForMs(config, config->polarity, durationMs);
 }
 
 void PowerControl::startTimer(const std::string& timerName,
-                               boost::asio::steady_timer& timer,
-                               Event eventOnExpiry)
+                              boost::asio::steady_timer& timer,
+                              Event eventOnExpiry)
 {
     // Look up timeout from TimerMap
     auto it = TimerMap.find(timerName);
@@ -1566,42 +1625,44 @@ void PowerControl::startTimer(const std::string& timerName,
         lg2::error("Timer '{TIMER}' not found in TimerMap", "TIMER", timerName);
         throw std::runtime_error("Timer not found in TimerMap: " + timerName);
     }
-    
+
     int timeoutMs = it->second;
-    
+
     // Use the overloaded version with direct timeout
     startTimer(timeoutMs, timer, eventOnExpiry);
 }
 
-void PowerControl::startTimer(int timeoutMs,
-                               boost::asio::steady_timer& timer,
-                               Event eventOnExpiry)
+void PowerControl::startTimer(int timeoutMs, boost::asio::steady_timer& timer,
+                              Event eventOnExpiry)
 {
-    lg2::info("Timer started with {TIMEOUT_MS}ms timeout", "TIMEOUT_MS", timeoutMs);
-    
+    lg2::info("Timer started with {TIMEOUT_MS}ms timeout", "TIMEOUT_MS",
+              timeoutMs);
+
     timer.expires_after(std::chrono::milliseconds(timeoutMs));
-    timer.async_wait([this, eventOnExpiry](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before completion
-            if (ec != boost::asio::error::operation_aborted)
+    timer.async_wait(
+        [this, eventOnExpiry](const boost::system::error_code& ec) {
+            if (ec)
             {
-                lg2::error("Timer async_wait failed: {ERROR_MSG}",
-                          "ERROR_MSG", ec.message());
+                // operation_aborted is expected if timer is canceled before
+                // completion
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    lg2::error("Timer async_wait failed: {ERROR_MSG}",
+                               "ERROR_MSG", ec.message());
+                }
+                lg2::info("Timer canceled");
+                return;
             }
-            lg2::info("Timer canceled");
-            return;
-        }
-        
-        lg2::info("Timer expired");
-        sendPowerControlEvent(eventOnExpiry);
-    });
+
+            lg2::info("Timer expired");
+            sendPowerControlEvent(eventOnExpiry);
+        });
 }
 
 void PowerControl::validateRequiredSignals()
 {
     // TODO: Determine which configs are required by upstream PowerControl
-    // 
+    //
     // {"PowerOut", &powerOutConfig},
     // {"PowerOk", &powerOkConfig},
     // {"ResetOut", &resetOutConfig},
@@ -1621,69 +1682,70 @@ void PowerControl::validateRequiredSignals()
 void PowerControl::registerGPIOHandlers()
 {
     lg2::info("Registering GPIO handlers from gpioHandlerMap");
-    
+
     for (const auto& [signalName, handler] : gpioHandlerMap)
     {
         // Find the signal in powerSignalMap
         auto it = powerSignalMap.find(signalName);
         if (it == powerSignalMap.end())
         {
-            lg2::error("GPIO signal '{SIGNAL}' not found in powerSignalMap", 
-                      "SIGNAL", signalName);
-            throw std::runtime_error("GPIO signal '" + signalName + 
-                                    "' not found in powerSignalMap");
+            lg2::error("GPIO signal '{SIGNAL}' not found in powerSignalMap",
+                       "SIGNAL", signalName);
+            throw std::runtime_error(
+                "GPIO signal '" + signalName + "' not found in powerSignalMap");
         }
-        
+
         // Assign the handler to the ConfigData object
         it->second->gpioHandler = handler;
-        
-        // Check if this signal uses input event monitoring (gpio_keys_polled driver)
+
+        // Check if this signal uses input event monitoring (gpio_keys_polled
+        // driver)
         if (it->second->useInputEvents)
         {
             // Validate input event configuration
             if (!it->second->inputEventConfig.has_value())
             {
-                lg2::error("Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
-                          "SIGNAL", signalName);
-                throw std::runtime_error("Signal '" + signalName + 
-                                        "' missing inputEventConfig");
+                lg2::error(
+                    "Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
+                    "SIGNAL", signalName);
+                throw std::runtime_error(
+                    "Signal '" + signalName + "' missing inputEventConfig");
             }
-            
+
             auto& inputConfig = it->second->inputEventConfig.value();
-            
+
             // Request input events for this signal
             if (!requestInputEvents(inputConfig.deviceName,
-                                   inputConfig.signalName,
-                                   inputConfig.keyCode,
-                                   handler,
-                                   it->second->eventDescriptor,
-                                   inputConfig.stateTracker))
+                                    inputConfig.signalName, inputConfig.keyCode,
+                                    handler, it->second->eventDescriptor,
+                                    inputConfig.stateTracker))
             {
-                lg2::error("Failed to register input events for '{SIGNAL}'", 
-                          "SIGNAL", signalName);
-                throw std::runtime_error("Failed to register input events for '" + 
-                                        signalName + "'");
+                lg2::error("Failed to register input events for '{SIGNAL}'",
+                           "SIGNAL", signalName);
+                throw std::runtime_error(
+                    "Failed to register input events for '" + signalName + "'");
             }
-            
-            lg2::info("Successfully registered input event handler for '{SIGNAL}'", 
-                     "SIGNAL", signalName);
+
+            lg2::info(
+                "Successfully registered input event handler for '{SIGNAL}'",
+                "SIGNAL", signalName);
         }
         else
         {
             // Request GPIO events for this signal (traditional method)
             if (!requestGPIOEvents(*it->second))
             {
-                lg2::error("Failed to register GPIO events for '{SIGNAL}'", 
-                          "SIGNAL", signalName);
-                throw std::runtime_error("Failed to register GPIO events for '" + 
-                                        signalName + "'");
+                lg2::error("Failed to register GPIO events for '{SIGNAL}'",
+                           "SIGNAL", signalName);
+                throw std::runtime_error(
+                    "Failed to register GPIO events for '" + signalName + "'");
             }
-            
-            lg2::info("Successfully registered GPIO handler for '{SIGNAL}'", 
-                     "SIGNAL", signalName);
+
+            lg2::info("Successfully registered GPIO handler for '{SIGNAL}'",
+                      "SIGNAL", signalName);
         }
     }
-    
+
     lg2::info("All GPIO handlers registered successfully");
 }
 
@@ -1693,9 +1755,10 @@ void PowerControl::registerGPIOHandlers()
 
 void PowerControl::psPowerOKHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto& config = *powerSignalMap["PowerOk"];
-    
+
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::psPowerOKAssert
                                   : Event::psPowerOKDeAssert;
@@ -1704,9 +1767,10 @@ void PowerControl::psPowerOKHandler(bool state)
 
 void PowerControl::sioPowerGoodHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto& config = *powerSignalMap["SioPowerGood"];
-    
+
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::sioPowerGoodAssert
                                   : Event::sioPowerGoodDeAssert;
@@ -1715,20 +1779,21 @@ void PowerControl::sioPowerGoodHandler(bool state)
 
 void PowerControl::sioS5Handler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto& config = *powerSignalMap["SIOS5"];
-    
-    Event powerControlEvent = (state == config.polarity)
-                                  ? Event::sioS5Assert
-                                  : Event::sioS5DeAssert;
+
+    Event powerControlEvent =
+        (state == config.polarity) ? Event::sioS5Assert : Event::sioS5DeAssert;
     sendPowerControlEvent(powerControlEvent, powerState);
 }
 
 void PowerControl::powerButtonHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto& config = *powerSignalMap["PowerButton"];
-    
+
     bool asserted = state == config.polarity;
     powerButtonIface->set_property("ButtonPressed", asserted);
     if (asserted)
@@ -1745,17 +1810,18 @@ void PowerControl::powerButtonHandler(bool state)
         }
     }
 #if USE_BUTTON_PASSTHROUGH
-    // Note: powerOutConfig is not in base class yet, this will need to be handled
-    // by derived classes if they use button passthrough
+    // Note: powerOutConfig is not in base class yet, this will need to be
+    // handled by derived classes if they use button passthrough
     lg2::info("Button passthrough not implemented in base class");
 #endif
 }
 
 void PowerControl::resetButtonHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto& config = *powerSignalMap["ResetButton"];
-    
+
     bool asserted = state == config.polarity;
     resetButtonIface->set_property("ButtonPressed", asserted);
     if (asserted)
@@ -1772,15 +1838,16 @@ void PowerControl::resetButtonHandler(bool state)
         }
     }
 #if USE_BUTTON_PASSTHROUGH
-    // Note: resetOutConfig is not in base class yet, this will need to be handled
-    // by derived classes if they use button passthrough
+    // Note: resetOutConfig is not in base class yet, this will need to be
+    // handled by derived classes if they use button passthrough
     lg2::info("Button passthrough not implemented in base class");
 #endif
 }
 
 void PowerControl::idButtonHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    // Lookup config for polarity (guaranteed to exist since handler was
+    // registered)
     auto it = powerSignalMap.find("IdButton");
     if (it == powerSignalMap.end())
     {
@@ -1788,7 +1855,7 @@ void PowerControl::idButtonHandler(bool state)
         return;
     }
     auto& config = *it->second;
-    
+
     bool asserted = state == config.polarity;
     idButtonIface->set_property("ButtonPressed", asserted);
 }
@@ -2003,7 +2070,8 @@ void PowerControl::nmiReset()
     auto nmiOutIt = powerSignalMap.find("NMIOut");
     if (nmiOutIt == powerSignalMap.end() || !nmiOutIt->second->gpioLine)
     {
-        lg2::error("NMIOut not found in powerSignalMap or GPIO line not initialized");
+        lg2::error(
+            "NMIOut not found in powerSignalMap or GPIO line not initialized");
         return;
     }
 
@@ -2013,9 +2081,10 @@ void PowerControl::nmiReset()
     nmiOutConfig->gpioLine.set_value(nmiOutConfig->polarity);
     lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME",
               nmiOutConfig->lineName, "GPIO_VALUE", nmiOutConfig->polarity);
-    
+
     gpioAssertTimer.expires_after(std::chrono::milliseconds(nmiOutPulseTimeMs));
-    gpioAssertTimer.async_wait([this, nmiOutConfig](const boost::system::error_code ec) {
+    gpioAssertTimer.async_wait([this, nmiOutConfig](
+                                   const boost::system::error_code ec) {
         // restore the NMI_OUT GPIO line back to the opposite value
         nmiOutConfig->gpioLine.set_value(!nmiOutConfig->polarity);
         lg2::info("{GPIO_NAME} released", "GPIO_NAME", nmiOutConfig->lineName);
@@ -2044,7 +2113,8 @@ void PowerControl::nmiSourcePropertyMonitor()
     auto nmiOutIt = powerSignalMap.find("NMIOut");
     if (nmiOutIt == powerSignalMap.end())
     {
-        lg2::info("NMIOut not configured, skipping NMI source property monitor");
+        lg2::info(
+            "NMIOut not configured, skipping NMI source property monitor");
         return;
     }
 
@@ -2135,7 +2205,7 @@ void PowerControl::pohCounterTimerStart()
 
         conn->async_method_call(
             [this](boost::system::error_code ec,
-               const std::variant<uint32_t>& pohCounterProperty) {
+                   const std::variant<uint32_t>& pohCounterProperty) {
                 if (ec)
                 {
                     lg2::error("error getting poh counter");
@@ -2173,8 +2243,7 @@ void PowerControl::pohCounterTimerStart()
 
 void PowerControl::currentHostStateMonitor()
 {
-    if (getHostState() ==
-        "xyz.openbmc_project.State.Host.HostState.Running")
+    if (getHostState() == "xyz.openbmc_project.State.Host.HostState.Running")
     {
         pohCounterTimerStart();
         // Clear the restart cause set for the next restart
@@ -2361,12 +2430,14 @@ void setRestartCause()
 
 std::string PowerControl::findInputEventDevice(const std::string& deviceName)
 {
-    // Search through /dev/input/eventX devices to find the one matching our name
+    // Search through /dev/input/eventX devices to find the one matching our
+    // name
     for (int i = 0; i < 32; i++)
     {
         std::string eventPath = "/dev/input/event" + std::to_string(i);
-        std::string namePath = "/sys/class/input/event" + std::to_string(i) + "/device/name";
-        
+        std::string namePath =
+            "/sys/class/input/event" + std::to_string(i) + "/device/name";
+
         std::ifstream nameFile(namePath);
         if (nameFile.is_open())
         {
@@ -2375,7 +2446,7 @@ std::string PowerControl::findInputEventDevice(const std::string& deviceName)
             if (name == deviceName)
             {
                 lg2::info("Found input device {DEVICE_NAME} at {EVENT_PATH}",
-                         "DEVICE_NAME", deviceName, "EVENT_PATH", eventPath);
+                          "DEVICE_NAME", deviceName, "EVENT_PATH", eventPath);
                 return eventPath;
             }
         }
@@ -2390,50 +2461,55 @@ void PowerControl::waitForInputEvent(
 {
     event.async_wait(
         boost::asio::posix::stream_descriptor::wait_read,
-        [this, name, eventHandler, keyCode, &event, stateTracker](const boost::system::error_code ec) {
+        [this, name, eventHandler, keyCode, &event,
+         stateTracker](const boost::system::error_code ec) {
             if (ec)
             {
                 lg2::error("{INPUT_NAME} fd handler error: {ERROR_MSG}",
                            "INPUT_NAME", name, "ERROR_MSG", ec.message());
                 return;
             }
-            
+
             struct input_event inputEvent;
-            ssize_t bytesRead = read(event.native_handle(), &inputEvent, sizeof(inputEvent));
-            
+            ssize_t bytesRead =
+                read(event.native_handle(), &inputEvent, sizeof(inputEvent));
+
             if (bytesRead != sizeof(inputEvent))
             {
                 if (bytesRead < 0)
                 {
-                    lg2::error("{INPUT_NAME} read error: {ERROR}",
-                               "INPUT_NAME", name, "ERROR", strerror(errno));
+                    lg2::error("{INPUT_NAME} read error: {ERROR}", "INPUT_NAME",
+                               name, "ERROR", strerror(errno));
                 }
                 else
                 {
-                    lg2::error("{INPUT_NAME} read error: incomplete event (got {BYTES} bytes)",
-                               "INPUT_NAME", name, "BYTES", bytesRead);
+                    lg2::error(
+                        "{INPUT_NAME} read error: incomplete event (got {BYTES} bytes)",
+                        "INPUT_NAME", name, "BYTES", bytesRead);
                 }
-                waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
+                waitForInputEvent(name, eventHandler, keyCode, event,
+                                  stateTracker);
                 return;
             }
-            
+
             // We only care about EV_KEY events with our specific key code
             if (inputEvent.type == EV_KEY && inputEvent.code == keyCode)
             {
-                lg2::info("{INPUT_NAME} event: code={KEY_CODE:#x} value={VALUE}",
-                         "INPUT_NAME", name, "KEY_CODE", inputEvent.code, 
-                         "VALUE", inputEvent.value);
-                
+                lg2::info(
+                    "{INPUT_NAME} event: code={KEY_CODE:#x} value={VALUE}",
+                    "INPUT_NAME", name, "KEY_CODE", inputEvent.code, "VALUE",
+                    inputEvent.value);
+
                 // Update state tracker if provided
                 if (stateTracker != nullptr)
                 {
                     *stateTracker = inputEvent.value;
                 }
-                
+
                 // Value 1 = pressed (high), 0 = released (low)
                 eventHandler(inputEvent.value == 1);
             }
-            
+
             // Continue waiting for next event
             waitForInputEvent(name, eventHandler, keyCode, event, stateTracker);
         });
@@ -2442,36 +2518,38 @@ void PowerControl::waitForInputEvent(
 bool PowerControl::requestInputEvents(
     const std::string& deviceName, const std::string& signalName,
     uint16_t keyCode, const std::function<void(bool)>& handler,
-    boost::asio::posix::stream_descriptor& eventDescriptor,
-    int* stateTracker)
+    boost::asio::posix::stream_descriptor& eventDescriptor, int* stateTracker)
 {
     // Find the input device
     std::string eventPath = findInputEventDevice(deviceName);
     if (eventPath.empty())
     {
-        lg2::error("Failed to find input device {DEVICE_NAME}",
-                   "DEVICE_NAME", deviceName);
+        lg2::error("Failed to find input device {DEVICE_NAME}", "DEVICE_NAME",
+                   deviceName);
         return false;
     }
-    
+
     // Open the event device
     int fd = open(eventPath.c_str(), O_RDONLY | O_NONBLOCK);
     if (fd < 0)
     {
-        lg2::error("Failed to open {EVENT_PATH}: {ERROR}",
-                   "EVENT_PATH", eventPath, "ERROR", strerror(errno));
+        lg2::error("Failed to open {EVENT_PATH}: {ERROR}", "EVENT_PATH",
+                   eventPath, "ERROR", strerror(errno));
         return false;
     }
-    
+
     // Assign to the stream descriptor
     eventDescriptor.assign(fd);
-    
+
     // Start waiting for events
-    waitForInputEvent(signalName, handler, keyCode, eventDescriptor, stateTracker);
-    
-    lg2::info("Successfully set up input event monitoring for {SIGNAL_NAME} on {EVENT_PATH} with key code {KEY_CODE:#x}",
-              "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE", keyCode);
-    
+    waitForInputEvent(signalName, handler, keyCode, eventDescriptor,
+                      stateTracker);
+
+    lg2::info(
+        "Successfully set up input event monitoring for {SIGNAL_NAME} on {EVENT_PATH} with key code {KEY_CODE:#x}",
+        "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE",
+        keyCode);
+
     return true;
 }
 
@@ -2512,7 +2590,7 @@ void PowerControl::forcePowerOff()
         lg2::error("PowerOut not found in powerSignalMap");
         return;
     }
-    
+
     if (assertGPIOForMs(powerOutIt->second, TimerMap["ForceOffPulseMs"]) < 0)
     {
         return;
@@ -2588,7 +2666,6 @@ void PowerControl::setOperatingSystemState(OperatingSystemStateStage stage)
               getOperatingSystemStateStage(stage));
 }
 
-
 // D-Bus Property Management
 
 int PowerControl::getProperty(std::shared_ptr<ConfigData> configData)
@@ -2633,7 +2710,8 @@ int PowerControl::getProperty(std::shared_ptr<ConfigData> configData)
     return (*respValue);
 }
 
-void PowerControl::reschedulePropertyRead(std::shared_ptr<ConfigData> configData)
+void PowerControl::reschedulePropertyRead(
+    std::shared_ptr<ConfigData> configData)
 {
     auto item = dBusRetryTimers.find(configData->name);
 
@@ -2674,7 +2752,8 @@ void PowerControl::reschedulePropertyRead(std::shared_ptr<ConfigData> configData
     });
 }
 
-void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData, bool initialValue)
+void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData,
+                                   bool initialValue)
 {
     if (configData->name == "PowerOk")
     {
@@ -2682,7 +2761,7 @@ void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData, bool 
         powerState = (initialValue ? PowerState::on : PowerState::off);
         hostIface->set_property("CurrentHostState",
                                 std::string(getHostState()));
-        lg2::info("PowerOk initial value: {VALUE}, power state set to {STATE}", 
+        lg2::info("PowerOk initial value: {VALUE}, power state set to {STATE}",
                   "VALUE", initialValue, "STATE", getHostState());
     }
     else if (configData->name == "PowerButton")
@@ -2717,9 +2796,9 @@ void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData, bool 
     }
     else
     {
-        lg2::info("Unknown signal name {NAME} for setInitialValue", "NAME", configData->name);
+        lg2::info("Unknown signal name {NAME} for setInitialValue", "NAME",
+                  configData->name);
     }
 }
 
 } // namespace power_control
-

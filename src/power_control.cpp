@@ -14,9 +14,10 @@
 // limitations under the License.
 */
 #include "config.h"
+
+#include "platform/nvl144/nvl144_power_control.hpp"
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
-#include "platform/nvl144/nvl144_power_control.hpp"
 
 #include <systemd/sd-journal.h>
 
@@ -30,17 +31,19 @@
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <regex>
 #include <string_view>
-#include <chrono>
 
-// For input event monitoring - PDB IOX interrupt lines are not connected to BMC/SMM
+// For input event monitoring - PDB IOX interrupt lines are not connected to
+// BMC/SMM
 #include <fcntl.h>
-#include <unistd.h>
 #include <linux/input.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <cstring>
 
@@ -105,7 +108,6 @@ static void resetACBootProperty()
     }
 }
 #endif // USE_ACBOOT
-
 
 #ifdef USE_ACBOOT
 static constexpr const char* powerACBootObject =
@@ -227,9 +229,11 @@ int main(int argc, char* argv[])
     }
     lg2::info("Start Chassis power control service for host : {NODE}", "NODE",
               node);
-    
-    std::shared_ptr<sdbusplus::asio::connection> conn = std::make_shared<sdbusplus::asio::connection>(io);
-    NVL144PowerControl powerControl(io, conn, "config/power-config-host0.json", node, appState);
+
+    std::shared_ptr<sdbusplus::asio::connection> conn =
+        std::make_shared<sdbusplus::asio::connection>(io);
+    NVL144PowerControl powerControl(io, conn, "config/power-config-host0.json",
+                                    node, appState);
     PowerRestoreController powerRestore(io, conn, node, powerControl, appState);
 
 #ifdef USE_PLT_RST
@@ -253,8 +257,9 @@ int main(int argc, char* argv[])
 
     lg2::info("Initializing power state.");
 
-    // D-Bus interfaces (host, chassis, boot progress, buttons, OS state, restart cause)
-    // are now initialized by the PowerControl base class constructor
+    // D-Bus interfaces (host, chassis, boot progress, buttons, OS state,
+    // restart cause) are now initialized by the PowerControl base class
+    // constructor
 
     powerControl.currentHostStateMonitor();
 
