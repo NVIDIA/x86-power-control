@@ -220,15 +220,15 @@ void VRPowerControl::deassertPreSystemResets()
 }
 
 // Helper function: Transition to CPU Reset Assert wait state
-void VRPowerControl::transitionToCPUResetAssertState()
+void VRPowerControl::transitionToCPUResetDeAssertState()
 {
     hpmPowerGoodWatchdogTimer.cancel();
     
-    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
+    lg2::info("HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetDeAssert.");
     
     deassertPreSystemResets();
     startTimer(TimerMap["CPUResetWatchdogTimer"], cpuResetWatchdogTimer, Event::cpuResetWatchdogTimerExpired);
-    setPowerState(PowerState::waitForCPUResetAssert);
+    setPowerState(PowerState::waitForCPUResetDeAssert);
 }
 
 // ============================================================================
@@ -241,7 +241,7 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
     switch (event)
     {
         case Event::board0RunPowerPGAssert:
-            transitionToCPUResetAssertState();
+            transitionToCPUResetDeAssertState(); // Transition to CPU Reset De-assert state
             break;
             
         case Event::hpmPowerGoodWatchdogTimerExpired:

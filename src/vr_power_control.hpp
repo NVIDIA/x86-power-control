@@ -209,12 +209,12 @@ protected:
     void deassertPreSystemResets();
 
     /**
-     * @brief Transition to CPU Reset Assert wait state
+     * @brief Transition to CPU Reset De-assert wait state
      * 
      * Cancels HPM power good watchdog, logs transition, de-asserts Pre System Resets,
-     * starts CPU reset watchdog, and transitions to waitForCPUResetAssert.
+     * starts CPU reset watchdog, and transitions to waitForCPUResetDeAssert.
      */
-    void transitionToCPUResetAssertState();
+    void transitionToCPUResetDeAssertState();
 
     /**
      * @brief Board presence information
