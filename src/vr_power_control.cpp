@@ -584,12 +584,12 @@ std::string_view VRPowerControl::getChassisState() const
     return PowerControl::getChassisState();
 }
 
-std::string VRPowerControl::getPowerStateName(const PowerState state)
+std::string VRPowerControl::getPowerStateName()
 {
     // VR-specific state name mappings
     // TODO: Confirm  VR-specific logic
     
-    switch (state)
+    switch (powerState)
     {
         case PowerState::waitForPDBMainPowerOk:
             return "Wait for PDB Main Power OK";
@@ -618,7 +618,7 @@ std::string VRPowerControl::getPowerStateName(const PowerState state)
     }
     
     // Call base class for upstream states
-    return PowerControl::getPowerStateName(state);
+    return PowerControl::getPowerStateName();
 }
 
 void VRPowerControl::validateRequiredSignals()

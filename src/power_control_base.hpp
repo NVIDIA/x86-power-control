@@ -383,23 +383,20 @@ public:
     PowerState getPowerState() const { return powerState; }
 
     /**
-     * @brief Get a human-readable name for a power state (virtual)
+     * @brief Get a human-readable name for the current power state (virtual)
      * 
-     * Converts a PowerState enum to a string for logging purposes.
+     * Converts the internal powerState enum to a string for logging purposes.
      * 
-     * @param state The power state
      * @return Human-readable state name
      */
-    virtual std::string getPowerStateName(const PowerState state);
+    virtual std::string getPowerStateName();
 
     /**
      * @brief Log a power state transition
      * 
      * Logs an informational message when the power state changes.
-     * 
-     * @param state The new power state
      */
-    void logStateTransition(const PowerState state);
+    void logStateTransition();
 
     /**
      * @brief Get current time in milliseconds

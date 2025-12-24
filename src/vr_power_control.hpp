@@ -99,7 +99,7 @@ public:
      * @param state The power state
      * @return Human-readable state name
      */
-    std::string getPowerStateName(const PowerState state) override;
+    std::string getPowerStateName() override;
 
 protected:
     /**

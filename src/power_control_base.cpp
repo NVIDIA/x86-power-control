@@ -671,10 +671,10 @@ std::string_view PowerControl::getChassisState() const
     }
 }
 
-std::string PowerControl::getPowerStateName(PowerState state)
+std::string PowerControl::getPowerStateName()
 {
     // Upstream implementation - only knows about upstream power states
-    switch (state)
+    switch (powerState)
     {
         case PowerState::on:
             return "On";
@@ -707,15 +707,15 @@ std::string PowerControl::getPowerStateName(PowerState state)
             return "Check for Warm Reset";
             break;
         default:
-            return "unknown state: " + std::to_string(static_cast<int>(state));
+            return "unknown state: " + std::to_string(static_cast<int>(powerState));
             break;
     }
 }
 
-void PowerControl::logStateTransition(const PowerState state)
+void PowerControl::logStateTransition()
 {
     lg2::info("Host{HOST}: Moving to \"{STATE}\" state", "HOST", nodeId, "STATE",
-              this->getPowerStateName(state));
+              this->getPowerStateName());
 }
 
 void PowerControl::setBootProgress(const std::string& bootProgressStage)
@@ -765,7 +765,7 @@ void PowerControl::setPowerState(const PowerState state)
     
     // Update global power state
     powerState = state;
-    logStateTransition(state);
+    logStateTransition();
 
     // Update D-Bus host state (uses virtual dispatch)
     hostIface->set_property("CurrentHostState",
