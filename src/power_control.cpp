@@ -242,7 +242,7 @@ int main(int argc, char* argv[])
         });
 #endif
 
-    if (powerControl.getPowerStateName() != "on")
+    if (powerControl.getPowerStateName() != "On")
     {
         powerRestore.run();
     }
