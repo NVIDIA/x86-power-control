@@ -529,6 +529,24 @@ public:
      */
     void nmiSourcePropertyMonitor();
 
+    /**
+     * @brief Start the POH (Power On Hours) counter timer
+     * 
+     * Starts a 1-hour timer that increments the POH counter when the host is running.
+     * The timer recursively restarts itself to continuously track power-on hours.
+     */
+    void pohCounterTimerStart();
+
+    /**
+     * @brief Monitor current host state changes
+     * 
+     * Sets up a D-Bus match to monitor host state property changes.
+     * When host transitions to Running, starts POH timer and clears restart cause.
+     * When host transitions to Off, cancels POH timer, sets OS state to Inactive,
+     * sets restart cause, and logs DC power off event.
+     */
+    void currentHostStateMonitor();
+
 protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -828,6 +846,67 @@ protected:
      * @param state The current state of the GPIO line (true = de-asserted)
      */
     virtual void pltRstHandler(bool state);
+
+    /**
+     * @brief Handler for SIO_ONCONTROL GPIO signal
+     * 
+     * Called when the SIO on control signal changes state.
+     * Logs the state change for debugging purposes.
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void sioOnControlHandler(bool state);
+
+    /**
+     * @brief Handler for Host Misc D-Bus property changes
+     * 
+     * Handles ESpiPlatformReset property changes from the Host.Misc interface.
+     * Calls pltRstHandler when the ESpiPlatformReset property changes.
+     * 
+     * @param msg The D-Bus message containing the property changes
+     */
+    void hostMiscHandler(sdbusplus::message_t& msg);
+
+    /**
+     * @brief Extract a property value from a D-Bus PropertiesChanged message
+     * 
+     * Template function to extract a typed value from a D-Bus properties changed signal.
+     * 
+     * @tparam T The expected type of the property value
+     * @param msg The D-Bus message to read from
+     * @param name The property name to look for
+     * @return The property value if found and matches name, std::nullopt otherwise
+     */
+    template <typename T>
+    std::optional<T> getMessageValue(sdbusplus::message_t& msg,
+                                     const std::string& name);
+
+    /**
+     * @brief Get GPIO state from a D-Bus message
+     * 
+     * Extracts GPIO state from a D-Bus PropertiesChanged message.
+     * Supports both boolean properties and regex matching on string properties.
+     * 
+     * @param msg The D-Bus message to read from
+     * @param config The ConfigData with property details and optional regex
+     * @param value Output parameter for the GPIO state
+     * @return true if state was successfully extracted, false otherwise
+     */
+    bool getDbusMsgGPIOState(sdbusplus::message_t& msg,
+                             const ConfigData& config, bool& value);
+
+    /**
+     * @brief Create a D-Bus match for GPIO-like property changes
+     * 
+     * Creates a sdbusplus match object that monitors D-Bus property changes
+     * and calls the provided callback with the GPIO state.
+     * 
+     * @param cfg The ConfigData with D-Bus service, path, interface details
+     * @param onMatch Callback function to invoke with the GPIO state
+     * @return A D-Bus match object
+     */
+    sdbusplus::bus::match_t dbusGPIOMatcher(
+        const ConfigData& cfg, std::function<void(bool)> onMatch);
 
     /**
      * @brief Log a power button press event

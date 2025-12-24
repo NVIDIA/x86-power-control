@@ -1805,6 +1805,135 @@ void PowerControl::pltRstHandler(bool pltRst)
     }
 }
 
+void PowerControl::sioOnControlHandler(bool state)
+{
+    lg2::info("SIO_ONCONTROL value changed: {VALUE}", "VALUE",
+              static_cast<int>(state));
+}
+
+void PowerControl::hostMiscHandler(sdbusplus::message_t& msg)
+{
+    std::string interfaceName;
+    boost::container::flat_map<std::string, std::variant<bool>>
+        propertiesChanged;
+    try
+    {
+        msg.read(interfaceName, propertiesChanged);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Unable to read Host Misc status: {ERROR}", "ERROR", e);
+        return;
+    }
+    if (propertiesChanged.empty())
+    {
+        lg2::error("ERROR: Empty Host.Misc PropertiesChanged signal received");
+        return;
+    }
+
+    for (auto& [property, value] : propertiesChanged)
+    {
+        if (property == "ESpiPlatformReset")
+        {
+            bool* pltRst = std::get_if<bool>(&value);
+            if (pltRst == nullptr)
+            {
+                lg2::error("{PROPERTY} property invalid", "PROPERTY", property);
+                return;
+            }
+            pltRstHandler(*pltRst);
+        }
+    }
+}
+
+template <typename T>
+std::optional<T> PowerControl::getMessageValue(sdbusplus::message_t& msg,
+                                               const std::string& name)
+{
+    std::string event;
+    std::string thresholdInterface;
+    boost::container::flat_map<std::string, std::variant<T>> propertiesChanged;
+
+    msg.read(thresholdInterface, propertiesChanged);
+    if (propertiesChanged.empty())
+    {
+        return std::nullopt;
+    }
+
+    event = propertiesChanged.begin()->first;
+    if (event.empty() || event != name)
+    {
+        return std::nullopt;
+    }
+
+    return std::get<T>(propertiesChanged.begin()->second);
+}
+
+// Explicit template instantiations
+template std::optional<bool> PowerControl::getMessageValue<bool>(
+    sdbusplus::message_t& msg, const std::string& name);
+template std::optional<std::string> PowerControl::getMessageValue<std::string>(
+    sdbusplus::message_t& msg, const std::string& name);
+
+bool PowerControl::getDbusMsgGPIOState(sdbusplus::message_t& msg,
+                                       const ConfigData& config, bool& value)
+{
+    try
+    {
+        if (config.matchRegex.has_value())
+        {
+            std::optional<std::string> s =
+                getMessageValue<std::string>(msg, config.lineName);
+            if (!s.has_value())
+            {
+                return false;
+            }
+
+            std::smatch m;
+            value = std::regex_match(s.value(), m, config.matchRegex.value());
+        }
+        else
+        {
+            std::optional<bool> v = getMessageValue<bool>(msg, config.lineName);
+            if (!v.has_value())
+            {
+                return false;
+            }
+            value = v.value();
+        }
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error(
+            "exception while reading dbus property \'{DBUS_NAME}\': {ERROR}",
+            "DBUS_NAME", config.lineName, "ERROR", e);
+        return false;
+    }
+}
+
+sdbusplus::bus::match_t PowerControl::dbusGPIOMatcher(
+    const ConfigData& cfg, std::function<void(bool)> onMatch)
+{
+    auto pulseEventMatcherCallback =
+        [this, &cfg, onMatch](sdbusplus::message_t& msg) {
+            bool value = false;
+            if (!getDbusMsgGPIOState(msg, cfg, value))
+            {
+                return;
+            }
+            onMatch(value);
+        };
+
+    return sdbusplus::bus::match_t(
+        static_cast<sdbusplus::bus_t&>(*conn),
+        "type='signal',interface='org.freedesktop.DBus.Properties',member='"
+        "PropertiesChanged',arg0='" +
+            cfg.interface + "',path='" + cfg.path + "',sender='" +
+            cfg.dbusName + "'",
+        std::move(pulseEventMatcherCallback));
+}
+
 void PowerControl::powerButtonPressLog()
 {
     sd_journal_send("MESSAGE=PowerControl: power button pressed", "PRIORITY=%i",
@@ -1977,6 +2106,157 @@ void PowerControl::setNmiSource()
             "xyz.openbmc_project.Chassis.Control.NMISource.BMCSourceSignal.FrontPanelButton"});
     // set Enable Property
     nmiSetEnableProperty(true);
+}
+
+void PowerControl::pohCounterTimerStart()
+{
+    lg2::info("POH timer started");
+    // Set the time-out as 1 hour, to align with POH command in ipmid
+    pohCounterTimer.expires_after(std::chrono::hours(1));
+    pohCounterTimer.async_wait([this](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("POH timer async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            lg2::info("POH timer canceled");
+            return;
+        }
+
+        if (getHostState() !=
+            "xyz.openbmc_project.State.Host.HostState.Running")
+        {
+            return;
+        }
+
+        conn->async_method_call(
+            [this](boost::system::error_code ec,
+               const std::variant<uint32_t>& pohCounterProperty) {
+                if (ec)
+                {
+                    lg2::error("error getting poh counter");
+                    return;
+                }
+                const uint32_t* pohCounter =
+                    std::get_if<uint32_t>(&pohCounterProperty);
+                if (pohCounter == nullptr)
+                {
+                    lg2::error("unable to read poh counter");
+                    return;
+                }
+
+                conn->async_method_call(
+                    [](boost::system::error_code ec) {
+                        if (ec)
+                        {
+                            lg2::error("failed to set poh counter");
+                        }
+                    },
+                    "xyz.openbmc_project.Settings",
+                    "/xyz/openbmc_project/state/chassis0",
+                    "org.freedesktop.DBus.Properties", "Set",
+                    "xyz.openbmc_project.State.PowerOnHours", "POHCounter",
+                    std::variant<uint32_t>(*pohCounter + 1));
+            },
+            "xyz.openbmc_project.Settings",
+            "/xyz/openbmc_project/state/chassis0",
+            "org.freedesktop.DBus.Properties", "Get",
+            "xyz.openbmc_project.State.PowerOnHours", "POHCounter");
+
+        pohCounterTimerStart();
+    });
+}
+
+void PowerControl::currentHostStateMonitor()
+{
+    if (getHostState() ==
+        "xyz.openbmc_project.State.Host.HostState.Running")
+    {
+        pohCounterTimerStart();
+        // Clear the restart cause set for the next restart
+        clearRestartCause();
+    }
+    else
+    {
+        pohCounterTimer.cancel();
+        // Set the restart cause set for this restart
+        setRestartCause();
+    }
+
+    static auto match = sdbusplus::bus::match_t(
+        *conn,
+        "type='signal',member='PropertiesChanged', "
+        "interface='org.freedesktop.DBus.Properties', "
+        "arg0='xyz.openbmc_project.State.Host'",
+        [this](sdbusplus::message_t& message) {
+            std::string intfName;
+            std::map<std::string, std::variant<std::string>> properties;
+
+            try
+            {
+                message.read(intfName, properties);
+            }
+            catch (const std::exception& e)
+            {
+                lg2::error("Unable to read host state: {ERROR}", "ERROR", e);
+                return;
+            }
+            if (properties.empty())
+            {
+                lg2::error("ERROR: Empty PropertiesChanged signal received");
+                return;
+            }
+
+            // We only want to check for CurrentHostState
+            if (properties.begin()->first != "CurrentHostState")
+            {
+                return;
+            }
+            std::string* currentHostState =
+                std::get_if<std::string>(&(properties.begin()->second));
+            if (currentHostState == nullptr)
+            {
+                lg2::error("{PROPERTY} property invalid", "PROPERTY",
+                           properties.begin()->first);
+                return;
+            }
+
+            if (*currentHostState ==
+                "xyz.openbmc_project.State.Host.HostState.Running")
+            {
+                pohCounterTimerStart();
+                // Clear the restart cause set for the next restart
+                clearRestartCause();
+                sd_journal_send("MESSAGE=Host system DC power is on",
+                                "PRIORITY=%i", LOG_INFO,
+                                "REDFISH_MESSAGE_ID=%s",
+                                "OpenBMC.0.1.DCPowerOn", NULL);
+            }
+            else
+            {
+                pohCounterTimer.cancel();
+                // POST_COMPLETE GPIO event is not working in some platforms
+                // when power state is changed to OFF. This resulted in
+                // 'OperatingSystemState' to stay at 'Standby', even though
+                // system is OFF. Set 'OperatingSystemState' to 'Inactive'
+                // if HostState is turned to OFF.
+                setOperatingSystemState(OperatingSystemStateStage::Inactive);
+
+                // Set the restart cause set for this restart
+                setRestartCause();
+#ifdef USE_ACBOOT
+                resetACBootProperty();
+#endif // USE_ACBOOT
+                sd_journal_send("MESSAGE=Host system DC power is off",
+                                "PRIORITY=%i", LOG_INFO,
+                                "REDFISH_MESSAGE_ID=%s",
+                                "OpenBMC.0.1.DCPowerOff", NULL);
+            }
+        });
 }
 
 // RestartCause Implementation (available in the power_control namespace)

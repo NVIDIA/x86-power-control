@@ -76,6 +76,9 @@ deps = [
 executable(
     'power-control',
     'src/power_control.cpp',
+    'src/power_control_base.cpp',
+    'src/vr_power_control.cpp',
+    'src/platform/nvl144/nvl144_power_control.cpp',
     include_directories: include_directories('src'),
     cpp_args: cpp_args,
     dependencies: deps,
