@@ -536,19 +536,5 @@ int main(int argc, char* argv[])
 
     currentHostStateMonitor(conn);
 
-    if (!hpmStbyEnConfig.lineName.empty())
-    {
-        // Set to indicate BMC's power control module is ready to take
-        // the inputs [PWR_GOOD] from the HPM FPGA
-        gpiod::line hpmLine;
-        if (!setGPIOOutput(hpmStbyEnConfig.lineName, hpmStbyEnConfig.polarity,
-                           hpmLine))
-        {
-            return -1;
-        }
-    }
-
-    io.run();
-
     return 0;
 }
