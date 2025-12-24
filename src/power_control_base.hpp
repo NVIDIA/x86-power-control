@@ -286,8 +286,7 @@ class PowerControl
         {"ResetPulseMs", 500},
         {"PowerCycleMs", 5000},
         {"SioPowerGoodWatchdogMs", 1000},
-        {"CpuResetWatchdogMs", 10000},
-        {"CpuShutdownOkWatchdogMs", 10000},
+        {"PowerOKWatchdogMs", 8000},
         {"GracefulPowerOffS", (5 * 60)},
         {"WarmResetCheckMs", 500},
         {"PowerOffSaveMs", 7000},
@@ -545,6 +544,20 @@ class PowerControl
     virtual void validateRequiredSignals();
 
     /**
+     * @brief Validate that all required timer configurations are present in
+     * TimerMap
+     *
+     * This method checks that timeout values for all required timers exist in
+     * TimerMap after loadConfigValues() has populated it from the JSON config.
+     *
+     * Derived classes override to check for platform-specific timeout values. 
+     * Base class implementation validates upstream/base timers.
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    virtual void validateTimerConfigs() = 0;
+
+    /**
      * @brief Monitor NMI source property changes via D-Bus
      *
      * Sets up a D-Bus match to listen for NMI source property changes
@@ -560,6 +573,22 @@ class PowerControl
      * power-on hours.
      */
     void pohCounterTimerStart();
+
+    /**
+     * @brief List of required base/upstream timer configurations
+     */
+    const std::vector<std::string> baseRequiredTimers = {
+        "PowerPulseMs", 
+        "ForceOffPulseMs",
+        "ResetPulseMs",
+        "PowerCycleMs",
+        "SioPowerGoodWatchdogMs",
+        "PowerOKWatchdogMs",
+        "GracefulPowerOffS",
+        "WarmResetCheckMs",
+        "PowerOffSaveMs",
+        "DbusGetPropertyRetry"
+    };
 
     /**
      * @brief Monitor current host state changes

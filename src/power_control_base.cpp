@@ -1683,6 +1683,23 @@ void PowerControl::validateRequiredSignals()
     // {"HpmStbyEn", &hpmStbyEnConfig}};
 }
 
+void PowerControl::validateTimerConfigs()
+{
+    // Base class validates upstream timers
+    for (const auto& timerName : baseRequiredTimers)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error("Required timer config '{TIMER}' not found in config",
+                       "TIMER", timerName);
+            throw std::runtime_error(
+                "PowerControl: Required timer config missing: " + timerName);
+        }
+    }
+
+    lg2::info("PowerControl timer configuration validation complete");
+}
+
 void PowerControl::registerGPIOHandlers()
 {
     lg2::info("Registering GPIO handlers from gpioHandlerMap");
