@@ -53,27 +53,6 @@ namespace power_control
 // Event enum is now defined inside PowerControl class in power_control_base.hpp
 using Event = PowerControl::Event;
 
-static constexpr uint8_t beepPowerFail = 8;
-
-static void beep(const uint8_t& beepPriority, std::shared_ptr<sdbusplus::asio::connection> conn)
-{
-    lg2::info("Beep with priority: {BEEP_PRIORITY}", "BEEP_PRIORITY",
-              beepPriority);
-
-    conn->async_method_call(
-        [](boost::system::error_code ec) {
-            if (ec)
-            {
-                lg2::error(
-                    "beep returned error with async_method_call (ec = {ERROR_MSG})",
-                    "ERROR_MSG", ec.message());
-                return;
-            }
-        },
-        "xyz.openbmc_project.BeepCode", "/xyz/openbmc_project/BeepCode",
-        "xyz.openbmc_project.BeepCode", "Beep", uint8_t(beepPriority));
-}
-
 enum class OperatingSystemStateStage
 {
     Inactive,

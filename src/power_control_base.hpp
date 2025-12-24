@@ -488,6 +488,14 @@ public:
      */
     virtual void validateRequiredSignals();
 
+    /**
+     * @brief Monitor NMI source property changes via D-Bus
+     * 
+     * Sets up a D-Bus match to listen for NMI source property changes
+     * and triggers nmiReset() when NMI is enabled.
+     */
+    void nmiSourcePropertyMonitor();
+
 protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -816,14 +824,6 @@ protected:
      * Pulses the NMI output GPIO and logs the diagnostic interrupt event.
      */
     void nmiReset();
-
-    /**
-     * @brief Monitor NMI source property changes via D-Bus
-     * 
-     * Sets up a D-Bus match to listen for NMI source property changes
-     * and triggers nmiReset() when NMI is enabled.
-     */
-    void nmiSourcePropertyMonitor();
 
     /**
      * @brief Set the NMI source via D-Bus
