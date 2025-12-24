@@ -29,20 +29,13 @@ VRPowerControl::VRPowerControl(
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
     PowerControl(ioContext, conn, node, appState),
-    pdbMainPowerOkWatchdogTimer(ioContext),
-    hpmPowerGoodWatchdogTimer(ioContext), cpuResetWatchdogTimer(ioContext),
+    hpmPowerGoodWatchdogTimer(ioContext),
+    cpuResetWatchdogTimer(ioContext),
     cpuShutdownOkWatchdogTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
     detectBoardPresence();
-
-    // Extend TimerMap with VR-specific timers
-    TimerMap.insert_or_assign("PsPowerOKWatchdogMs", 8000);
-    TimerMap.insert_or_assign("NVL144PdbMainPowerOkWatchdogMs", 10000);
-    TimerMap.insert_or_assign("GB300PdbMainPowerOkWatchdogMs", 10000);
-    TimerMap.insert_or_assign("C2PdbPSUPowerOkWatchdogMs", 10000);
-    TimerMap.insert_or_assign("HpmPowerGoodWatchdogMs", 15000);
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
@@ -253,7 +246,7 @@ void VRPowerControl::transitionToCPUResetDeAssertState()
         "HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetDeAssert.");
 
     deassertPreSystemResets();
-    startTimer(TimerMap["CPUResetWatchdogTimer"], cpuResetWatchdogTimer,
+    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
                Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetDeAssert);
 }
@@ -714,6 +707,23 @@ void VRPowerControl::validateRequiredSignals()
     }
 
     lg2::info("VR signal validation complete - all required signals present");
+}
+
+void VRPowerControl::validateTimerConfigs()
+{
+    // VR validates VR/HPM common timers (does NOT call base class)
+    for (const auto& timerName : vrRequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error("Required VR timer config '{TIMER}' not found in config",
+                       "TIMER", timerName);
+            throw std::runtime_error(
+                "VRPowerControl: Required timer config missing: " + timerName);
+        }
+    }
+
+    lg2::info("VR timer configuration validation complete");
 }
 
 void VRPowerControl::setGPIOsForHostStateOn()

@@ -128,6 +128,24 @@ class VRPowerControl : public PowerControl
     void validateRequiredSignals() override;
 
     /**
+     * @brief Validate that all required VR/HPM timer configurations are present
+     * in TimerMap
+     *
+     * VRPowerControl validates VR/HPM common timers and does NOT call base
+     * class. Platform classes should call this after validating their own
+     * platform-specific timers.
+     *
+     * Validates:
+     * - ForcefulCpuShutdownOkWatchdogMs
+     * - GracefulCpuShutdownOkWatchdogMs
+     * - CpuResetWatchdogMs
+     * - HPMPowerGoodWatchdogMs
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    void validateTimerConfigs() override;
+
+    /**
      * @brief Set all control GPIOs to match the host state "on"
      *
      * This virtual method sets all control GPIOs (Run Power Enable, Pre System
@@ -254,15 +272,19 @@ class VRPowerControl : public PowerControl
     const std::vector<std::string> requiredBoard1Signals = {
         "Board1RunPowerEnable", "Board1PreSystemReset", "Board1CpuShutdownOk"};
 
+    /**
+     * @brief List of required VR/HPM common timer configurations
+     */
+    const std::vector<std::string> vrRequiredTimeoutValues = {
+        "ForcefulCpuShutdownOkWatchdogMs",
+        "GracefulCpuShutdownOkWatchdogMs",
+        "CpuResetWatchdogMs",
+        "HPMPowerGoodWatchdogMs",
+    };
+
   protected:
     // VR-SPECIFIC TIMERS
     // These timers are used by VR-specific power sequencing (not in upstream)
-
-    /**
-     * @brief Timer for PDB main power OK assertion/de-assertion in PDB power
-     * sequencing
-     */
-    boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
 
     /**
      * @brief Timer for HPM board power good assertion/de-assertion in HPM power
