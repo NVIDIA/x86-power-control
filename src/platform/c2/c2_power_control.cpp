@@ -31,6 +31,9 @@ C2PowerControl::C2PowerControl(
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
+    // call validateTimerConfigs() to validate all required timers
+    validateTimerConfigs();
+
     // Add C2-specific GPIO handler to the map
     gpioHandlerMap["C2PDBPSUPowerOk"] = [this](bool state) {
         this->c2pdbPSUPowerOkHandler(state);
@@ -116,6 +119,28 @@ void C2PowerControl::validateRequiredSignals()
     VRPowerControl::validateRequiredSignals();
 
     lg2::info("C2 signal validation complete");
+}
+
+void C2PowerControl::validateTimerConfigs()
+{
+    // TODO: Validate C2-specific PDB timer when implemented
+    // Example: "C2PdbPSUPowerOkWatchdogMs"
+    for (const auto& timerName : platformRequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error(
+                "Required C2 timer config '{TIMER}' not found in config",
+                "TIMER", timerName);
+            throw std::runtime_error(
+                "C2PowerControl: Required timer config missing: " + timerName);
+        }
+    }
+
+    // Call VRPowerControl to validate common VR timers
+    VRPowerControl::validateTimerConfigs();
+
+    lg2::info("C2 timer configuration validation complete");
 }
 
 void C2PowerControl::setGPIOsForHostStateOn()

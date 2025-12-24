@@ -60,6 +60,18 @@ class C2PowerControl : public VRPowerControl
      */
     void validateRequiredSignals() override;
 
+    /**
+     * @brief Validate that all required timer configurations for C2 platform
+     * are present in TimerMap
+     *
+     * TODO: Implement C2-specific timer validation when timers are added
+     * Checks for C2-specific PDB timer, then calls
+     * VRPowerControl::validateTimerConfigs() to check common VR timers.
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    void validateTimerConfigs() override;
+
   private:
     // C2-SPECIFIC GPIO HANDLERS (Member functions)
 
@@ -80,6 +92,14 @@ class C2PowerControl : public VRPowerControl
     const std::vector<std::string> requiredSignals = {
         "C2PDBPSUPowerOk", "C2PDB12VHPMEnable", "C2PDB12VGPU1Enable",
         "C2PDB12VGPU2Enable"};
+
+    /**
+     * @brief List of required C2 platform-specific timer configurations
+     * TODO: Add C2PdbPSUPowerOkWatchdogMs when C2 sequencing is implemented
+     */
+    const std::vector<std::string> platformRequiredTimeoutValues = {
+        // Empty for now - add "C2PdbPSUPowerOkWatchdogMs" when needed
+    };
 
   protected:
     // OVERRIDDEN VR STATE HANDLERS (C2-specific behavior)
