@@ -596,9 +596,22 @@ class PowerControl
      */
     std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
     std::string configFilePath;
+
+    /**
+     * @brief Reference to the io_context for async operations
+     */
+    boost::asio::io_context& ioContext;
+
     std::shared_ptr<sdbusplus::asio::connection> conn;
-    std::string node;
+
+    /**
+     * @brief Node identifier
+     */
+    std::string nodeId;
+
     PersistentState& appState;
+
+    std::string node;
 
     /**
      * @brief Current power state
@@ -631,19 +644,9 @@ class PowerControl
     void registerGPIOHandlers();
 
     /**
-     * @brief Reference to the io_context for async operations
-     */
-    boost::asio::io_context& ioContext;
-
-    /**
      * @brief D-Bus connection
      */
     std::shared_ptr<sdbusplus::asio::connection> dbusConn;
-
-    /**
-     * @brief Node identifier
-     */
-    std::string nodeId;
 
     /**
      * @brief Application name for GPIO requests
