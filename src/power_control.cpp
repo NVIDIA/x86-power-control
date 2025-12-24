@@ -53,21 +53,6 @@ namespace power_control
 // Event enum is now defined inside PowerControl class in power_control_base.hpp
 using Event = PowerControl::Event;
 
-static uint64_t getCurrentTimeMs()
-{
-    struct timespec time = {};
-
-    if (clock_gettime(CLOCK_REALTIME, &time) < 0)
-    {
-        return 0;
-    }
-    uint64_t currentTimeMs = static_cast<uint64_t>(time.tv_sec) * 1000;
-    currentTimeMs += static_cast<uint64_t>(time.tv_nsec) / 1000 / 1000;
-
-    return currentTimeMs;
-}
-
-
 #ifdef CHASSIS_SYSTEM_RESET
 enum class SlotPowerState
 {
