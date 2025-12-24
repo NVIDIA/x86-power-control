@@ -25,7 +25,8 @@ NVL144PowerControl::NVL144PowerControl(
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
     VRPowerControl(ioContext, conn, configFilePath, node,
-                   appState) // Call parent constructor (registers VR GPIOs)
+                   appState), // Call parent constructor (registers VR GPIOs)
+    pdbMainPowerOkWatchdogTimer(ioContext)
 {
     // powerSignalMap is now populated by base class
     // PowerControl::loadConfigValues() VR handlers already added to
@@ -34,6 +35,9 @@ NVL144PowerControl::NVL144PowerControl(
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
+
+    // call validateTimerConfigs() to validate all required timers
+    validateTimerConfigs();
 
     // Add NVL144-specific GPIO handler to the map
     gpioHandlerMap["NVL144PDBMainPowerOk"] = [this](bool state) {
@@ -99,6 +103,8 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     const char* shutdownType =
         (event == Event::powerOffRequest) ? "Forceful" : "Graceful";
 
+    int shutdownOkTimeout = event == Event::powerOffRequest ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"] : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
+
     const char* shutdownAction = (event == Event::powerOffRequest)
                                      ? "Shutdown Force"
                                      : "Shutdown Request";
@@ -130,7 +136,7 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
             "SHUTDOWN_ACTION", shutdownAction);
         setGPIOOutput(shutdownSignal->second,
                       !shutdownSignal->second->polarity);
-        startTimer(TimerMap["CpuShutdownOkWatchdogMs"],
+        startTimer(shutdownOkTimeout,
                    cpuShutdownOkWatchdogTimer,
                    Event::cpuShutdownOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForCPUShutdownOk);
@@ -197,7 +203,7 @@ void NVL144PowerControl::handlePowerOnRequest()
             "Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
         setGPIOOutput(nvl144pdbMainPowerEnable->second,
                       nvl144pdbMainPowerEnable->second->polarity);
-        startTimer(TimerMap["PDBMainPowerOkWatchdogTimer"],
+        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
                    pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForPDBMainPowerOk);
@@ -278,7 +284,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
         "NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
 
     assertHPMBoardPowerSequence();
-    startTimer(TimerMap["HPMPowerGoodWatchdogTimer"], hpmPowerGoodWatchdogTimer,
+    startTimer(TimerMap["HPMPowerGoodWatchdogMs"], hpmPowerGoodWatchdogTimer,
                Event::hpmPowerGoodWatchdogTimerExpired);
     setPowerState(PowerState::waitForHPMPowerGoodAssert);
 }
@@ -406,7 +412,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
         "CPU Reset Indicator Asserted. CPUs are in reset. De-asserting Run Power Enable, E1S Power Enable, USB Power Enable, and asserting BMC SSD Reset lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodDeAssert.");
 
     deassertHPMPowerAndPeripherals();
-    startTimer(TimerMap["HPMPowerGoodWatchdogTimer"], hpmPowerGoodWatchdogTimer,
+    startTimer(TimerMap["HPMPowerGoodWatchdogMs"], hpmPowerGoodWatchdogTimer,
                Event::hpmPowerGoodWatchdogTimerExpired);
     setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
 }
@@ -530,6 +536,28 @@ void NVL144PowerControl::validateRequiredSignals()
     VRPowerControl::validateRequiredSignals();
 
     lg2::info("NVL144 signal validation complete");
+}
+
+void NVL144PowerControl::validateTimerConfigs()
+{
+    // Validate NVL144-specific PDB timer
+    for (const auto& timerName : platformRequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error(
+                "Required NVL144 timer config '{TIMER}' not found in config",
+                "TIMER", timerName);
+            throw std::runtime_error(
+                "NVL144PowerControl: Required timer config missing: " +
+                timerName);
+        }
+    }
+
+    // Call VRPowerControl to validate common VR timers
+    VRPowerControl::validateTimerConfigs();
+
+    lg2::info("NVL144 timer configuration validation complete");
 }
 
 void NVL144PowerControl::setGPIOsForHostStateOn()

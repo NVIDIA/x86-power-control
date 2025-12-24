@@ -58,6 +58,17 @@ class NVL144PowerControl : public VRPowerControl
      */
     void validateRequiredSignals() override;
 
+    /**
+     * @brief Validate that all required timer configurations for NVL144
+     * platform are present in TimerMap
+     *
+     * Checks for NVL144-specific PDB timer, then calls
+     * VRPowerControl::validateTimerConfigs() to check common VR timers.
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    void validateTimerConfigs() override;
+
   protected:
     // NVL144 uses the default VR implementations (which are NVL144 behavior)
     // Override only if NVL144 needs platform-specific variations
@@ -214,6 +225,19 @@ class NVL144PowerControl : public VRPowerControl
         "BMCSSDReset",
         // TODO: Add E1S, BMC SSD signals when implemented
     };
+
+    /**
+     * @brief List of required NVL144 platform-specific timer configurations
+     */
+    const std::vector<std::string> platformRequiredTimeoutValues = {
+        "NVL144PdbMainPowerOkWatchdogMs",
+    };
+
+    /**
+     * @brief Timer for NVL144 PDB main power OK assertion/de-assertion in PDB
+     * power sequencing
+     */
+    boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
 
   private:
     // NVL144-SPECIFIC GPIO HANDLERS (Member functions)
