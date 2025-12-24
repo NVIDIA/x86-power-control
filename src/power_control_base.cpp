@@ -27,9 +27,9 @@ std::string PowerControl::getEventName(Event event)
 {
     switch (event)
     {
-        case Event::psPowerOKAssert:
+        case Event::powerOKAssert:
             return "power supply power OK assert";
-        case Event::psPowerOKDeAssert:
+        case Event::powerOKDeAssert:
             return "power supply power OK de-assert";
         case Event::sioPowerGoodAssert:
             return "SIO power good assert";
@@ -53,7 +53,7 @@ std::string PowerControl::getEventName(Event event)
             return "reset button pressed";
         case Event::powerCycleTimerExpired:
             return "power cycle timer expired";
-        case Event::psPowerOKWatchdogTimerExpired:
+        case Event::powerOKWatchdogTimerExpired:
             return "power supply power OK watchdog timer expired";
         case Event::pdbMainPowerOkWatchdogTimerExpired:
             return "PDB main power OK watchdog timer expired";
@@ -130,7 +130,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     ioContext(ioContext), conn(conn), nodeId(node), appState(appState),
     appName("power-control"), gpioAssertTimer(ioContext),
     powerCycleTimer(ioContext), gracefulPowerOffTimer(ioContext),
-    warmResetCheckTimer(ioContext), psPowerOKWatchdogTimer(ioContext),
+    warmResetCheckTimer(ioContext), powerOKWatchdogTimer(ioContext),
     sioPowerGoodWatchdogTimer(ioContext), powerStateSaveTimer(ioContext),
     pohCounterTimer(ioContext), restartCauseTimer(ioContext),
     slotPowerCycleTimer(ioContext)
@@ -142,7 +142,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // These handlers are available in all platforms and can be overridden by
     // derived classes
     gpioHandlerMap["PowerOk"] = [this](bool state) {
-        this->psPowerOKHandler(state);
+        this->powerOKHandler(state);
     };
     gpioHandlerMap["SioPowerGood"] = [this](bool state) {
         this->sioPowerGoodHandler(state);
@@ -190,8 +190,8 @@ std::function<void(Event)> PowerControl::getPowerStateHandler()
         case PowerState::on:
             return [this](Event e) { this->handlePowerStateOn(e); };
 
-        case PowerState::waitForPSPowerOK:
-            return [this](Event e) { this->handleWaitForPSPowerOK(e); };
+        case PowerState::waitForPowerOK:
+            return [this](Event e) { this->handleWaitForPowerOK(e); };
 
         case PowerState::waitForSIOPowerGood:
             return [this](Event e) { this->handleWaitForSIOPowerGood(e); };
@@ -511,30 +511,74 @@ void PowerControl::waitForGPIOEvent(ConfigData& config)
 
 void PowerControl::handlePowerStateOn(Event event)
 {
-    // TODO: Move upstream powerStateOn() implementation here
-    //
-    // PREVIOUS IMPLEMENTATION (from powerStateOn in power_control.cpp):
-    // - logEvent(__FUNCTION__, event);
-    // - switch (event):
-    //     case Event::psPowerOKDeAssert:
-    //         - setPowerState(PowerState::off);
-    //         - beep(beepPowerFail);
-    //     case Event::sioS5Assert:
-    //         - setPowerState(PowerState::transitionToOff);
-    //         - addRestartCause(RestartCause::softReset);
-    //     case Event::pltRstAssert / Event::postCompleteDeAssert:
-    //         - setPowerState(PowerState::checkForWarmReset);
-    //         - addRestartCause(RestartCause::softReset);
-    //     case Event::powerButtonPressed:
-    //         - graceful power off sequence
-    //     case Event::gracefulPowerOffRequest:
-    //         - setPowerState(PowerState::gracefulTransitionToOff);
-    //     case Event::powerCycleRequest:
-    //         - setPowerState(PowerState::gracefulTransitionToCycleOff);
-    //     case Event::resetRequest:
-    //         - reset sequence
-    //     case Event::powerOffRequest:
-    //         - setPowerState(PowerState::transitionToOff);
+    logEvent(__FUNCTION__, event);
+    switch (event)
+    {
+        case Event::powerOKDeAssert:
+            setPowerState(PowerState::off);
+            // DC power is unexpectedly lost, beep
+            beep(beepPowerFail);
+            break;
+        case Event::sioS5Assert:
+            setPowerState(PowerState::transitionToOff);
+#if IGNORE_SOFT_RESETS_DURING_POST
+            // Only recognize soft resets once host gets past POST COMPLETE
+            if (operatingSystemState != OperatingSystemStateStage::Standby)
+            {
+                ignoreNextSoftReset = true;
+            }
+#endif
+            addRestartCause(RestartCause::softReset);
+            break;
+#if USE_PLT_RST
+        case Event::pltRstAssert:
+#else
+        case Event::postCompleteDeAssert:
+#endif
+            setPowerState(PowerState::checkForWarmReset);
+#if IGNORE_SOFT_RESETS_DURING_POST
+            // Only recognize soft resets once host gets past POST COMPLETE
+            if (operatingSystemState != OperatingSystemStateStage::Standby)
+            {
+                ignoreNextSoftReset = true;
+            }
+#endif
+            addRestartCause(RestartCause::softReset);
+            warmResetCheckTimerStart();
+            break;
+        case Event::powerButtonPressed:
+            setPowerState(PowerState::gracefulTransitionToOff);
+            gracefulPowerOffTimerStart();
+            break;
+        case Event::powerOffRequest:
+            setPowerState(PowerState::transitionToOff);
+            forcePowerOff();
+            break;
+        case Event::gracefulPowerOffRequest:
+            setPowerState(PowerState::gracefulTransitionToOff);
+            gracefulPowerOffTimerStart();
+            gracefulPowerOff();
+            break;
+        case Event::powerCycleRequest:
+            setPowerState(PowerState::transitionToCycleOff);
+            forcePowerOff();
+            break;
+        case Event::gracefulPowerCycleRequest:
+            setPowerState(PowerState::gracefulTransitionToCycleOff);
+            gracefulPowerOffTimerStart();
+            gracefulPowerOff();
+            break;
+        case Event::resetButtonPressed:
+            setPowerState(PowerState::checkForWarmReset);
+            warmResetCheckTimerStart();
+            break;
+        case Event::resetRequest:
+            reset();
+            break;
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void PowerControl::handlePowerStateOff(Event event)
@@ -559,7 +603,7 @@ void PowerControl::handlePowerStateOff(Event event)
     //         - setPowerState(PowerState::waitForPSPowerOK);
 }
 
-void PowerControl::handleWaitForPSPowerOK(Event event)
+void PowerControl::handleWaitForPowerOK(Event event)
 {
     // TODO: Move upstream powerStateWaitForPSPowerOK() implementation here
     //
@@ -664,7 +708,7 @@ std::string_view PowerControl::getHostState() const
         case PowerState::gracefulTransitionToCycleOff:
             return "xyz.openbmc_project.State.Host.HostState.Running";
             break;
-        case PowerState::waitForPSPowerOK:
+        case PowerState::waitForPowerOK:
         case PowerState::waitForSIOPowerGood:
         case PowerState::off:
         case PowerState::transitionToOff:
@@ -692,7 +736,7 @@ std::string_view PowerControl::getChassisState() const
         case PowerState::checkForWarmReset:
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
-        case PowerState::waitForPSPowerOK:
+        case PowerState::waitForPowerOK:
         case PowerState::waitForSIOPowerGood:
         case PowerState::off:
         case PowerState::cycleOff:
@@ -712,7 +756,7 @@ std::string PowerControl::getPowerStateName()
         case PowerState::on:
             return "On";
             break;
-        case PowerState::waitForPSPowerOK:
+        case PowerState::waitForPowerOK:
             return "Wait for Power OK";
             break;
         case PowerState::waitForSIOPowerGood:
@@ -1774,15 +1818,15 @@ void PowerControl::registerGPIOHandlers()
 // GPIO Event Handlers
 // ===========================================================================
 
-void PowerControl::psPowerOKHandler(bool state)
+void PowerControl::powerOKHandler(bool state)
 {
     // Lookup config for polarity (guaranteed to exist since handler was
     // registered)
     auto& config = *powerSignalMap["PowerOk"];
 
     Event powerControlEvent = (state == config.polarity)
-                                  ? Event::psPowerOKAssert
-                                  : Event::psPowerOKDeAssert;
+                                  ? Event::powerOKAssert
+                                  : Event::powerOKDeAssert;
     sendPowerControlEvent(powerControlEvent);
 }
 
@@ -2259,6 +2303,116 @@ void PowerControl::pohCounterTimerStart()
             "xyz.openbmc_project.State.PowerOnHours", "POHCounter");
 
         pohCounterTimerStart();
+    });
+}
+
+void PowerControl::beep(const uint8_t& beepPriority)
+{
+    lg2::info("Beep with priority: {BEEP_PRIORITY}", "BEEP_PRIORITY",
+              beepPriority);
+    conn->async_method_call(
+        [](boost::system::error_code ec) {
+            if (ec)
+            {
+                lg2::error(
+                    "beep returned error with async_method_call (ec = {ERROR_MSG})",
+                    "ERROR_MSG", ec.message());
+                return;
+            }
+        },
+        "xyz.openbmc_project.BeepCode", "/xyz/openbmc_project/BeepCode",
+        "xyz.openbmc_project.BeepCode", "Beep", uint8_t(beepPriority));
+}
+
+void PowerControl::warmResetCheckTimerStart()
+{
+    lg2::info("Warm reset check timer started");
+    warmResetCheckTimer.expires_after(
+        std::chrono::milliseconds(TimerMap["WarmResetCheckMs"]));
+    warmResetCheckTimer.async_wait([this](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Warm reset check async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            lg2::info("Warm reset check timer canceled");
+            return;
+        }
+        lg2::info("Warm reset check timer completed");
+        sendPowerControlEvent(Event::warmResetDetected);
+    });
+}
+
+void PowerControl::gracefulPowerOffTimerStart()
+{
+    lg2::info("Graceful power-off timer started");
+    gracefulPowerOffTimer.expires_after(
+        std::chrono::seconds(TimerMap["GracefulPowerOffS"]));
+    gracefulPowerOffTimer.async_wait([this](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Graceful power-off async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            lg2::info("Graceful power-off timer canceled");
+            return;
+        }
+        lg2::info("Graceful power-off timer completed");
+        sendPowerControlEvent(Event::gracefulPowerOffTimerExpired);
+    });
+}
+
+void PowerControl::powerCycleTimerStart()
+{
+    lg2::info("Power-cycle timer started");
+    powerCycleTimer.expires_after(
+        std::chrono::milliseconds(TimerMap["PowerCycleMs"]));
+    powerCycleTimer.async_wait([this](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Power-cycle async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            lg2::info("Power-cycle timer canceled");
+            return;
+        }
+        lg2::info("Power-cycle timer completed");
+        sendPowerControlEvent(Event::powerCycleTimerExpired);
+    });
+}
+
+void PowerControl::powerOKWatchdogTimerStart()
+{
+    lg2::info("power OK watchdog timer started");
+    powerOKWatchdogTimer.expires_after(
+        std::chrono::milliseconds(TimerMap["PowerOKWatchdogMs"]));
+    powerOKWatchdogTimer.async_wait([this](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("power OK watchdog async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            lg2::info("power OK watchdog timer canceled");
+            return;
+        }
+        lg2::info("power OK watchdog timer expired");
+        sendPowerControlEvent(Event::powerOKWatchdogTimerExpired);
     });
 }
 

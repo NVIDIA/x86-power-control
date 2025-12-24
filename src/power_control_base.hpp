@@ -28,7 +28,7 @@ enum class PowerState
 {
     on,
     off,
-    waitForPSPowerOK,
+    waitForPowerOK,
     waitForSIOPowerGood,
     transitionToOff,
     gracefulTransitionToOff,
@@ -194,8 +194,8 @@ class PowerControl
      */
     enum class Event
     {
-        psPowerOKAssert,
-        psPowerOKDeAssert,
+        powerOKAssert,
+        powerOKDeAssert,
         sioPowerGoodAssert,
         sioPowerGoodDeAssert,
         sioS5Assert,
@@ -207,7 +207,7 @@ class PowerControl
         powerButtonPressed,
         resetButtonPressed,
         powerCycleTimerExpired,
-        psPowerOKWatchdogTimerExpired,
+        powerOKWatchdogTimerExpired,
         pdbMainPowerOkWatchdogTimerExpired,
         hpmPowerGoodWatchdogTimerExpired,
         cpuResetWatchdogTimerExpired,
@@ -575,6 +575,52 @@ class PowerControl
     void pohCounterTimerStart();
 
     /**
+     * @brief Beep priority for power failure
+     */
+    static constexpr uint8_t beepPowerFail = 8;
+
+    /**
+     * @brief Send a beep code via D-Bus
+     *
+     * Sends a beep command with the specified priority to the BeepCode service.
+     *
+     * @param beepPriority Priority level for the beep (0-255)
+     */
+    virtual void beep(const uint8_t& beepPriority);
+
+    /**
+     * @brief Start the warm reset check timer
+     *
+     * Starts a timer to check for warm reset conditions. When the timer
+     * expires, sends Event::warmResetDetected.
+     */
+    virtual void warmResetCheckTimerStart();
+
+    /**
+     * @brief Start the graceful power-off timer
+     *
+     * Starts a timer for graceful power-off timeout. When the timer expires,
+     * sends Event::gracefulPowerOffTimerExpired.
+     */
+    virtual void gracefulPowerOffTimerStart();
+
+    /**
+     * @brief Start the power cycle timer
+     *
+     * Starts a timer for power cycle delay. When the timer expires, sends
+     * Event::powerCycleTimerExpired.
+     */
+    virtual void powerCycleTimerStart();
+
+    /**
+     * @brief Start the power OK watchdog timer
+     *
+     * Starts a watchdog timer for power OK assertion on power-on. When the
+     * timer expires, sends Event::powerOKWatchdogTimerExpired.
+     */
+    virtual void powerOKWatchdogTimerStart();
+
+    /**
      * @brief List of required base/upstream timer configurations
      */
     const std::vector<std::string> baseRequiredTimers = {
@@ -706,10 +752,11 @@ class PowerControl
      */
     boost::asio::steady_timer warmResetCheckTimer;
 
+
     /**
-     * @brief Timer for power supply power OK assertion on power-on
+     * @brief Timer for power OK watchdog on power-on
      */
-    boost::asio::steady_timer psPowerOKWatchdogTimer;
+    boost::asio::steady_timer powerOKWatchdogTimer;
 
     /**
      * @brief Timer for SIO power good assertion on power-on
@@ -866,7 +913,7 @@ class PowerControl
      *
      * @param state The current state of the GPIO line
      */
-    virtual void psPowerOKHandler(bool state);
+    virtual void powerOKHandler(bool state);
 
     /**
      * @brief Handler for SIO Power Good GPIO signal
@@ -1157,15 +1204,15 @@ class PowerControl
     virtual void handlePowerStateOff(Event event);
 
     /**
-     * @brief Handler for PowerState::waitForPSPowerOK
+     * @brief Handler for PowerState::waitForPowerOK
      *
      * PREVIOUS IMPLEMENTATION (Upstream):
-     * - Waited for PS Power OK assertion
+     * - Waited for Power OK assertion
      * - Handled watchdog timeout (power supply failed to come up)
      * - Transitioned to waitForSIOPowerGood or on depending on SIO
      * configuration
      */
-    virtual void handleWaitForPSPowerOK(Event event);
+    virtual void handleWaitForPowerOK(Event event);
 
     /**
      * @brief Handler for PowerState::waitForSIOPowerGood
