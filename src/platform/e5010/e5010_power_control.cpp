@@ -31,6 +31,9 @@ E5010PowerControl::E5010PowerControl(
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
+    // call validateTimerConfigs() to validate all required timers
+    validateTimerConfigs();
+
     // Register all GPIO handlers (from base and VR only)
     registerGPIOHandlers();
 }
@@ -73,6 +76,15 @@ void E5010PowerControl::validateRequiredSignals()
     VRPowerControl::validateRequiredSignals();
 
     lg2::info("E5010 signal validation complete");
+}
+
+void E5010PowerControl::validateTimerConfigs()
+{
+    // E5010 has no PDB, so no platform-specific timers
+    // Just call VRPowerControl to validate common VR timers
+    VRPowerControl::validateTimerConfigs();
+
+    lg2::info("E5010 timer configuration validation complete");
 }
 
 void E5010PowerControl::setGPIOsForHostStateOn()

@@ -52,6 +52,17 @@ class E5010PowerControl : public VRPowerControl
      */
     void validateRequiredSignals() override;
 
+    /**
+     * @brief Validate that all required timer configurations for E5010 platform
+     * are present in TimerMap
+     *
+     * E5010 has no PDB, so no platform-specific timers. Just calls
+     * VRPowerControl::validateTimerConfigs() to check common VR timers.
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    void validateTimerConfigs() override;
+
   protected:
     /**
      * @brief Handler for PowerState::on (E5010 Override)
