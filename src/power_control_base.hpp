@@ -803,6 +803,35 @@ protected:
      */
     void nmiDiagIntLog();
 
+    /**
+     * @brief Set the NMI Enable property via D-Bus
+     * 
+     * @param value The value to set (true = enabled, false = disabled)
+     */
+    void nmiSetEnableProperty(bool value);
+
+    /**
+     * @brief Perform NMI reset operation
+     * 
+     * Pulses the NMI output GPIO and logs the diagnostic interrupt event.
+     */
+    void nmiReset();
+
+    /**
+     * @brief Monitor NMI source property changes via D-Bus
+     * 
+     * Sets up a D-Bus match to listen for NMI source property changes
+     * and triggers nmiReset() when NMI is enabled.
+     */
+    void nmiSourcePropertyMonitor();
+
+    /**
+     * @brief Set the NMI source via D-Bus
+     * 
+     * Sets the BMC source for NMI to FrontPanelButton and enables NMI.
+     */
+    void setNmiSource();
+
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior
 

@@ -503,143 +503,6 @@ void systemReset()
 }
 #endif
 
-static void nmiSetEnableProperty(std::shared_ptr<sdbusplus::asio::connection> conn, bool value)
-{
-    conn->async_method_call(
-        [conn](boost::system::error_code ec) {
-            if (ec)
-            {
-                lg2::error("failed to set NMI source");
-            }
-        },
-        "xyz.openbmc_project.Settings",
-        "/xyz/openbmc_project/Chassis/Control/NMISource",
-        "org.freedesktop.DBus.Properties", "Set",
-        "xyz.openbmc_project.Chassis.Control.NMISource", "Enabled",
-        std::variant<bool>{value});
-}
-
-static void nmiReset()
-{
-    const static constexpr int nmiOutPulseTimeMs = 200;
-
-    lg2::info("NMI out action");
-    nmiOutLine.set_value(nmiOutConfig.polarity);
-    lg2::info("{GPIO_NAME} set to {GPIO_VALUE}", "GPIO_NAME",
-              nmiOutConfig.lineName, "GPIO_VALUE", nmiOutConfig.polarity);
-    gpioAssertTimer.expires_after(std::chrono::milliseconds(nmiOutPulseTimeMs));
-    gpioAssertTimer.async_wait([](const boost::system::error_code ec) {
-        // restore the NMI_OUT GPIO line back to the opposite value
-        nmiOutLine.set_value(!nmiOutConfig.polarity);
-        lg2::info("{GPIO_NAME} released", "GPIO_NAME", nmiOutConfig.lineName);
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                           "GPIO_NAME", nmiOutConfig.lineName, "ERROR_MSG",
-                           ec.message());
-            }
-        }
-    });
-    // log to redfish
-    nmiDiagIntLog();
-    lg2::info("NMI out action completed");
-    // reset Enable Property
-    nmiSetEnableProperty(false);
-}
-
-static void nmiSourcePropertyMonitor(std::shared_ptr<sdbusplus::asio::connection> conn)
-{
-    lg2::info("NMI Source Property Monitor");
-
-    static std::unique_ptr<sdbusplus::bus::match_t> nmiSourceMatch =
-        std::make_unique<sdbusplus::bus::match_t>(
-            *conn,
-            "type='signal',interface='org.freedesktop.DBus.Properties',"
-            "member='PropertiesChanged',"
-            "arg0namespace='xyz.openbmc_project.Chassis.Control.NMISource'",
-            [](sdbusplus::message_t& msg) {
-                std::string interfaceName;
-                boost::container::flat_map<std::string,
-                                           std::variant<bool, std::string>>
-                    propertiesChanged;
-                std::string state;
-                bool value = true;
-                try
-                {
-                    msg.read(interfaceName, propertiesChanged);
-                    if (propertiesChanged.begin()->first == "Enabled")
-                    {
-                        value =
-                            std::get<bool>(propertiesChanged.begin()->second);
-                        lg2::info(
-                            "NMI Enabled propertiesChanged value: {VALUE}",
-                            "VALUE", value);
-                        nmiEnabled = value;
-                        if (nmiEnabled)
-                        {
-                            nmiReset();
-                        }
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    lg2::error("Unable to read NMI source: {ERROR}", "ERROR",
-                               e);
-                    return;
-                }
-            });
-}
-
-static void setNmiSource(std::shared_ptr<sdbusplus::asio::connection> conn)
-{
-    conn->async_method_call(
-        [](boost::system::error_code ec) {
-            if (ec)
-            {
-                lg2::error("failed to set NMI source");
-            }
-        },
-        "xyz.openbmc_project.Settings",
-        "/xyz/openbmc_project/Chassis/Control/NMISource",
-        "org.freedesktop.DBus.Properties", "Set",
-        "xyz.openbmc_project.Chassis.Control.NMISource", "BMCSource",
-        std::variant<std::string>{
-            "xyz.openbmc_project.Chassis.Control.NMISource.BMCSourceSignal.FrontPanelButton"});
-    // set Enable Property
-    nmiSetEnableProperty(true);
-}
-
-// TODO: nmiButtonHandler is dead code - never called. Remove or refactor to use PowerControl class.
-// static void nmiButtonHandler(bool state)
-// {
-//     // Don't handle event if host not running and config doesn't force it
-//     if (!nmiWhenPoweredOff &&
-//         powerControl.getHostState() !=
-//             "xyz.openbmc_project.State.Host.HostState.Running")
-//     {
-//         return;
-//     }
-// 
-//     bool asserted = state == nmiButtonConfig.polarity;
-//     nmiButtonIface->set_property("ButtonPressed", asserted);
-//     if (asserted)
-//     {
-//         nmiButtonPressLog();
-//         if (nmiButtonMasked)
-//         {
-//             lg2::info("NMI button press masked");
-//         }
-//         else
-//         {
-//             setNmiSource();
-//         }
-//     }
-// }
-
 static void idButtonHandler(bool state)
 {
     bool asserted = state == idButtonConfig.polarity;
@@ -938,8 +801,9 @@ int main(int argc, char* argv[])
         powerRestore.run();
     }
 
-    if (nmiOutLine)
-        nmiSourcePropertyMonitor();
+    // NMI source property monitor is initialized by the powerControl object
+    // if NMIOut is configured in powerSignalMap
+    powerControl.nmiSourcePropertyMonitor();
 
     lg2::info("Initializing power state.");
 
