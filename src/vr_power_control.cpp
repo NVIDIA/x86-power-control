@@ -3,7 +3,13 @@
  * Copyright (C) 2021-2022 YADRO.
  */
 
+#include "config.h"
+
 #include "vr_power_control.hpp"
+
+#include <phosphor-logging/lg2.hpp>
+
+#include <filesystem>
 
 // External references to global variables from power_control.cpp
 namespace power_control
@@ -13,6 +19,8 @@ extern PowerState powerState;
 
 namespace power_control
 {
+// Type aliases for convenience
+using Event = PowerControl::Event;
 
 // Constructor: Assigns handlers and registers events for common VR/HPM GPIOs
 VRPowerControl::VRPowerControl(
@@ -30,13 +38,11 @@ VRPowerControl::VRPowerControl(
     detectBoardPresence();
 
     // Extend TimerMap with VR-specific timers
-    TimerMap.insert_or_assign({
-        {"PsPowerOKWatchdogMs", 8000},
-        {"NVL144PdbMainPowerOkWatchdogMs", 10000},
-        {"GB300PdbMainPowerOkWatchdogMs", 10000},
-        {"C2PdbPSUPowerOkWatchdogMs", 10000},
-        {"HpmPowerGoodWatchdogMs", 15000},
-    });
+    TimerMap.insert_or_assign("PsPowerOKWatchdogMs", 8000);
+    TimerMap.insert_or_assign("NVL144PdbMainPowerOkWatchdogMs", 10000);
+    TimerMap.insert_or_assign("GB300PdbMainPowerOkWatchdogMs", 10000);
+    TimerMap.insert_or_assign("C2PdbPSUPowerOkWatchdogMs", 10000);
+    TimerMap.insert_or_assign("HpmPowerGoodWatchdogMs", 15000);
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
@@ -65,29 +71,29 @@ VRPowerControl::VRPowerControl(
 void VRPowerControl::detectBoardPresence()
 {
     // Check presence and update context using paths from build configuration
-    presence.gb300_pdb = checkIOXPresence(GB300_PDB_IOX_PATH);
-    presence.c2_pdb = checkIOXPresence(C2_PDB_IOX_PATH);
-    presence.nvl144_pdb = checkIOXPresence(NVL144_PDB_IOX_PATH);
-    presence.board0 = checkIOXPresence(BOARD0_IOX_PATH);
-    presence.board1 = checkIOXPresence(BOARD1_IOX_PATH);
+    boardPresence.parsecPdbPresent = checkIOXPresence(GB300_PDB_IOX_PATH);
+    boardPresence.c2PdbPresent = checkIOXPresence(C2_PDB_IOX_PATH);
+    boardPresence.nvl144PdbPresent = checkIOXPresence(NVL144_PDB_IOX_PATH);
+    boardPresence.board0Present = checkIOXPresence(BOARD0_IOX_PATH);
+    boardPresence.board1Present = checkIOXPresence(BOARD1_IOX_PATH);
 
     // Log detected board presence
     lg2::info("Board presence detection:");
     lg2::info("  GB300 PDB ({PATH}): {PRESENT}", "PATH",
               std::string(GB300_PDB_IOX_PATH), "PRESENT",
-              powerContext.presence.gb300_pdb);
+              boardPresence.parsecPdbPresent);
     lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH",
               std::string(C2_PDB_IOX_PATH), "PRESENT",
-              powerContext.presence.c2_pdb);
+              boardPresence.c2PdbPresent);
     lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH",
               std::string(NVL144_PDB_IOX_PATH), "PRESENT",
-              powerContext.presence.nvl144_pdb);
+              boardPresence.nvl144PdbPresent);
     lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH",
               std::string(BOARD0_IOX_PATH), "PRESENT",
-              powerContext.presence.board0);
+              boardPresence.board0Present);
     lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH",
               std::string(BOARD1_IOX_PATH), "PRESENT",
-              powerContext.presence.board1);
+              boardPresence.board1Present);
 }
 
 // Board presence detection functions
@@ -109,7 +115,7 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
                                   : Event::board0RunPowerPGDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 void VRPowerControl::board1RunPowerPGHandler(bool state)
@@ -121,7 +127,7 @@ void VRPowerControl::board1RunPowerPGHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1RunPowerPGAssert
                                   : Event::board1RunPowerPGDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 void VRPowerControl::board0CpuShutdownOkHandler(bool state)
@@ -133,7 +139,7 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0CpuShutdownOkAssert
                                   : Event::board0CpuShutdownOkDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 void VRPowerControl::board1CpuShutdownOkHandler(bool state)
@@ -145,7 +151,7 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1CpuShutdownOkAssert
                                   : Event::board1CpuShutdownOkDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 void VRPowerControl::cpuResetIndicatorHandler(bool state)
@@ -157,7 +163,7 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::cpuResetIndicatorAssert
                                   : Event::cpuResetIndicatorDeAssert;
-    this->sendPowerControlEvent(powerControlEvent, powerState);
+    this->sendPowerControlEvent(powerControlEvent);
 }
 
 std::function<void(Event)> VRPowerControl::getPowerStateHandler()
