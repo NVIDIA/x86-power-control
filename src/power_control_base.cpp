@@ -2163,9 +2163,255 @@ bool PowerControl::requestInputEvents(
     waitForInputEvent(signalName, handler, keyCode, eventDescriptor, stateTracker);
     
     lg2::info("Successfully set up input event monitoring for {SIGNAL_NAME} on {EVENT_PATH} with key code {KEY_CODE:#x}",
-             "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE", keyCode);
+              "SIGNAL_NAME", signalName, "EVENT_PATH", eventPath, "KEY_CODE", keyCode);
     
     return true;
+}
+
+// Power Control Operations
+// referenced by upstream power state handlers
+
+void PowerControl::powerOn()
+{
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+    }
+    else
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+    }
+}
+
+void PowerControl::gracefulPowerOff()
+{
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+    }
+    else
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+    }
+}
+
+void PowerControl::forcePowerOff()
+{
+    auto powerOutIt = powerSignalMap.find("PowerOut");
+    if (powerOutIt == powerSignalMap.end())
+    {
+        lg2::error("PowerOut not found in powerSignalMap");
+        return;
+    }
+    
+    if (assertGPIOForMs(powerOutIt->second, TimerMap["ForceOffPulseMs"]) < 0)
+    {
+        return;
+    }
+
+    // If the force off timer expires, then the power-button override failed
+    gpioAssertTimer.async_wait([](const boost::system::error_code ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion.
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error("Force power off async_wait failed: {ERROR_MSG}",
+                           "ERROR_MSG", ec.message());
+            }
+            return;
+        }
+
+        lg2::error("Power-button override failed. Not sure what to do now.");
+    });
+}
+
+void PowerControl::reset()
+{
+    auto resetOutIt = powerSignalMap.find("ResetOut");
+    if (resetOutIt != powerSignalMap.end())
+    {
+        assertGPIOForMs(resetOutIt->second, TimerMap["ResetPulseMs"]);
+    }
+    else
+    {
+        lg2::error("ResetOut not found in powerSignalMap");
+    }
+}
+
+// Operating System State Management
+
+std::string_view PowerControl::getOperatingSystemStateStage(
+    OperatingSystemStateStage stage) const
+{
+    switch (stage)
+    {
+        case OperatingSystemStateStage::Inactive:
+            return "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive";
+        case OperatingSystemStateStage::Standby:
+            return "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Standby";
+        default:
+            return "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive";
+    }
+}
+
+void PowerControl::setOperatingSystemState(OperatingSystemStateStage stage)
+{
+    if (!osIface)
+    {
+        return;
+    }
+
+    operatingSystemState = stage;
+#if IGNORE_SOFT_RESETS_DURING_POST
+    // If POST complete has asserted set ignoreNextSoftReset to false to avoid
+    // masking soft resets after POST
+    if (operatingSystemState == OperatingSystemStateStage::Standby)
+    {
+        ignoreNextSoftReset = false;
+    }
+#endif
+    osIface->set_property("OperatingSystemState",
+                          std::string(getOperatingSystemStateStage(stage)));
+
+    lg2::info("Moving os state to {STATE} stage", "STATE",
+              getOperatingSystemStateStage(stage));
+}
+
+
+// D-Bus Property Management
+
+int PowerControl::getProperty(std::shared_ptr<ConfigData> configData)
+{
+    std::variant<bool> resp;
+
+    try
+    {
+        auto method = conn->new_method_call(
+            configData->dbusName.c_str(), configData->path.c_str(),
+            "org.freedesktop.DBus.Properties", "Get");
+        method.append(configData->interface.c_str(),
+                      configData->lineName.c_str());
+
+        auto reply = conn->call(method);
+        if (reply.is_method_error())
+        {
+            lg2::error(
+                "Error reading {PROPERTY} D-Bus property on interface {INTERFACE} and path {PATH}",
+                "PROPERTY", configData->lineName, "INTERFACE",
+                configData->interface, "PATH", configData->path);
+            return -1;
+        }
+
+        reply.read(resp);
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        lg2::error("Exception while reading {PROPERTY}: {WHAT}", "PROPERTY",
+                   configData->lineName, "WHAT", e.what());
+        reschedulePropertyRead(configData);
+        return -1;
+    }
+
+    auto respValue = std::get_if<bool>(&resp);
+    if (!respValue)
+    {
+        lg2::error("Error: {PROPERTY} D-Bus property is not the expected type",
+                   "PROPERTY", configData->lineName);
+        return -1;
+    }
+    return (*respValue);
+}
+
+void PowerControl::reschedulePropertyRead(std::shared_ptr<ConfigData> configData)
+{
+    auto item = dBusRetryTimers.find(configData->name);
+
+    if (item == dBusRetryTimers.end())
+    {
+        auto newItem = dBusRetryTimers.insert(
+            {configData->name, boost::asio::steady_timer(ioContext)});
+
+        if (!newItem.second)
+        {
+            lg2::error("Failed to add new timer for {NAME}", "NAME",
+                       configData->name);
+            return;
+        }
+
+        item = newItem.first;
+    }
+
+    auto& timer = item->second;
+    timer.expires_after(
+        std::chrono::milliseconds(TimerMap["DbusGetPropertyRetry"]));
+    timer.async_wait([this, configData](const boost::system::error_code ec) {
+        if (ec)
+        {
+            lg2::error("Retry timer for {NAME} failed: {MSG}", "NAME",
+                       configData->name, "MSG", ec.message());
+            dBusRetryTimers.erase(configData->name);
+            return;
+        }
+
+        int property = getProperty(configData);
+
+        if (property >= 0)
+        {
+            setInitialValue(configData, (property > 0));
+            dBusRetryTimers.erase(configData->name);
+        }
+    });
+}
+
+void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData, bool initialValue)
+{
+    if (configData->name == "PowerOk")
+    {
+        // Set power state based on PowerOk signal
+        powerState = (initialValue ? PowerState::on : PowerState::off);
+        hostIface->set_property("CurrentHostState",
+                                std::string(getHostState()));
+        lg2::info("PowerOk initial value: {VALUE}, power state set to {STATE}", 
+                  "VALUE", initialValue, "STATE", getHostState());
+    }
+    else if (configData->name == "PowerButton")
+    {
+        powerButtonIface->set_property("ButtonPressed", !initialValue);
+    }
+    else if (configData->name == "ResetButton")
+    {
+        resetButtonIface->set_property("ButtonPressed", !initialValue);
+    }
+    else if (configData->name == "NMIButton")
+    {
+        nmiButtonIface->set_property("ButtonPressed", !initialValue);
+    }
+    else if (configData->name == "IdButton")
+    {
+        idButtonIface->set_property("ButtonPressed", !initialValue);
+    }
+    else if (configData->name == "PostComplete")
+    {
+        // Look up PostComplete config to check polarity
+        auto postCompleteIt = powerSignalMap.find("PostComplete");
+        if (postCompleteIt != powerSignalMap.end())
+        {
+            OperatingSystemStateStage osState =
+                (initialValue == postCompleteIt->second->polarity
+                     ? OperatingSystemStateStage::Standby
+                     : OperatingSystemStateStage::Inactive);
+            setOperatingSystemState(osState);
+        }
+        // If PostComplete not in powerSignalMap, just skip silently
+    }
+    else
+    {
+        lg2::info("Unknown signal name {NAME} for setInitialValue", "NAME", configData->name);
+    }
 }
 
 } // namespace power_control

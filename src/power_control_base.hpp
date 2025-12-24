@@ -44,6 +44,17 @@ enum class RestartCause
 };
 
 /**
+ * @brief Operating system state stages
+ * 
+ * Represents the current state of the operating system as it boots and runs.
+ */
+enum class OperatingSystemStateStage
+{
+    Inactive,
+    Standby,
+};
+
+/**
  * @brief Global set of restart causes for the current restart
  * 
  * Multiple causes can be added during a restart sequence.
@@ -304,15 +315,20 @@ public:
 
     gpiod::line powerButtonMask;
     gpiod::line resetButtonMask;
-    bool nmiButtonMasked;
+    bool nmiButtonMasked = false;
     #if IGNORE_SOFT_RESETS_DURING_POST
-    bool ignoreNextSoftReset;
+    bool ignoreNextSoftReset = false;
     #endif
 
     // Changed from default true to false
-    bool nmiEnabled;
-    bool nmiWhenPoweredOff;
-    bool sioEnabled;
+    bool nmiEnabled = true;
+    bool nmiWhenPoweredOff = true;
+    bool sioEnabled = true;
+
+    /**
+     * @brief Current operating system state
+     */
+    OperatingSystemStateStage operatingSystemState = OperatingSystemStateStage::Inactive;
 
     /**
      * @brief Get the handler function for the current power state
@@ -626,6 +642,13 @@ protected:
      * @brief Timer for slot power cycle
      */
     boost::asio::steady_timer slotPowerCycleTimer;
+    
+    /**
+     * @brief Map of retry timers for D-Bus property reads
+     * 
+     * Maps signal name (string) to retry timer for rescheduling failed D-Bus reads
+     */
+    boost::container::flat_map<std::string, boost::asio::steady_timer> dBusRetryTimers;
     
     /**
      * @brief Load configuration values from JSON config file
@@ -1012,6 +1035,102 @@ protected:
      * - If cold reset (power off), transitioned to off
      */
     virtual void handleCheckForWarmReset(Event event);
+
+    // POWER CONTROL OPERATIONS
+    // referenced by upstream power state handlers
+
+    /**
+     * @brief Power on the system
+     * 
+     * Asserts the PowerOut GPIO signal for the duration specified by
+     * PowerPulseMs in TimerMap to initiate a power-on sequence.
+     * Used by state handlers to turn on the system.
+     */
+    virtual void powerOn();
+
+    /**
+     * @brief Gracefully power off the system
+     * 
+     * Asserts the PowerOut GPIO signal for the duration specified by
+     * PowerPulseMs in TimerMap to initiate a graceful shutdown sequence.
+     * This simulates a short power button press.
+     */
+    virtual void gracefulPowerOff();
+
+    /**
+     * @brief Force power off the system
+     * 
+     * Asserts the PowerOut GPIO signal for the duration specified by
+     * ForceOffPulseMs in TimerMap to force an immediate shutdown.
+     * This simulates a long power button press (hard power off).
+     * Sets up a timer to detect if the force-off fails.
+     */
+    virtual void forcePowerOff();
+
+    /**
+     * @brief Reset the system
+     * 
+     * Asserts the ResetOut GPIO signal for the duration specified by
+     * ResetPulseMs in TimerMap to perform a system reset.
+     */
+    virtual void reset();
+
+    // OPERATING SYSTEM STATE MANAGEMENT
+
+    /**
+     * @brief Get the D-Bus string representation of an OS state
+     * 
+     * @param stage The OS state stage
+     * @return D-Bus interface string for the given stage
+     */
+    std::string_view getOperatingSystemStateStage(OperatingSystemStateStage stage) const;
+
+    /**
+     * @brief Set the operating system state
+     * 
+     * Updates the OS state, D-Bus property, and resets ignoreNextSoftReset flag
+     * when transitioning to Standby (POST complete).
+     * 
+     * @param stage The new OS state stage
+     */
+    void setOperatingSystemState(OperatingSystemStateStage stage);
+
+    // D-BUS PROPERTY MANAGEMENT
+    // Functions for reading D-Bus properties and handling GPIO signals from D-Bus
+
+    /**
+     * @brief Get D-Bus property value for a GPIO signal
+     * 
+     * Reads a boolean D-Bus property as specified in the ConfigData.
+     * On failure, schedules a retry via reschedulePropertyRead().
+     * 
+     * @param configData Shared pointer to signal configuration with D-Bus details
+     * @return Property value (>0 if true, 0 if false, -1 on error)
+     */
+    int getProperty(std::shared_ptr<ConfigData> configData);
+
+    /**
+     * @brief Reschedule a failed D-Bus property read
+     * 
+     * Creates/reuses a retry timer to attempt reading the D-Bus property again
+     * after DbusGetPropertyRetry milliseconds. On success, calls setInitialValue().
+     * 
+     * @param configData Shared pointer to signal configuration to retry
+     */
+    void reschedulePropertyRead(std::shared_ptr<ConfigData> configData);
+
+    /**
+     * @brief Set initial value for a signal based on its name
+     * 
+     * Updates D-Bus interface properties or internal state based on the signal name:
+     * - PowerButton/ResetButton/NMIButton/IdButton: Updates ButtonPressed property
+     * - PostComplete: Updates operating system state
+     * - PowerOk: Sets power state and updates host state
+     * 
+     * @param configData Shared pointer to signal configuration
+     * @param initialValue The initial boolean value read from hardware/D-Bus
+     */
+    void setInitialValue(std::shared_ptr<ConfigData> configData, bool initialValue);
 };
 
 } // namespace power_control
