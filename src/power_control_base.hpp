@@ -14,18 +14,44 @@
 #include <string>
 #include <string_view>
 
-// Forward declarations (these enums are defined in power_control.cpp)
+// Forward declarations
 namespace power_control
 {
-enum class PowerState;
-enum class ConfigType;
 class PersistentState;
 } // namespace power_control
 
 namespace power_control
 {
 
-// TODO: Add the Upsteram ConfigType enum to the class
+// Power state enumeration - defines all possible power states
+enum class PowerState
+{
+    on,
+    off,
+    waitForPSPowerOK,
+    waitForSIOPowerGood,
+    transitionToOff,
+    gracefulTransitionToOff,
+    cycleOff,
+    transitionToCycleOff,
+    gracefulTransitionToCycleOff,
+    checkForWarmReset,
+    // VR-specific states
+    waitForPDBMainPowerOk,
+    waitForPDBMainPowerOff,
+    waitForHPMPowerGoodAssert,
+    waitForHPMPowerGoodDeAssert,
+    waitForCPUResetAssert,
+    waitForCPUResetDeAssert,
+    waitForCPUShutdownOk,
+};
+
+// Configuration type enumeration
+enum class ConfigType
+{
+    GPIO = 1,
+    DBUS
+};
 
 /**
  * @brief Restart Cause enumeration
@@ -82,21 +108,6 @@ void addRestartCause(const RestartCause cause);
  * @brief Clear the restart cause set for next restart
  */
 void clearRestartCause();
-
-/**
- * @brief Set the RestartCause D-Bus property
- *
- * @param cause The restart cause string to set
- */
-void setRestartCauseProperty(const std::string& cause);
-
-/**
- * @brief Determine and set the restart cause from causeSet
- *
- * Evaluates the set of causes and selects the highest priority
- * cause to report via the D-Bus RestartCause property.
- */
-void setRestartCause();
 
 /**
  * @brief Input event configuration for gpio_keys_polled driver signals
@@ -297,12 +308,6 @@ class PowerControl
         {DbusConfigType::path, "Path"},
         {DbusConfigType::interface, "Interface"},
         {DbusConfigType::property, "Property"}};
-
-    enum class ConfigType
-    {
-        GPIO = 1,
-        DBUS
-    };
 
     PowerAction action = PowerAction::NONE;
     std::string target_state = "HostOff";
@@ -566,6 +571,21 @@ class PowerControl
      */
     void currentHostStateMonitor();
 
+    /**
+     * @brief Set the restart cause D-Bus property
+     *
+     * @param cause The restart cause string to set
+     */
+    void setRestartCauseProperty(const std::string& cause);
+
+    /**
+     * @brief Determine and set the restart cause from causeSet
+     *
+     * Evaluates the set of causes and selects the highest priority
+     * cause to report via the D-Bus RestartCause property.
+     */
+    void setRestartCause();
+
   protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -737,6 +757,20 @@ class PowerControl
      * progress.
      */
     void initializeBootProgressInterface();
+
+    /**
+     * @brief Set boot progress property
+     *
+     * @param bootProgressStage The boot progress stage string
+     */
+    void setBootProgress(const std::string& bootProgressStage);
+
+    /**
+     * @brief Set boot progress OEM property
+     *
+     * @param oemProgress The OEM-specific boot progress string
+     */
+    void setBootProgressOem(const std::string& oemProgress);
 
     /**
      * @brief Initialize Button D-Bus interfaces

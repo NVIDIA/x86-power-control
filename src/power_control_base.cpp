@@ -14,10 +14,14 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 
 namespace power_control
 {
+// Type alias for convenience - Event is inside PowerControl class
+using Event = PowerControl::Event;
+
 // TODO: define virtual method
 std::string PowerControl::getEventName(Event event)
 {
@@ -850,7 +854,7 @@ void PowerControl::initializeHostInterface()
 
     // Create Host Interface
     sdbusplus::asio::object_server hostServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     hostIface =
         hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
@@ -924,8 +928,8 @@ void PowerControl::initializeHostInterface()
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.GracefulWarmReboot")
             {
-            TODO:
-                Check reset button mask when implemented if (!resetButtonMask)
+                // TODO: Check reset button mask when implemented
+                if (!resetButtonMask)
                 {
                     sendPowerControlEvent(Event::gracefulPowerCycleRequest);
                     // addRestartCause(RestartCause::command);
@@ -943,8 +947,8 @@ void PowerControl::initializeHostInterface()
                 requested ==
                 "xyz.openbmc_project.State.Host.Transition.ForceWarmReboot")
             {
-            TODO:
-                Check reset button mask when implemented if (!resetButtonMask)
+                // TODO: Check reset button mask when implemented
+                if (!resetButtonMask)
                 {
                     sendPowerControlEvent(Event::resetRequest);
                     // addRestartCause(RestartCause::command);
@@ -979,7 +983,7 @@ void PowerControl::initializeChassisInterface()
 {
     // Create Chassis Interface
     sdbusplus::asio::object_server chassisServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     chassisIface = chassisServer.add_interface(
         "/xyz/openbmc_project/state/chassis" + nodeId,
@@ -1068,7 +1072,7 @@ void PowerControl::initializeChassisSystemInterface()
 {
     // Chassis System Interface
     sdbusplus::asio::object_server chassisSysServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     chassisSysIface = chassisSysServer.add_interface(
         "/xyz/openbmc_project/state/chassis_system0",
@@ -1113,7 +1117,7 @@ void PowerControl::initializeBootProgressInterface()
     // This interface allows external entities (IPMI, PLDM, etc.) to update boot
     // progress
     sdbusplus::asio::object_server hostServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     bootProgressIface =
         hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
@@ -1169,7 +1173,7 @@ void PowerControl::initializeButtonInterfaces()
 {
     // Buttons Service
     sdbusplus::asio::object_server buttonsServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     // Power Button Interface
     auto powerButtonConfig = powerSignalMap.find("PowerButton");
@@ -1339,7 +1343,7 @@ void PowerControl::initializeButtonInterfaces()
     if (nmiOutConfig != powerSignalMap.end() && nmiOutConfig->second->gpioLine)
     {
         sdbusplus::asio::object_server nmiOutServer =
-            sdbusplus::asio::object_server(*conn);
+            sdbusplus::asio::object_server(conn);
 
         nmiOutIface = nmiOutServer.add_interface(
             "/xyz/openbmc_project/control/host" + nodeId + "/nmi",
@@ -1378,7 +1382,7 @@ void PowerControl::initializeOSInterface()
 {
     // OS State Service
     sdbusplus::asio::object_server osServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     // OS State Interface
     osIface = osServer.add_interface(
@@ -1400,7 +1404,7 @@ void PowerControl::initializeRestartCauseInterface()
 {
     // Restart Cause Service
     sdbusplus::asio::object_server restartCauseServer =
-        sdbusplus::asio::object_server(*conn);
+        sdbusplus::asio::object_server(conn);
 
     // Restart Cause Interface
     restartCauseIface = restartCauseServer.add_interface(
@@ -1762,7 +1766,7 @@ void PowerControl::psPowerOKHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::psPowerOKAssert
                                   : Event::psPowerOKDeAssert;
-    sendPowerControlEvent(powerControlEvent, powerState);
+    sendPowerControlEvent(powerControlEvent);
 }
 
 void PowerControl::sioPowerGoodHandler(bool state)
@@ -1774,7 +1778,7 @@ void PowerControl::sioPowerGoodHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::sioPowerGoodAssert
                                   : Event::sioPowerGoodDeAssert;
-    sendPowerControlEvent(powerControlEvent, powerState);
+    sendPowerControlEvent(powerControlEvent);
 }
 
 void PowerControl::sioS5Handler(bool state)
@@ -1785,7 +1789,7 @@ void PowerControl::sioS5Handler(bool state)
 
     Event powerControlEvent =
         (state == config.polarity) ? Event::sioS5Assert : Event::sioS5DeAssert;
-    sendPowerControlEvent(powerControlEvent, powerState);
+    sendPowerControlEvent(powerControlEvent);
 }
 
 void PowerControl::powerButtonHandler(bool state)
@@ -1801,7 +1805,7 @@ void PowerControl::powerButtonHandler(bool state)
         powerButtonPressLog();
         if (!powerButtonMask)
         {
-            sendPowerControlEvent(Event::powerButtonPressed, powerState);
+            sendPowerControlEvent(Event::powerButtonPressed);
             addRestartCause(RestartCause::powerButton);
         }
         else
@@ -1829,7 +1833,7 @@ void PowerControl::resetButtonHandler(bool state)
         resetButtonPressLog();
         if (!resetButtonMask)
         {
-            sendPowerControlEvent(Event::resetButtonPressed, powerState);
+            sendPowerControlEvent(Event::resetButtonPressed);
             addRestartCause(RestartCause::resetButton);
         }
         else
@@ -2376,13 +2380,13 @@ void clearRestartCause()
     causeSet.clear();
 }
 
-void setRestartCauseProperty(const std::string& cause)
+void PowerControl::setRestartCauseProperty(const std::string& cause)
 {
     lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
-    PowerControl::restartCauseIface->set_property("RestartCause", cause);
+    restartCauseIface->set_property("RestartCause", cause);
 }
 
-void setRestartCause()
+void PowerControl::setRestartCause()
 {
     // Determine the actual restart cause based on the set of causes
     std::string restartCause =
@@ -2717,8 +2721,8 @@ void PowerControl::reschedulePropertyRead(
 
     if (item == dBusRetryTimers.end())
     {
-        auto newItem = dBusRetryTimers.insert(
-            {configData->name, boost::asio::steady_timer(ioContext)});
+        auto newItem = dBusRetryTimers.emplace(
+            configData->name, boost::asio::steady_timer(ioContext));
 
         if (!newItem.second)
         {

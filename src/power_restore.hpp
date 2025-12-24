@@ -513,7 +513,7 @@ class PowerRestoreController
         {
             powerControl.sendPowerControlEvent(
                 PowerControl::Event::powerOnRequest);
-            setRestartCauseProperty(
+            powerControl.setRestartCauseProperty(
                 getRestartCause(RestartCause::powerPolicyOn));
         }
         else if (
@@ -525,7 +525,7 @@ class PowerRestoreController
                 lg2::info("Power was dropped, restoring Host On state");
                 powerControl.sendPowerControlEvent(
                     PowerControl::Event::powerOnRequest);
-                setRestartCauseProperty(
+                powerControl.setRestartCauseProperty(
                     getRestartCause(RestartCause::powerPolicyRestore));
             }
             else
