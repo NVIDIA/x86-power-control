@@ -58,6 +58,18 @@ class ParsecPowerControl : public VRPowerControl
      */
     void validateRequiredSignals() override;
 
+    /**
+     * @brief Validate that all required timer configurations for Parsec
+     * platform are present in TimerMap
+     *
+     * TODO: Implement Parsec-specific timer validation when timers are added
+     * Checks for Parsec-specific PDB timer, then calls
+     * VRPowerControl::validateTimerConfigs() to check common VR timers.
+     *
+     * @throws std::runtime_error if any required timer config is missing
+     */
+    void validateTimerConfigs() override;
+
   private:
     /**
      * @brief Handler for GB300 PDB Main Power OK GPIO events
@@ -84,6 +96,15 @@ class ParsecPowerControl : public VRPowerControl
      */
     const std::vector<std::string> requiredSignals = {
         "GB300PDBMainPowerOk", "GB300PDBMainPowerEnable"};
+
+    /**
+     * @brief List of required Parsec platform-specific timer configurations
+     * TODO: Add ParsecPdbMainPowerOkWatchdogMs when Parsec sequencing is
+     * implemented
+     */
+    const std::vector<std::string> platformRequiredTimeoutValues = {
+        // Empty for now - add "ParsecPdbMainPowerOkWatchdogMs" when needed
+    };
 
   protected:
     /**

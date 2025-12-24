@@ -32,6 +32,9 @@ ParsecPowerControl::ParsecPowerControl(
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
+    // call validateTimerConfigs() to validate all required timers
+    validateTimerConfigs();
+
     // Add Parsec-specific GPIO handler to the map
     gpioHandlerMap["GB300PDBMainPowerOk"] = [this](bool state) {
         this->gb300pdbMainPowerOkHandler(state);
@@ -126,6 +129,29 @@ void ParsecPowerControl::validateRequiredSignals()
     VRPowerControl::validateRequiredSignals();
 
     lg2::info("Parsec signal validation complete");
+}
+
+void ParsecPowerControl::validateTimerConfigs()
+{
+    // TODO: Validate Parsec-specific PDB timer when implemented
+    // Example: "ParsecPdbMainPowerOkWatchdogMs"
+    for (const auto& timerName : platformRequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error(
+                "Required Parsec timer config '{TIMER}' not found in config",
+                "TIMER", timerName);
+            throw std::runtime_error(
+                "ParsecPowerControl: Required timer config missing: " +
+                timerName);
+        }
+    }
+
+    // Call VRPowerControl to validate common VR timers
+    VRPowerControl::validateTimerConfigs();
+
+    lg2::info("Parsec timer configuration validation complete");
 }
 
 void ParsecPowerControl::setGPIOsForHostStateOn()
