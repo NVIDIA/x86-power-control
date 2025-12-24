@@ -808,6 +808,28 @@ protected:
     virtual void resetButtonHandler(bool state);
 
     /**
+     * @brief Handler for ID Button GPIO signal
+     * 
+     * Called when the ID button signal changes state.
+     * Updates D-Bus ButtonPressed property.
+     * 
+     * Signal key in powerSignalMap: "IdButton"
+     * 
+     * @param state The current state of the GPIO line
+     */
+    virtual void idButtonHandler(bool state);
+
+    /**
+     * @brief Handler for PLT_RST GPIO signal
+     * 
+     * Called when the platform reset signal changes state.
+     * Sends pltRstAssert or pltRstDeAssert event.
+     * 
+     * @param state The current state of the GPIO line (true = de-asserted)
+     */
+    virtual void pltRstHandler(bool state);
+
+    /**
      * @brief Log a power button press event
      * 
      * Sends a Redfish event log entry for power button press.

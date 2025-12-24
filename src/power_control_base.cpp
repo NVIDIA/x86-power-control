@@ -1778,6 +1778,33 @@ void PowerControl::resetButtonHandler(bool state)
 #endif
 }
 
+void PowerControl::idButtonHandler(bool state)
+{
+    // Lookup config for polarity (guaranteed to exist since handler was registered)
+    auto it = powerSignalMap.find("IdButton");
+    if (it == powerSignalMap.end())
+    {
+        lg2::error("IdButton not found in powerSignalMap");
+        return;
+    }
+    auto& config = *it->second;
+    
+    bool asserted = state == config.polarity;
+    idButtonIface->set_property("ButtonPressed", asserted);
+}
+
+void PowerControl::pltRstHandler(bool pltRst)
+{
+    if (pltRst)
+    {
+        sendPowerControlEvent(Event::pltRstDeAssert);
+    }
+    else
+    {
+        sendPowerControlEvent(Event::pltRstAssert);
+    }
+}
+
 void PowerControl::powerButtonPressLog()
 {
     sd_journal_send("MESSAGE=PowerControl: power button pressed", "PRIORITY=%i",

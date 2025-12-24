@@ -356,7 +356,7 @@ static constexpr auto systemdPath = "/org/freedesktop/systemd1";
 static constexpr auto systemdInterface = "org.freedesktop.systemd1.Manager";
 static constexpr auto systemTargetName = "chassis-system-reset.target";
 
-void systemReset()
+void systemReset(std::shared_ptr<sdbusplus::asio::connection> conn)
 {
     conn->async_method_call(
         [](boost::system::error_code ec) {
@@ -370,24 +370,6 @@ void systemReset()
         systemTargetName, "replace");
 }
 #endif
-
-static void idButtonHandler(bool state)
-{
-    bool asserted = state == idButtonConfig.polarity;
-    idButtonIface->set_property("ButtonPressed", asserted);
-}
-
-static void pltRstHandler(bool pltRst)
-{
-    if (pltRst)
-    {
-        sendPowerControlEvent(Event::pltRstDeAssert);
-    }
-    else
-    {
-        sendPowerControlEvent(Event::pltRstAssert);
-    }
-}
 
 [[maybe_unused]] static void hostMiscHandler(sdbusplus::message_t& msg)
 {
