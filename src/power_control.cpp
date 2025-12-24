@@ -16,6 +16,7 @@
 #include "config.h"
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
+#include "platform/nvl144/nvl144_power_control.hpp"
 
 #include <systemd/sd-journal.h>
 
