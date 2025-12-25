@@ -723,7 +723,7 @@ void VRPowerControl::validateTimerConfigs()
         }
     }
 
-    lg2::info("VR timer configuration validation complete");
+    lg2::info("VR timer configuration validation complete - all required timers present");
 }
 
 void VRPowerControl::setGPIOsForHostStateOn()

@@ -109,6 +109,9 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
                                      ? "Shutdown Force"
                                      : "Shutdown Request";
 
+    action = (event == Event::powerOffRequest) ? PowerAction::FORCE_OFF
+                                                : PowerAction::GRACE_OFF;
+
     lg2::info(
         "{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.",
         "SHUTDOWN_TYPE", shutdownType);
@@ -201,6 +204,7 @@ void NVL144PowerControl::handlePowerOnRequest()
     {
         lg2::info(
             "Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
+        action = PowerAction::POWER_ON;
         setGPIOOutput(nvl144pdbMainPowerEnable->second,
                       nvl144pdbMainPowerEnable->second->polarity);
         startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
@@ -481,7 +485,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffState()
         "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
 
     deassertPreSystemResetsAndPDBMainPower();
-    startTimer(TimerMap["PDBMainPowerOkWatchdogTimer"],
+    startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
                pdbMainPowerOkWatchdogTimer,
                Event::pdbMainPowerOkWatchdogTimerExpired);
     setPowerState(PowerState::waitForPDBMainPowerOff);
@@ -535,7 +539,7 @@ void NVL144PowerControl::validateRequiredSignals()
     // Call VRPowerControl to validate common VR signals
     VRPowerControl::validateRequiredSignals();
 
-    lg2::info("NVL144 signal validation complete");
+    lg2::info("NVL144 signal validation complete - all required signals present");
 }
 
 void NVL144PowerControl::validateTimerConfigs()
@@ -557,7 +561,7 @@ void NVL144PowerControl::validateTimerConfigs()
     // Call VRPowerControl to validate common VR timers
     VRPowerControl::validateTimerConfigs();
 
-    lg2::info("NVL144 timer configuration validation complete");
+    lg2::info("NVL144 timer configuration validation complete - all required timers present");
 }
 
 void NVL144PowerControl::setGPIOsForHostStateOn()

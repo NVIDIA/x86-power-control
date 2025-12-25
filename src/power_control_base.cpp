@@ -155,13 +155,6 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
         this->resetButtonHandler(state);
     };
 
-    hostDbusName += node;
-    chassisDbusName += node;
-    osDbusName += node;
-    buttonDbusName += node;
-    nmiDbusName += node;
-    rstCauseDbusName += node;
-
     // Request all the dbus names
     conn->request_name(hostDbusName.c_str());
     conn->request_name(chassisDbusName.c_str());
@@ -248,7 +241,7 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
 
     // Determine config file path
     const std::string configFilePath =
-        "/usr/share/x86-power-control/power-config-host" + node + ".json";
+        "/usr/share/x86-power-control/power-config-host" + nodeId + ".json";
 
     std::ifstream configFile(configFilePath.c_str());
     if (!configFile.is_open())
@@ -406,9 +399,9 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
               "COUNT", powerSignalMap.size());
 
     // Load timer values from JSON config
-    if (jsonData.contains("timers"))
+    if (jsonData.contains("timing_configs"))
     {
-        auto timers = jsonData["timers"];
+        auto timers = jsonData["timing_configs"];
         if (timers.is_object())
         {
             for (auto& [key, value] : timers.items())
@@ -431,13 +424,13 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
         else
         {
             lg2::warning(
-                "'timers' field in JSON is not an object, skipping timer loading");
+                "'timing_configs' field in JSON is not an object, skipping timer loading");
         }
     }
     else
     {
         lg2::info(
-            "No 'timers' field found in JSON config, TimerMap will be empty");
+            "No 'timing_configs' field found in JSON config, TimerMap will be empty");
     }
 }
 
@@ -858,11 +851,10 @@ void PowerControl::setPowerState(const PowerState state)
     chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 
     // Reset boot progress to Unspecified when host powers off
-    // TODO: Commented out for now - boot progress interface not created yet
-    // if (state == PowerState::off)
-    // {
-    //     setBootProgress("xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
-    // }
+    if (state == PowerState::off)
+    {
+        setBootProgress("xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
+    }
 
     // Save the power state for the restore policy
     savePowerState(state);
@@ -919,10 +911,9 @@ void PowerControl::initializeHostInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    // Use member function sendPowerControlEvent
-                    sendPowerControlEvent(Event::gracefulPowerOffRequest);
-                    // addRestartCause(RestartCause::command);
+                    addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Off requested");
+                    sendPowerControlEvent(Event::gracefulPowerOffRequest);
                 }
                 else
                 {
@@ -931,8 +922,8 @@ void PowerControl::initializeHostInterface()
                     return 0;
                 }
 
-                sendPowerControlEvent(Event::gracefulPowerOffRequest);
                 addRestartCause(RestartCause::command);
+                sendPowerControlEvent(Event::gracefulPowerOffRequest);
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Host.Transition.On")
@@ -940,9 +931,9 @@ void PowerControl::initializeHostInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    sendPowerControlEvent(Event::powerOnRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to On requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::powerOnRequest);
                 }
                 else
                 {
@@ -957,9 +948,9 @@ void PowerControl::initializeHostInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    sendPowerControlEvent(Event::powerCycleRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Reboot requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::powerCycleRequest);
                 }
                 else
                 {
@@ -975,10 +966,9 @@ void PowerControl::initializeHostInterface()
                 // TODO: Check reset button mask when implemented
                 if (!resetButtonMask)
                 {
+                    addRestartCause(RestartCause::command);
+                    lg2::info("Host transition to GracefulWarmReboot requested");
                     sendPowerControlEvent(Event::gracefulPowerCycleRequest);
-                    // addRestartCause(RestartCause::command);
-                    lg2::info(
-                        "Host transition to GracefulWarmReboot requested");
                 }
                 else
                 {
@@ -994,9 +984,9 @@ void PowerControl::initializeHostInterface()
                 // TODO: Check reset button mask when implemented
                 if (!resetButtonMask)
                 {
-                    sendPowerControlEvent(Event::resetRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Host transition to ForceWarmReboot requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::resetRequest);
                 }
                 else
                 {
@@ -1047,9 +1037,10 @@ void PowerControl::initializeChassisInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    sendPowerControlEvent(Event::powerOffRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to Off requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::powerOffRequest);
+                    
                 }
                 else
                 {
@@ -1064,9 +1055,10 @@ void PowerControl::initializeChassisInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    sendPowerControlEvent(Event::powerOnRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to On requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::powerOnRequest);
+
                 }
                 else
                 {
@@ -1081,9 +1073,9 @@ void PowerControl::initializeChassisInterface()
                 // TODO: Check power button mask when implemented
                 if (!powerButtonMask)
                 {
-                    sendPowerControlEvent(Event::powerCycleRequest);
-                    // addRestartCause(RestartCause::command);
                     lg2::info("Chassis transition to PowerCycle requested");
+                    addRestartCause(RestartCause::command);
+                    sendPowerControlEvent(Event::powerCycleRequest);
                 }
                 else
                 {
@@ -1754,10 +1746,11 @@ void PowerControl::registerGPIOHandlers()
         auto it = powerSignalMap.find(signalName);
         if (it == powerSignalMap.end())
         {
-            lg2::error("GPIO signal '{SIGNAL}' not found in powerSignalMap",
-                       "SIGNAL", signalName);
-            throw std::runtime_error(
-                "GPIO signal '" + signalName + "' not found in powerSignalMap");
+            // TBD: revisit this and get deisgn feedback
+            lg2::info(
+                "GPIO signal '{SIGNAL}' not found in config, skipping handler registration",
+                "SIGNAL", signalName);
+            continue;
         }
 
         // Assign the handler to the ConfigData object

@@ -280,18 +280,7 @@ class PowerControl
     };
 
     // This map contains all timer values that are to be read from json config
-    boost::container::flat_map<std::string, int> TimerMap = {
-        {"PowerPulseMs", 200},
-        {"ForceOffPulseMs", 15000},
-        {"ResetPulseMs", 500},
-        {"PowerCycleMs", 5000},
-        {"SioPowerGoodWatchdogMs", 1000},
-        {"PowerOKWatchdogMs", 8000},
-        {"GracefulPowerOffS", (5 * 60)},
-        {"WarmResetCheckMs", 500},
-        {"PowerOffSaveMs", 7000},
-        {"SlotPowerCycleMs", 200},
-        {"DbusGetPropertyRetry", 1000}};
+    boost::container::flat_map<std::string, int> TimerMap;
 
     enum class DbusConfigType
     {
@@ -685,8 +674,6 @@ class PowerControl
     std::string nodeId;
 
     PersistentState& appState;
-
-    std::string node;
 
     /**
      * @brief Current power state

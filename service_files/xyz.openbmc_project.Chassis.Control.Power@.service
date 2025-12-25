@@ -15,7 +15,7 @@ Restart=always
 RestartSec=3
 ExecStart=/usr/bin/power-control %i
 Type=dbus
-BusName=xyz.openbmc_project.State.Host%i
+BusName=xyz.openbmc_project.State.Host
 
 [Install]
 WantedBy=sysinit.target

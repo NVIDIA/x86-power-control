@@ -263,5 +263,7 @@ int main(int argc, char* argv[])
 
     powerControl.currentHostStateMonitor();
 
+    io.run();
+
     return 0;
 }
