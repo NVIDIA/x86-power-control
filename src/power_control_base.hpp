@@ -82,6 +82,19 @@ enum class OperatingSystemStateStage
 };
 
 /**
+ * @brief Default state enumeration for output GPIO signals
+ *
+ * Defines the default state for output GPIO signals in different host states.
+ * NA is used for input signals or signals without a default state.
+ */
+enum class DefaultState
+{
+    NA,         // Not applicable (input signals or no default)
+    Asserted,   // Signal should be asserted
+    DeAsserted, // Signal should be de-asserted
+};
+
+/**
  * @brief Global set of restart causes for the current restart
  *
  * Multiple causes can be added during a restart sequence.
@@ -160,9 +173,17 @@ struct ConfigData
     std::optional<InputEventConfig>
         inputEventConfig; // Configuration for input event monitoring
 
+    // Default states for output signals in different host states
+    DefaultState defaultStateHostStateOn;  // Default state when host is on
+    DefaultState defaultStateHostStateOff; // Default state when host is off
+
     // Constructor to initialize event descriptor with io_context
     ConfigData(boost::asio::io_context& io) :
-        eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false)
+        eventDescriptor(io),
+        gpioHandler(nullptr),
+        useInputEvents(false),
+        defaultStateHostStateOn(DefaultState::NA),
+        defaultStateHostStateOff(DefaultState::NA)
     {}
 };
 
@@ -1336,6 +1357,24 @@ class PowerControl
      * @param stage The new OS state stage
      */
     void setOperatingSystemState(OperatingSystemStateStage stage);
+
+    /**
+     * @brief Set all control GPIOs to their default state for host "on"
+     *
+     * Iterates through powerSignalMap and sets all output signals with
+     * non-NA defaultStateHostStateOn to their configured state.
+     * The default values must be configured via setDefaultValues() first.
+     */
+    void setGPIOsForHostStateOn();
+
+    /**
+     * @brief Set all control GPIOs to their default state for host "off"
+     *
+     * Iterates through powerSignalMap and sets all output signals with
+     * non-NA defaultStateHostStateOff to their configured state.
+     * The default values must be configured via setDefaultValues() first.
+     */
+    void setGPIOsForHostStateOff();
 
     // D-BUS PROPERTY MANAGEMENT
     // Functions for reading D-Bus properties and handling GPIO signals from

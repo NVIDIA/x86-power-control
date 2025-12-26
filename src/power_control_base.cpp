@@ -2969,4 +2969,60 @@ void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData,
     }
 }
 
+void PowerControl::setGPIOsForHostStateOn()
+{
+    lg2::info("Setting GPIOs to default state for host state ON");
+
+    // Iterate through powerSignalMap and set signals with non-NA defaults
+    for (auto& [signalName, configData] : powerSignalMap)
+    {
+        if (configData->defaultStateHostStateOn != DefaultState::NA)
+        {
+            // Determine the GPIO value based on the default state and polarity
+            int value;
+            if (configData->defaultStateHostStateOn == DefaultState::Asserted)
+            {
+                value = configData->polarity;
+            }
+            else // DefaultState::DeAsserted
+            {
+                value = !configData->polarity;
+            }
+
+            lg2::debug(
+                "Setting {SIGNAL} to {VALUE} for default state for host state ON",
+                "SIGNAL", signalName, "VALUE", value);
+            setGPIOOutput(configData, value);
+        }
+    }
+}
+
+void PowerControl::setGPIOsForHostStateOff()
+{
+    lg2::info("Setting GPIOs to default state for host state OFF");
+
+    // Iterate through powerSignalMap and set signals with non-NA defaults
+    for (auto& [signalName, configData] : powerSignalMap)
+    {
+        if (configData->defaultStateHostStateOff != DefaultState::NA)
+        {
+            // Determine the GPIO value based on the default state and polarity
+            int value;
+            if (configData->defaultStateHostStateOff == DefaultState::Asserted)
+            {
+                value = configData->polarity;
+            }
+            else // DefaultState::DeAsserted
+            {
+                value = !configData->polarity;
+            }
+
+            lg2::debug(
+                "Setting {SIGNAL} to {VALUE} for default state for host state OFF",
+                "SIGNAL", signalName, "VALUE", value);
+            setGPIOOutput(configData, value);
+        }
+    }
+}
+
 } // namespace power_control
