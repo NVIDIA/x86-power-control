@@ -106,22 +106,12 @@ class E5010PowerControl : public VRPowerControl
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
 
     /**
-     * @brief Set all control GPIOs to match the host state "on" (E5010
-     * override)
+     * @brief Set default values for E5010 output signals (E5010 override)
      *
-     * E5010 has no PDB, so just calls VRPowerControl::setGPIOsForHostStateOn()
-     * to set VR control GPIOs.
+     * E5010 has no PDB, so only calls VRPowerControl::setDefaultValues()
+     * to set common VR/HPM defaults.
      */
-    void setGPIOsForHostStateOn() override;
-
-    /**
-     * @brief Set all control GPIOs to match the host state "off" (E5010
-     * override)
-     *
-     * E5010 has no PDB, so just calls VRPowerControl::setGPIOsForHostStateOff()
-     * to set VR control GPIOs.
-     */
-    void setGPIOsForHostStateOff() override;
+    void setDefaultValues() override;
 };
 
 } // namespace power_control

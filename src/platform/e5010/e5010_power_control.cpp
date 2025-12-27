@@ -34,6 +34,9 @@ E5010PowerControl::E5010PowerControl(
     // call validateTimerConfigs() to validate all required timers
     validateTimerConfigs();
 
+    // call setDefaultValues() to set the default values for output signals
+    setDefaultValues();
+
     // Register all GPIO handlers (from base and VR only)
     registerGPIOHandlers();
 }
@@ -87,18 +90,13 @@ void E5010PowerControl::validateTimerConfigs()
     lg2::info("E5010 timer configuration validation complete");
 }
 
-void E5010PowerControl::setGPIOsForHostStateOn()
+void E5010PowerControl::setDefaultValues()
 {
-    // E5010 has no PDB, just call parent to set VR GPIOs
-    lg2::info("Setting E5010 GPIOs for host state ON");
-    VRPowerControl::setGPIOsForHostStateOn();
-}
-
-void E5010PowerControl::setGPIOsForHostStateOff()
-{
-    // E5010 has no PDB, just call parent to set VR GPIOs
-    lg2::info("Setting E5010 GPIOs for host state OFF");
-    VRPowerControl::setGPIOsForHostStateOff();
+    // E5010 has no PDB, so no platform-specific defaults to set
+    // Just call parent to set common VR/HPM defaults
+    lg2::info("Setting E5010 default values (calling parent for VR defaults)");
+    VRPowerControl::setDefaultValues();
+    lg2::info("E5010 default values set successfully");
 }
 
 } // namespace power_control
