@@ -90,8 +90,13 @@ class C2PowerControl : public VRPowerControl
      * @brief Required C2 PDB signals
      */
     const std::vector<std::string> requiredSignals = {
-        "C2PDBPSUPowerOk", "C2PDB12VHPMEnable", "C2PDB12VGPU1Enable",
-        "C2PDB12VGPU2Enable"};
+        "C2PDBPSUPowerOk",
+        "C2PDBPSUPowerEnable",
+        "C2PDBType",
+        "C2PDB12VHPMEnable",
+        "C2PDB12VGPU1Enable",
+        "C2PDB12VGPU2Enable"
+    };
 
     /**
      * @brief List of required C2 platform-specific timer configurations
@@ -153,20 +158,12 @@ class C2PowerControl : public VRPowerControl
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
 
     /**
-     * @brief Set all control GPIOs to match the host state "on" (C2 override)
+     * @brief Set default values for C2 output signals (C2 override)
      *
-     * Sets C2 PDB control GPIOs, then calls
-     * VRPowerControl::setGPIOsForHostStateOn() to set VR control GPIOs.
+     * Sets C2 PDB-specific default values for output signals, then calls
+     * VRPowerControl::setDefaultValues() to set common VR defaults.
      */
-    void setGPIOsForHostStateOn() override;
-
-    /**
-     * @brief Set all control GPIOs to match the host state "off" (C2 override)
-     *
-     * Sets C2 PDB control GPIOs, then calls
-     * VRPowerControl::setGPIOsForHostStateOff() to set VR control GPIOs.
-     */
-    void setGPIOsForHostStateOff() override;
+    void setDefaultValues() override;
 };
 
 } // namespace power_control

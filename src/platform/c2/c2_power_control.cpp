@@ -34,6 +34,9 @@ C2PowerControl::C2PowerControl(
     // call validateTimerConfigs() to validate all required timers
     validateTimerConfigs();
 
+    // call setDefaultValues() to set the default values for output signals
+    setDefaultValues();
+
     // Add C2-specific GPIO handler to the map
     gpioHandlerMap["C2PDBPSUPowerOk"] = [this](bool state) {
         this->c2pdbPSUPowerOkHandler(state);
@@ -143,30 +146,47 @@ void C2PowerControl::validateTimerConfigs()
     lg2::info("C2 timer configuration validation complete");
 }
 
-void C2PowerControl::setGPIOsForHostStateOn()
+void C2PowerControl::setDefaultValues()
 {
-    // TODO: Set C2 PDB control GPIOs for host state "on"
-    // - Assert C2PDB12VHPMEnable
-    // - Assert C2PDB12VGPU1Enable
-    // - Assert C2PDB12VGPU2Enable
+    // Set C2 PDB-specific default values for output signals
+    lg2::info("Setting C2 default values for output signals");
 
-    lg2::info("Setting C2 GPIOs for host state ON");
+    // C2 PDB PSU Power Enable
+    // - ON: Asserted (C2 PDB PSU output should be enabled)
+    // - OFF: DeAsserted (C2 PDB PSU should not be enabled)
+    powerSignalMap["C2PDBPSUPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["C2PDBPSUPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+    
+    // C2 PDB 12V HPM Enable
+    // - ON: Asserted (12V HPM rail should be powered)
+    // - OFF: DeAsserted (12V HPM rail should be unpowered)
+    powerSignalMap["C2PDB12VHPMEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["C2PDB12VHPMEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOn();
-}
+    // C2 PDB 12V GPU1 Enable
+    // - ON: Asserted (12V GPU1 rail should be powered)
+    // - OFF: DeAsserted (12V GPU1 rail should be unpowered)
+    powerSignalMap["C2PDB12VGPU1Enable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["C2PDB12VGPU1Enable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-void C2PowerControl::setGPIOsForHostStateOff()
-{
-    // TODO: Set C2 PDB control GPIOs for host state "off"
-    // - De-assert C2PDB12VHPMEnable
-    // - De-assert C2PDB12VGPU1Enable
-    // - De-assert C2PDB12VGPU2Enable
+    // C2 PDB 12V GPU2 Enable
+    // - ON: Asserted (12V GPU2 rail should be powered)
+    // - OFF: DeAsserted (12V GPU2 rail should be unpowered)
+    powerSignalMap["C2PDB12VGPU2Enable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["C2PDB12VGPU2Enable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-    lg2::info("Setting C2 GPIOs for host state OFF");
+    // Call parent to set common VR/HPM defaults
+    VRPowerControl::setDefaultValues();
 
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOff();
+    lg2::info("C2 default values set successfully");
 }
 
 } // namespace power_control
