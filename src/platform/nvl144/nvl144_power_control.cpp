@@ -39,6 +39,9 @@ NVL144PowerControl::NVL144PowerControl(
     // call validateTimerConfigs() to validate all required timers
     validateTimerConfigs();
 
+    // call setDefaultValues() to set the default values for output signals
+    setDefaultValues();
+
     // Add NVL144-specific GPIO handler to the map
     gpioHandlerMap["NVL144PDBMainPowerOk"] = [this](bool state) {
         this->nvl144pdbMainPowerOkHandler(state);
@@ -564,30 +567,39 @@ void NVL144PowerControl::validateTimerConfigs()
     lg2::info("NVL144 timer configuration validation complete - all required timers present");
 }
 
-void NVL144PowerControl::setGPIOsForHostStateOn()
+void NVL144PowerControl::setDefaultValues()
 {
-    // TODO: Set NVL144 PDB control GPIOs for host state "on"
-    // - Assert NVL144PDBMainPowerEnable
-    // - Assert E1S Power Enable (if applicable)
-    // - Assert BMC SSD Reset (if applicable)
+    // Set NVL144 PDB-specific default values for output signals
+    lg2::info("Setting NVL144 default values for output signals");
 
-    lg2::info("Setting NVL144 GPIOs for host state ON");
+    // NVL144 PDB Main Power Enable
+    // - ON: Asserted (PDB should be powered)
+    // - OFF: DeAsserted (PDB should be unpowered)
+    powerSignalMap["NVL144PDBMainPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["NVL144PDBMainPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOn();
-}
+    // E1S Power Enable
+    // - ON: Asserted (E1S should be powered)
+    // - OFF: DeAsserted (E1S should be unpowered)
+    powerSignalMap["E1SPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["E1SPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-void NVL144PowerControl::setGPIOsForHostStateOff()
-{
-    // TODO: Set NVL144 PDB control GPIOs for host state "off"
-    // - De-assert NVL144PDBMainPowerEnable
-    // - De-assert E1S Power Enable (if applicable)
-    // - De-assert BMC SSD Reset (if applicable)
+    // BMC SSD Reset
+    // - ON: DeAsserted (BMC SSD should be out of reset)
+    // - OFF: Asserted (BMC SSD should be in reset)
+    powerSignalMap["BMCSSDReset"]->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    powerSignalMap["BMCSSDReset"]->defaultStateHostStateOff =
+        DefaultState::Asserted;
 
-    lg2::info("Setting NVL144 GPIOs for host state OFF");
+    // Call parent to set common VR/HPM defaults
+    VRPowerControl::setDefaultValues();
 
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOff();
+    lg2::info("NVL144 default values set successfully");
 }
 
 } // namespace power_control

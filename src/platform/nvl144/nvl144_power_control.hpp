@@ -119,22 +119,12 @@ class NVL144PowerControl : public VRPowerControl
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
 
     /**
-     * @brief Set all control GPIOs to match the host state "on" (NVL144
-     * override)
+     * @brief Set default values for NVL144 output signals (NVL144 override)
      *
-     * Sets NVL144 PDB control GPIOs, then calls
-     * VRPowerControl::setGPIOsForHostStateOn() to set VR control GPIOs.
+     * Sets NVL144 PDB-specific default values for output signals, then calls
+     * VRPowerControl::setDefaultValues() to set common VR defaults.
      */
-    void setGPIOsForHostStateOn() override;
-
-    /**
-     * @brief Set all control GPIOs to match the host state "off" (NVL144
-     * override)
-     *
-     * Sets NVL144 PDB control GPIOs, then calls
-     * VRPowerControl::setGPIOsForHostStateOff() to set VR control GPIOs.
-     */
-    void setGPIOsForHostStateOff() override;
+    void setDefaultValues() override;
 
     /**
      * @brief Handle shutdown request (forceful or graceful) from PowerState::on
