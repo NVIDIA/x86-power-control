@@ -146,26 +146,16 @@ class VRPowerControl : public PowerControl
     void validateTimerConfigs() override;
 
     /**
-     * @brief Set all control GPIOs to match the host state "on"
+     * @brief Set default values for VR output signals
      *
-     * This virtual method sets all control GPIOs (Run Power Enable, Pre System
-     * Reset, etc.) to the values that correspond to the host being in the "on"
-     * state.
+     * This virtual method configures the defaultStateHostStateOn and
+     * defaultStateHostStateOff properties for common VR/HPM output signals
+     * in the powerSignalMap.
      *
-     * Platform classes override to add platform-specific and PDB GPIO settings.
+     * Platform classes override to set platform-specific PDB default values
+     * first, then call this parent method to set common VR/HPM defaults.
      */
-    virtual void setGPIOsForHostStateOn();
-
-    /**
-     * @brief Set all control GPIOs to match the host state "off"
-     *
-     * This virtual method sets all control GPIOs (Run Power Enable, Pre System
-     * Reset, etc.) to the values that correspond to the host being in the "off"
-     * state.
-     *
-     * Platform classes override to add platform-specific and PDB GPIO settings.
-     */
-    virtual void setGPIOsForHostStateOff();
+    virtual void setDefaultValues();
 
     /**
      * @brief Check if all required boards have asserted CPU Shutdown OK

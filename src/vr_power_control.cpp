@@ -40,6 +40,8 @@ VRPowerControl::VRPowerControl(
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
+
+
     // Add VR-specific GPIO handlers to the map (will be registered by most
     // derived class)
     gpioHandlerMap["Board0RunPowerPG"] = [this](bool state) {
@@ -726,30 +728,46 @@ void VRPowerControl::validateTimerConfigs()
     lg2::info("VR timer configuration validation complete - all required timers present");
 }
 
-void VRPowerControl::setGPIOsForHostStateOn()
+void VRPowerControl::setDefaultValues()
 {
-    // TODO: Set VR control GPIOs for host state "on"
-    // - Assert Board0RunPowerEnable
-    // - De-assert Board0PreSystemReset
-    // - Assert Board0CpuShutdownForce (or Request?)
-    // If Board 1 present:
-    //   - Assert Board1RunPowerEnable
-    //   - De-assert Board1PreSystemReset
+    lg2::info("Initializing default values for VR output signals");
 
-    lg2::info("Setting VR GPIOs for host state ON");
-}
+    // Set VR/HPM common signal defaults
+    powerSignalMap["Board0RunPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["Board0RunPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+    powerSignalMap["Board0PreSystemReset"]->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    powerSignalMap["Board0PreSystemReset"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-void VRPowerControl::setGPIOsForHostStateOff()
-{
-    // TODO: Set VR control GPIOs for host state "off"
-    // - De-assert Board0RunPowerEnable
-    // - Assert Board0PreSystemReset
-    // - De-assert Board0CpuShutdownForce (or Request?)
-    // If Board 1 present:
-    //   - De-assert Board1RunPowerEnable
-    //   - Assert Board1PreSystemReset
+    if (boardPresence.board1Present)
+    {
+        powerSignalMap["Board1RunPowerEnable"]->defaultStateHostStateOn =
+            DefaultState::Asserted;
+        powerSignalMap["Board1RunPowerEnable"]->defaultStateHostStateOff =
+            DefaultState::DeAsserted;
+        powerSignalMap["Board1PreSystemReset"]->defaultStateHostStateOn =
+            DefaultState::DeAsserted;
+        powerSignalMap["Board1PreSystemReset"]->defaultStateHostStateOff =
+            DefaultState::DeAsserted;
+    }
 
-    lg2::info("Setting VR GPIOs for host state OFF");
+    powerSignalMap["Board0CpuShutdownForce"]->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    powerSignalMap["Board0CpuShutdownForce"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+    powerSignalMap["Board0CpuShutdownRequest"]->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    powerSignalMap["Board0CpuShutdownRequest"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+    powerSignalMap["USBPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["USBPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+
+    lg2::info("VR default values set successfully");
 }
 
 } // namespace power_control
