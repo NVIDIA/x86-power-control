@@ -35,6 +35,9 @@ ParsecPowerControl::ParsecPowerControl(
     // call validateTimerConfigs() to validate all required timers
     validateTimerConfigs();
 
+    // call setDefaultValues() to set the default values for output signals
+    setDefaultValues();
+
     // Add Parsec-specific GPIO handler to the map
     gpioHandlerMap["GB300PDBMainPowerOk"] = [this](bool state) {
         this->gb300pdbMainPowerOkHandler(state);
@@ -154,26 +157,23 @@ void ParsecPowerControl::validateTimerConfigs()
     lg2::info("Parsec timer configuration validation complete");
 }
 
-void ParsecPowerControl::setGPIOsForHostStateOn()
+void ParsecPowerControl::setDefaultValues()
 {
-    // TODO: Set Parsec GB300 PDB control GPIOs for host state "on"
-    // - Assert GB300PDBMainPowerEnable
+    // Set Parsec GB300 PDB-specific default values for output signals
+    lg2::info("Setting Parsec default values for output signals");
 
-    lg2::info("Setting Parsec GPIOs for host state ON");
+    // GB300 PDB Main Power Enable
+    // - ON: Asserted (GB300 PDB should be powered)
+    // - OFF: DeAsserted (GB300 PDB should be unpowered)
+    powerSignalMap["GB300PDBMainPowerEnable"]->defaultStateHostStateOn =
+        DefaultState::Asserted;
+    powerSignalMap["GB300PDBMainPowerEnable"]->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
 
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOn();
-}
+    // Call parent to set common VR/HPM defaults
+    VRPowerControl::setDefaultValues();
 
-void ParsecPowerControl::setGPIOsForHostStateOff()
-{
-    // TODO: Set Parsec GB300 PDB control GPIOs for host state "off"
-    // - De-assert GB300PDBMainPowerEnable
-
-    lg2::info("Setting Parsec GPIOs for host state OFF");
-
-    // Call parent to set VR GPIOs
-    VRPowerControl::setGPIOsForHostStateOff();
+    lg2::info("Parsec default values set successfully");
 }
 
 } // namespace power_control
