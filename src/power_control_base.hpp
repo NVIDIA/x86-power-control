@@ -205,7 +205,8 @@ class PowerControl
   public:
     PowerControl(boost::asio::io_context& ioContext,
                  std::shared_ptr<sdbusplus::asio::connection> conn,
-                 const std::string& node, PersistentState& appState);
+                 const std::string& node, PersistentState& appState,
+                 const std::string& configFilePath = "");
     virtual ~PowerControl() = default;
 
     /**
@@ -680,7 +681,6 @@ class PowerControl
      * signal.
      */
     std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
-    std::string configFilePath;
 
     /**
      * @brief Reference to the io_context for async operations
@@ -735,6 +735,11 @@ class PowerControl
      * @brief Application name for GPIO requests
      */
     std::string appName;
+
+    /**
+     * @brief Configuration file path
+     */
+    std::string configFilePath;
 
     // UPSTREAM TIMERS
     // These timers are used by the upstream (OpenBMC x86-power-control)
@@ -810,7 +815,7 @@ class PowerControl
      *
      * @param io The io_context for initializing stream descriptors
      */
-    void loadConfigValues(boost::asio::io_context& io);
+    void loadConfigValues();
 
     /**
      * @brief Initialize Host D-Bus interface

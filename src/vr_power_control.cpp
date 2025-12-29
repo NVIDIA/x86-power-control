@@ -28,7 +28,7 @@ VRPowerControl::VRPowerControl(
     std::shared_ptr<sdbusplus::asio::connection> conn,
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
-    PowerControl(ioContext, conn, node, appState),
+    PowerControl(ioContext, conn, node, appState, configFilePath),
     hpmPowerGoodWatchdogTimer(ioContext),
     cpuResetWatchdogTimer(ioContext),
     cpuShutdownOkWatchdogTimer(ioContext)
@@ -39,7 +39,6 @@ VRPowerControl::VRPowerControl(
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
-
 
 
     // Add VR-specific GPIO handlers to the map (will be registered by most
@@ -198,22 +197,26 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 
 void VRPowerControl::handlePowerStateOn(Event event)
 {
+    (void)event;    
     // TODO: Move NVL144-specific powerStateOn() implementation here
 }
 
 void VRPowerControl::handlePowerStateOff(Event event)
 {
+    (void)event;
     // TODO: Move NVL144-specific powerStateOff() implementation here
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
+    (void)event;
     // TODO: Move NVL144-specific powerStateWaitForPDBMainPowerOk()
     // implementation here
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 {
+    (void)event;
     // TODO: Move powerStateWaitForPDBMainPowerOff() implementation here
 }
 
@@ -284,11 +287,13 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
 
 void VRPowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 {
+    (void)event;
     // TODO: Move powerStateWaitForHPMPowerGoodDeAssert() implementation here
 }
 
 void VRPowerControl::handleWaitForCPUResetAssert(Event event)
 {
+    (void)event;
     // TODO: Move powerStateWaitForCPUResetAssert() implementation here
 }
 

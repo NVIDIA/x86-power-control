@@ -126,9 +126,15 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& node, PersistentState& appState) :
+                           const std::string& node, PersistentState& appState,
+                           const std::string& configFilePath) :
     ioContext(ioContext), conn(conn), nodeId(node), appState(appState),
-    appName("power-control"), gpioAssertTimer(ioContext),
+    appName("power-control"), 
+    configFilePath(configFilePath.empty()
+                       ? "/usr/share/x86-power-control/power-config-host" + node + ".json"
+                       : configFilePath),
+    // Timers
+    gpioAssertTimer(ioContext),
     powerCycleTimer(ioContext), gracefulPowerOffTimer(ioContext),
     warmResetCheckTimer(ioContext), powerOKWatchdogTimer(ioContext),
     sioPowerGoodWatchdogTimer(ioContext), powerStateSaveTimer(ioContext),
@@ -136,7 +142,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
-    loadConfigValues(ioContext);
+    loadConfigValues();
 
     // Register base class GPIO handlers
     // These handlers are available in all platforms and can be overridden by
@@ -235,14 +241,11 @@ void PowerControl::sendPowerControlEvent(Event event)
     handler(event);
 }
 
-void PowerControl::loadConfigValues(boost::asio::io_context& io)
+void PowerControl::loadConfigValues()
 {
     // Dynamically build powerSignalMap from JSON config file
 
     // Determine config file path
-    const std::string configFilePath =
-        "/usr/share/x86-power-control/power-config-host" + nodeId + ".json";
-
     std::ifstream configFile(configFilePath.c_str());
     if (!configFile.is_open())
     {
@@ -273,7 +276,7 @@ void PowerControl::loadConfigValues(boost::asio::io_context& io)
         std::string gpioName = gpioConfig["Name"];
 
         // Create a new ConfigData object (dynamically allocated)
-        auto configPtr = std::make_shared<ConfigData>(io);
+        auto configPtr = std::make_shared<ConfigData>(ioContext);
         configPtr->name = gpioName;
 
         // Parse Type
@@ -576,6 +579,7 @@ void PowerControl::handlePowerStateOn(Event event)
 
 void PowerControl::handlePowerStateOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateOff() implementation here
     //
     // PREVIOUS IMPLEMENTATION (from powerStateOff in power_control.cpp -
@@ -598,6 +602,7 @@ void PowerControl::handlePowerStateOff(Event event)
 
 void PowerControl::handleWaitForPowerOK(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateWaitForPSPowerOK() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
@@ -615,6 +620,7 @@ void PowerControl::handleWaitForPowerOK(Event event)
 
 void PowerControl::handleWaitForSIOPowerGood(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateWaitForSIOPowerGood() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
@@ -631,6 +637,7 @@ void PowerControl::handleWaitForSIOPowerGood(Event event)
 
 void PowerControl::handleTransitionToOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateTransitionToOff() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
@@ -640,6 +647,7 @@ void PowerControl::handleTransitionToOff(Event event)
 
 void PowerControl::handleGracefulTransitionToOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateGracefulTransitionToOff() implementation
     // here
     //
@@ -652,6 +660,7 @@ void PowerControl::handleGracefulTransitionToOff(Event event)
 
 void PowerControl::handleCycleOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateCycleOff() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
@@ -661,6 +670,7 @@ void PowerControl::handleCycleOff(Event event)
 
 void PowerControl::handleTransitionToCycleOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateTransitionToCycleOff() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
@@ -671,6 +681,7 @@ void PowerControl::handleTransitionToCycleOff(Event event)
 
 void PowerControl::handleGracefulTransitionToCycleOff(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateGracefulTransitionToCycleOff()
     // implementation here
     //
@@ -683,6 +694,7 @@ void PowerControl::handleGracefulTransitionToCycleOff(Event event)
 
 void PowerControl::handleCheckForWarmReset(Event event)
 {
+    (void)event;
     // TODO: Move upstream powerStateCheckForWarmReset() implementation here
     //
     // PREVIOUS IMPLEMENTATION:
