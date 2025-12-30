@@ -299,6 +299,7 @@ class PowerControl
         FORCE_OFF,
         GRACE_OFF,
         POWER_CYCLE,
+        GRACEFUL_POWER_CYCLE,
         SYSTEM_RESET,
         HOST_INITIATED_SHUTDOWN,
     };
