@@ -136,6 +136,27 @@ class NVL144PowerControl : public VRPowerControl
     void handleShutdownRequest(Event event);
 
     /**
+     * @brief Check if system power is already off
+     *
+     * @return true if both Board0RunPowerPG and NVL144PDBMainPowerOk are de-asserted
+     */
+    bool isSystemPowerOff();
+
+    /**
+     * @brief Initiate CPU shutdown sequence
+     *
+     * @param shutdownSignalName Name of the shutdown signal to assert
+     * @param shutdownOkTimeout Timeout for CPU Shutdown OK watchdog
+     * @param shutdownAction Description of shutdown action for logging
+     *
+     * Asserts the specified shutdown signal, starts the watchdog timer,
+     * and transitions to waitForCPUShutdownOk state.
+     */
+    void initiateCPUShutdown(const char* shutdownSignalName,
+                             int shutdownOkTimeout,
+                             const char* shutdownAction);
+
+    /**
      * @brief Handle power on request from PowerState::off
      *
      * Checks if power is already on, and initiates power-on sequence by
@@ -146,11 +167,13 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Handle power cycle request when in off state
      *
+     * @param event The power cycle event (powerCycleRequest or gracefulPowerCycleRequest)
+     *
      * Verifies power is actually off by checking Board0RunPowerPG, then
      * initiates power on sequence. If power is not fully off, initiates
-     * forceful shutdown first.
+     * appropriate shutdown (forceful or graceful) first based on event type.
      */
-    void handlePowerCycleWhenOff();
+    void handlePowerCycleWhenOff(Event event);
 
     /**
      * @brief Assert HPM board power sequence during power-on
@@ -179,6 +202,21 @@ class NVL144PowerControl : public VRPowerControl
      * expired
      */
     void completeShutdownAndTransitionToOff(bool success);
+
+    /**
+     * @brief Transition to off state after successful shutdown
+     *
+     * Clears action, sets GPIOs to off state, transitions to off.
+     */
+    void transitionToOffState();
+
+    /**
+     * @brief Transition to power cycle delay state
+     *
+     * Preserves action, sets GPIOs to off state, starts delay timer,
+     * transitions to waitForPowerCycleDelay.
+     */
+    void transitionToPowerCycleDelay();
 
     /**
      * @brief De-assert HPM power and peripheral power during shutdown

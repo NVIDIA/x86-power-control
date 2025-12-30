@@ -99,34 +99,9 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
 // HELPER FUNCTIONS for handlePowerStateOn
 // ============================================================================
 
-// Helper function: Handle shutdown requests (force or graceful)
-void NVL144PowerControl::handleShutdownRequest(Event event)
+// Helper function: Check if system power is already off
+bool NVL144PowerControl::isSystemPowerOff()
 {
-    // Determine which shutdown signal to use based on event type
-    const char* shutdownSignalName = (event == Event::powerOffRequest)
-                                         ? "Board0CpuShutdownForce"
-                                         : "Board0CpuShutdownRequest";
-
-    const char* shutdownType =
-        (event == Event::powerOffRequest) ? "Forceful" : "Graceful";
-
-    int shutdownOkTimeout = event == Event::powerOffRequest ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"] : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
-
-    const char* shutdownAction = (event == Event::powerOffRequest)
-                                     ? "Shutdown Force"
-                                     : "Shutdown Request";
-
-    // Only set action if it's not already POWER_CYCLE (to preserve power cycle context)
-    if (action != PowerAction::POWER_CYCLE)
-    {
-        action = (event == Event::powerOffRequest) ? PowerAction::FORCE_OFF
-                                                    : PowerAction::GRACE_OFF;
-    }
-
-    lg2::info(
-        "{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.",
-        "SHUTDOWN_TYPE", shutdownType);
-
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
     if (board0RunPowerPG == powerSignalMap.end())
     {
@@ -141,36 +116,120 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
             "NVL144PDBMainPowerOk signal not found in powerSignalMap");
     }
 
+    return (board0RunPowerPG->second->gpioLine.get_value() ==
+                !board0RunPowerPG->second->polarity &&
+            nvl144pdbMainPowerOk->second->gpioLine.get_value() ==
+                !nvl144pdbMainPowerOk->second->polarity);
+}
+
+// Helper function: Initiate CPU shutdown sequence
+void NVL144PowerControl::initiateCPUShutdown(const char* shutdownSignalName,
+                                               int shutdownOkTimeout,
+                                               const char* shutdownAction)
+{
     auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
     if (shutdownSignal == powerSignalMap.end())
     {
         throw std::runtime_error(
-            std::string(shutdownSignalName) + " signal not found in powerSignalMap");
+            std::string(shutdownSignalName) +
+            " signal not found in powerSignalMap");
     }
 
-    // Check if power is already off
-    if (board0RunPowerPG->second->gpioLine.get_value() ==
-            !board0RunPowerPG->second->polarity &&
-        nvl144pdbMainPowerOk->second->gpioLine.get_value() ==
-            !nvl144pdbMainPowerOk->second->polarity)
+    lg2::info(
+        "Asserting Board 0 CPU {SHUTDOWN_ACTION}. Starting CPU Shutdown OK Watchdog Timer. Transitioning to PowerState::waitForCPUShutdownOk",
+        "SHUTDOWN_ACTION", shutdownAction);
+
+    // Assert Board 0 shutdown signal
+    setGPIOOutput(shutdownSignal->second, shutdownSignal->second->polarity);
+
+    // If Board 1 is present, de-assert its corresponding shutdown signal
+    if (boardPresence.board1Present)
     {
+        // Determine the Board 1 shutdown signal name
+        std::string board1SignalName;
+        if (std::string(shutdownSignalName) == "Board0CpuShutdownForce")
+        {
+            board1SignalName = "Board1CpuShutdownForce";
+        }
+        else // Board0CpuShutdownRequest
+        {
+            board1SignalName = "Board1CpuShutdownRequest";
+        }
+
+        auto board1ShutdownSignal = powerSignalMap.find(board1SignalName);
+        if (board1ShutdownSignal == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                board1SignalName + " signal not found in powerSignalMap");
+        }
+
+        lg2::info("De-asserting Board 1 CPU {SHUTDOWN_ACTION}",
+                  "SHUTDOWN_ACTION", shutdownAction);
+
+        // De-assert Board 1 shutdown signal
+        setGPIOOutput(board1ShutdownSignal->second,
+                      !board1ShutdownSignal->second->polarity);
+    }
+
+    startTimer(shutdownOkTimeout, cpuShutdownOkWatchdogTimer,
+               Event::cpuShutdownOkWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUShutdownOk);
+}
+
+// Helper function: Handle shutdown requests (force or graceful)
+void NVL144PowerControl::handleShutdownRequest(Event event)
+{
+    // Determine shutdown parameters based on event type
+    bool isForceful = (event == Event::powerOffRequest);
+    const char* shutdownSignalName = isForceful ? "Board0CpuShutdownForce"
+                                         : "Board0CpuShutdownRequest";
+    const char* shutdownType = isForceful ? "Forceful" : "Graceful";
+    const char* shutdownAction = isForceful ? "Shutdown Force"
+                                     : "Shutdown Request";
+    int shutdownOkTimeout = isForceful
+                                ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"]
+                                : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
+
+    // Preserve power cycle context; only set action for direct shutdown requests
+    if (action != PowerAction::POWER_CYCLE &&
+        action != PowerAction::GRACEFUL_POWER_CYCLE)
+    {
+        action = isForceful ? PowerAction::FORCE_OFF : PowerAction::GRACE_OFF;
+    }
+
+    lg2::info(
+        "{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.",
+        "SHUTDOWN_TYPE", shutdownType);
+
+    // Check if system is already powered off
+    if (isSystemPowerOff())
+    {
+        // If this is part of a power cycle, continue with the cycle
+        if (action == PowerAction::POWER_CYCLE)
+        {
+            lg2::info(
+                "Power already off during forceful power cycle. Setting GPIOs for host state OFF, starting power cycle delay timer, and transitioning to PowerState::waitForPowerCycleDelay");
+            transitionToPowerCycleDelay();
+        }
+        else if (action == PowerAction::GRACEFUL_POWER_CYCLE)
+        {
+            lg2::info(
+                "Power already off during graceful power cycle. Setting GPIOs for host state OFF, starting power cycle delay timer, and transitioning to PowerState::waitForPowerCycleDelay");
+            transitionToPowerCycleDelay();
+        }
+        else
+        {
+            // Normal shutdown when already off - just transition to off state
         lg2::info(
             "PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
-        setGPIOsForHostStateOff();
-        action = PowerAction::NONE;
-        setPowerState(PowerState::off);
+            transitionToOffState();
+        }
     }
     else
     {
-        lg2::info(
-            "Asserting Board 0 CPU {SHUTDOWN_ACTION}. Starting CPU Shutdown OK Watchdog Timer. Transitioning to PowerState::waitForCPUShutdownOk",
-            "SHUTDOWN_ACTION", shutdownAction);
-        setGPIOOutput(shutdownSignal->second,
-                      !shutdownSignal->second->polarity);
-        startTimer(shutdownOkTimeout,
-                   cpuShutdownOkWatchdogTimer,
-                   Event::cpuShutdownOkWatchdogTimerExpired);
-        setPowerState(PowerState::waitForCPUShutdownOk);
+        // Initiate shutdown sequence
+        initiateCPUShutdown(shutdownSignalName, shutdownOkTimeout,
+                            shutdownAction);
     }
 }
 
@@ -202,12 +261,16 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             action = PowerAction::POWER_CYCLE;
             handleShutdownRequest(Event::powerOffRequest);  // Reuse forceful shutdown
             break;
+
+        case Event::gracefulPowerCycleRequest:
+            lg2::info("Graceful Power Cycle Request received. Initiating graceful shutdown");
+            action = PowerAction::GRACEFUL_POWER_CYCLE;
+            handleShutdownRequest(Event::gracefulPowerOffRequest);  // Reuse graceful shutdown
+            break;
+
         case Event::resetRequest:
             break;
         case Event::powerButtonPressed:
-            break;
-        case Event::gracefulPowerCycleRequest:
-            // handleGracefulPowerCycleRequest(event);
             break;
         default:
             lg2::info("No action taken.");
@@ -274,9 +337,18 @@ void NVL144PowerControl::handlePowerOnRequest()
 }
 
 // Helper function: Handle power cycle request when in off state
-void NVL144PowerControl::handlePowerCycleWhenOff()
+void NVL144PowerControl::handlePowerCycleWhenOff(Event event)
 {
-    lg2::info("Power Cycle Request received while in off state");
+    // Determine the type of power cycle based on the event
+    bool isForceful = (event == Event::powerCycleRequest);
+    const char* cycleType = isForceful ? "Forceful" : "Graceful";
+    PowerAction cycleAction = isForceful ? PowerAction::POWER_CYCLE
+                                         : PowerAction::GRACEFUL_POWER_CYCLE;
+    Event shutdownEvent = isForceful ? Event::powerOffRequest
+                                     : Event::gracefulPowerOffRequest;
+
+    lg2::info("{CYCLE_TYPE} Power Cycle Request received while in off state",
+              "CYCLE_TYPE", cycleType);
 
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
     if (board0RunPowerPG == powerSignalMap.end())
@@ -290,16 +362,17 @@ void NVL144PowerControl::handlePowerCycleWhenOff()
         !board0RunPowerPG->second->polarity)
     {
         lg2::info("Verified Board 0 Run Power PG is de-asserted. Initiating Host Power On sequence");
-        action = PowerAction::POWER_CYCLE;
+        action = cycleAction;
         handlePowerOnRequest();
     }
     else
     {
         lg2::warning(
-            "Power cycle requested but Board 0 Run Power PG is not de-asserted. Initiating Host Forceful Shutdown first");
-        action = PowerAction::POWER_CYCLE;
+            "{CYCLE_TYPE} Power cycle requested but Board 0 Run Power PG is not de-asserted. Initiating Host {SHUTDOWN_TYPE} Shutdown first",
+            "CYCLE_TYPE", cycleType, "SHUTDOWN_TYPE", cycleType);
+        action = cycleAction;
         setPowerState(PowerState::on);
-        handleShutdownRequest(Event::powerOffRequest);
+        handleShutdownRequest(shutdownEvent);
     }
 }
 
@@ -316,8 +389,9 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
             handlePowerOnRequest();
             break;
         case Event::powerCycleRequest:
+        case Event::gracefulPowerCycleRequest:
             // Power cycle requested when already off
-            handlePowerCycleWhenOff();
+            handlePowerCycleWhenOff(event);
             break;
         case Event::powerButtonPressed:
             break;
@@ -453,57 +527,75 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
 // HELPER FUNCTIONS for handleWaitForPDBMainPowerOff
 // ============================================================================
 
+// Helper function: Transition to off state after successful shutdown
+void NVL144PowerControl::transitionToOffState()
+{
+    action = PowerAction::NONE;
+    setGPIOsForHostStateOff();
+    setPowerState(PowerState::off);
+}
+
+// Helper function: Transition to power cycle delay state
+void NVL144PowerControl::transitionToPowerCycleDelay()
+{
+    // Keep action (POWER_CYCLE or GRACEFUL_POWER_CYCLE) - don't clear it
+    setGPIOsForHostStateOff();
+    startTimer(TimerMap["PowerCycleDelayMs"], powerCycleDelayTimer,
+               Event::powerCycleDelayTimerExpired);
+    setPowerState(PowerState::waitForPowerCycleDelay);
+}
+
 // Helper function: Complete shutdown and transition to off state
 void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
 {
     pdbMainPowerOkWatchdogTimer.cancel();
 
-    if (success)
+    if (!success)
     {
-        // Log success based on shutdown type
-        if (action == PowerAction::FORCE_OFF)
-        {
-            lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
-            action = PowerAction::NONE;
-            setGPIOsForHostStateOff();
-            setPowerState(PowerState::off);
-        }
-        else if (action == PowerAction::GRACE_OFF)
-        {
-            lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
-            action = PowerAction::NONE;
-            setGPIOsForHostStateOff();
-            setPowerState(PowerState::off);
-        }
-        else if (action == PowerAction::POWER_CYCLE)
-        {
-            lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Forceful Power Cycle Host Forceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
-            // Keep action = POWER_CYCLE (don't clear it)
-            setGPIOsForHostStateOff();
-            startTimer(TimerMap["PowerCycleDelayMs"], powerCycleDelayTimer,
-                       Event::powerCycleDelayTimerExpired);
-            setPowerState(PowerState::waitForPowerCycleDelay);
-        }
-        else
-        {
-            // Unknown action - default to off
-            lg2::warning("Shutdown complete with unexpected action. Transitioning to off.");
-            action = PowerAction::NONE;
-            setGPIOsForHostStateOff();
-            setPowerState(PowerState::off);
-        }
-    }
-    else
-    {
-        // Log failure - abort any ongoing action
+        // Failure case - abort any ongoing action
         lg2::error(
             "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
         action = PowerAction::NONE;
         setGPIOsForHostStateOff();
         setPowerState(PowerState::off);
+        return;
+    }
+
+    // Success - handle based on current action
+    switch (action)
+    {
+        case PowerAction::FORCE_OFF:
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::GRACE_OFF:
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::POWER_CYCLE:
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Forceful Power Cycle Host Forceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+            transitionToPowerCycleDelay();
+            break;
+
+        case PowerAction::GRACEFUL_POWER_CYCLE:
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Graceful Power Cycle Host Graceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+            transitionToPowerCycleDelay();
+            break;
+
+        default:
+            // Unknown action - default to off
+            lg2::warning(
+                "Shutdown complete with unexpected action. Transitioning to off.");
+    action = PowerAction::NONE;
+            setGPIOsForHostStateOff();
+    setPowerState(PowerState::off);
+            break;
     }
 }
 
