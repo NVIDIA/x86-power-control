@@ -31,7 +31,8 @@ VRPowerControl::VRPowerControl(
     PowerControl(ioContext, conn, node, appState, configFilePath),
     hpmPowerGoodWatchdogTimer(ioContext),
     cpuResetWatchdogTimer(ioContext),
-    cpuShutdownOkWatchdogTimer(ioContext)
+    cpuShutdownOkWatchdogTimer(ioContext),
+    powerCycleDelayTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
@@ -102,10 +103,14 @@ bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
 
 void VRPowerControl::board0RunPowerPGHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["Board0RunPowerPG"];
+    auto it = powerSignalMap.find("Board0RunPowerPG");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerPG signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
                                   : Event::board0RunPowerPGDeAssert;
@@ -114,10 +119,14 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
 
 void VRPowerControl::board1RunPowerPGHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["Board1RunPowerPG"];
+    auto it = powerSignalMap.find("Board1RunPowerPG");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board1RunPowerPG signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1RunPowerPGAssert
                                   : Event::board1RunPowerPGDeAssert;
@@ -126,10 +135,14 @@ void VRPowerControl::board1RunPowerPGHandler(bool state)
 
 void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["Board0CpuShutdownOk"];
+    auto it = powerSignalMap.find("Board0CpuShutdownOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0CpuShutdownOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0CpuShutdownOkAssert
                                   : Event::board0CpuShutdownOkDeAssert;
@@ -138,10 +151,14 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 
 void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["Board1CpuShutdownOk"];
+    auto it = powerSignalMap.find("Board1CpuShutdownOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board1CpuShutdownOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1CpuShutdownOkAssert
                                   : Event::board1CpuShutdownOkDeAssert;
@@ -150,10 +167,14 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 
 void VRPowerControl::cpuResetIndicatorHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["CpuResetIndicator"];
+    auto it = powerSignalMap.find("CpuResetIndicator");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "CpuResetIndicator signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::cpuResetIndicatorAssert
                                   : Event::cpuResetIndicatorDeAssert;
@@ -188,6 +209,9 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 
         case PowerState::waitForCPUShutdownOk:
             return [this](Event e) { this->handleWaitForCPUShutdownOk(e); };
+
+        case PowerState::waitForPowerCycleDelay:
+            return [this](Event e) { this->handleWaitForPowerCycleDelay(e); };
 
         // Delegate upstream states to base class
         default:
@@ -228,6 +252,11 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 void VRPowerControl::deassertPreSystemResets()
 {
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
 
     // De-assert Board 0 Pre System Reset
     setGPIOOutput(board0PreSystemReset->second,
@@ -237,6 +266,12 @@ void VRPowerControl::deassertPreSystemResets()
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
+
         setGPIOOutput(board1PreSystemReset->second,
                       !board1PreSystemReset->second->polarity);
     }
@@ -336,6 +371,12 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 bool VRPowerControl::areAllRequiredBoardsShutdownOk()
 {
     auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
+    if (board0CpuShutdownOk == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0CpuShutdownOk signal not found in powerSignalMap");
+    }
+
     bool board0ShutdownOkAsserted =
         board0CpuShutdownOk->second->gpioLine.get_value() ==
         board0CpuShutdownOk->second->polarity;
@@ -348,6 +389,12 @@ bool VRPowerControl::areAllRequiredBoardsShutdownOk()
 
     // 2P system - need both Board 0 and Board 1
     auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
+    if (board1CpuShutdownOk == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board1CpuShutdownOk signal not found in powerSignalMap");
+    }
+
     bool board1ShutdownOkAsserted =
         board1CpuShutdownOk->second->gpioLine.get_value() ==
         board1CpuShutdownOk->second->polarity;
@@ -361,6 +408,12 @@ int VRPowerControl::getShutdownOkAssertedCount()
     int count = 0;
 
     auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
+    if (board0CpuShutdownOk == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0CpuShutdownOk signal not found in powerSignalMap");
+    }
+
     if (board0CpuShutdownOk->second->gpioLine.get_value() ==
         board0CpuShutdownOk->second->polarity)
     {
@@ -370,6 +423,12 @@ int VRPowerControl::getShutdownOkAssertedCount()
     if (boardPresence.board1Present)
     {
         auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
+        if (board1CpuShutdownOk == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1CpuShutdownOk signal not found in powerSignalMap");
+        }
+
         if (board1CpuShutdownOk->second->gpioLine.get_value() ==
             board1CpuShutdownOk->second->polarity)
         {
@@ -384,12 +443,24 @@ int VRPowerControl::getShutdownOkAssertedCount()
 void VRPowerControl::assertBoardPreSystemResets()
 {
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
+
     setGPIOOutput(board0PreSystemReset->second,
                   board0PreSystemReset->second->polarity);
 
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
+
         setGPIOOutput(board1PreSystemReset->second,
                       board1PreSystemReset->second->polarity);
     }
@@ -481,6 +552,12 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // anyway
             auto board0CpuShutdownOk =
                 powerSignalMap.find("Board0CpuShutdownOk");
+            if (board0CpuShutdownOk == powerSignalMap.end())
+            {
+                throw std::runtime_error(
+                    "Board0CpuShutdownOk signal not found in powerSignalMap");
+            }
+
             bool board0Asserted =
                 board0CpuShutdownOk->second->gpioLine.get_value() ==
                 board0CpuShutdownOk->second->polarity;
@@ -568,6 +645,27 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
     }
 }
 
+void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
+{
+    switch (event)
+    {
+        case Event::powerCycleDelayTimerExpired:
+            lg2::info("Power cycle delay complete. Initiating power on sequence");
+            powerCycleDelayTimer.cancel();
+            // Keep action = POWER_CYCLE - will be cleared when we reach On state
+            // Delegate to base/platform handlePowerStateOff to trigger power on
+            sendPowerControlEvent(Event::powerOnRequest);
+            break;
+
+        default:
+            // Reject all other events during power cycle delay
+            lg2::warning(
+                "Event {EVENT} rejected - power cycle delay in progress",
+                "EVENT", static_cast<int>(event));
+            break;
+    }
+}
+
 std::string_view VRPowerControl::getHostState() const
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus host
@@ -582,6 +680,9 @@ std::string_view VRPowerControl::getHostState() const
         case PowerState::waitForCPUResetAssert:
         case PowerState::waitForCPUShutdownOk:
             return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
+            break;
+        case PowerState::waitForPowerCycleDelay:
+            return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
         case PowerState::waitForHPMPowerGoodDeAssert:
             return "xyz.openbmc_project.State.Host.HostState.Off";
@@ -620,6 +721,9 @@ std::string_view VRPowerControl::getChassisState() const
         case PowerState::waitForCPUResetAssert:
         case PowerState::waitForCPUShutdownOk:
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForPowerCycleDelay:
+            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
             break;
         case PowerState::waitForCPUResetDeAssert:
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
@@ -671,6 +775,9 @@ std::string VRPowerControl::getPowerStateName()
             break;
         case PowerState::waitForCPUShutdownOk:
             return "Wait for CPU Shutdown OK";
+            break;
+        case PowerState::waitForPowerCycleDelay:
+            return "Wait for Power Cycle Delay";
             break;
         default:
             // Fall through to base class for upstream states
@@ -737,40 +844,104 @@ void VRPowerControl::setDefaultValues()
 {
     lg2::info("Initializing default values for VR output signals");
 
-    // Set VR/HPM common signal defaults
-    powerSignalMap["Board0RunPowerEnable"]->defaultStateHostStateOn =
+    // Find and validate all required signals first
+    auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
+    if (board0RunPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerEnable signal not found in powerSignalMap");
+    }
+
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
+
+    auto board0CpuShutdownForce =
+        powerSignalMap.find("Board0CpuShutdownForce");
+    if (board0CpuShutdownForce == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0CpuShutdownForce signal not found in powerSignalMap");
+    }
+
+    auto board0CpuShutdownRequest =
+        powerSignalMap.find("Board0CpuShutdownRequest");
+    if (board0CpuShutdownRequest == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0CpuShutdownRequest signal not found in powerSignalMap");
+    }
+
+    auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
+    if (usbPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "USBPowerEnable signal not found in powerSignalMap");
+    }
+
+    // Board 1 signals (if present)
+    std::map<std::string, std::shared_ptr<ConfigData>>::iterator
+        board1RunPowerEnable;
+    std::map<std::string, std::shared_ptr<ConfigData>>::iterator
+        board1PreSystemReset;
+
+    if (boardPresence.board1Present)
+    {
+        board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
+        if (board1RunPowerEnable == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1RunPowerEnable signal not found in powerSignalMap");
+        }
+
+        board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
+    }
+
+    // All signals validated, now set the default states
+    board0RunPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["Board0RunPowerEnable"]->defaultStateHostStateOff =
+    board0RunPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
-    powerSignalMap["Board0PreSystemReset"]->defaultStateHostStateOn =
+
+    board0PreSystemReset->second->defaultStateHostStateOn =
         DefaultState::DeAsserted;
-    powerSignalMap["Board0PreSystemReset"]->defaultStateHostStateOff =
+    board0PreSystemReset->second->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+
+    board0CpuShutdownForce->second->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    board0CpuShutdownForce->second->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+
+    board0CpuShutdownRequest->second->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    board0CpuShutdownRequest->second->defaultStateHostStateOff =
+        DefaultState::DeAsserted;
+
+    usbPowerEnable->second->defaultStateHostStateOn = DefaultState::Asserted;
+    usbPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     if (boardPresence.board1Present)
     {
-        powerSignalMap["Board1RunPowerEnable"]->defaultStateHostStateOn =
+        board1RunPowerEnable->second->defaultStateHostStateOn =
             DefaultState::Asserted;
-        powerSignalMap["Board1RunPowerEnable"]->defaultStateHostStateOff =
+        board1RunPowerEnable->second->defaultStateHostStateOff =
             DefaultState::DeAsserted;
-        powerSignalMap["Board1PreSystemReset"]->defaultStateHostStateOn =
+
+        board1PreSystemReset->second->defaultStateHostStateOn =
             DefaultState::DeAsserted;
-        powerSignalMap["Board1PreSystemReset"]->defaultStateHostStateOff =
+        board1PreSystemReset->second->defaultStateHostStateOff =
             DefaultState::DeAsserted;
     }
-
-    powerSignalMap["Board0CpuShutdownForce"]->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    powerSignalMap["Board0CpuShutdownForce"]->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
-    powerSignalMap["Board0CpuShutdownRequest"]->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    powerSignalMap["Board0CpuShutdownRequest"]->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
-    powerSignalMap["USBPowerEnable"]->defaultStateHostStateOn =
-        DefaultState::Asserted;
-    powerSignalMap["USBPowerEnable"]->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
 
     lg2::info("VR default values set successfully");
 }

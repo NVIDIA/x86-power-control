@@ -270,6 +270,7 @@ class VRPowerControl : public PowerControl
         "GracefulCpuShutdownOkWatchdogMs",
         "CpuResetWatchdogMs",
         "HPMPowerGoodWatchdogMs",
+        "PowerCycleDelayMs",
     };
 
   protected:
@@ -291,6 +292,11 @@ class VRPowerControl : public PowerControl
      * @brief Timer for CPU shutdown OK assertion
      */
     boost::asio::steady_timer cpuShutdownOkWatchdogTimer;
+
+    /**
+     * @brief Timer for power cycle delay between shutdown and power on
+     */
+    boost::asio::steady_timer powerCycleDelayTimer;
 
   protected:
     // GPIO EVENT HANDLERS (Member functions)
@@ -508,6 +514,16 @@ class VRPowerControl : public PowerControl
      * case Event::cpuShutdownOkWatchdogTimerExpired:
      */
     virtual void handleWaitForCPUShutdownOk(Event event);
+
+    /**
+     * @brief Handle events in waitForPowerCycleDelay state
+     *
+     * Waits for the power cycle delay timer to expire before initiating
+     * power on sequence. Rejects all other events during the delay.
+     *
+     * @param event The event to process
+     */
+    virtual void handleWaitForPowerCycleDelay(Event event);
 };
 
 } // namespace power_control
