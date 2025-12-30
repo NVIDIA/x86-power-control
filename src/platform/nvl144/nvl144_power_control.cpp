@@ -116,8 +116,12 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
                                      ? "Shutdown Force"
                                      : "Shutdown Request";
 
-    action = (event == Event::powerOffRequest) ? PowerAction::FORCE_OFF
-                                                : PowerAction::GRACE_OFF;
+    // Only set action if it's not already POWER_CYCLE (to preserve power cycle context)
+    if (action != PowerAction::POWER_CYCLE)
+    {
+        action = (event == Event::powerOffRequest) ? PowerAction::FORCE_OFF
+                                                    : PowerAction::GRACE_OFF;
+    }
 
     lg2::info(
         "{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.",
@@ -294,6 +298,7 @@ void NVL144PowerControl::handlePowerCycleWhenOff()
         lg2::warning(
             "Power cycle requested but Board 0 Run Power PG is not de-asserted. Initiating Host Forceful Shutdown first");
         action = PowerAction::POWER_CYCLE;
+        setPowerState(PowerState::on);
         handleShutdownRequest(Event::powerOffRequest);
     }
 }

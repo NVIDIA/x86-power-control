@@ -622,9 +622,10 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             break;
 
         case Event::cpuShutdownOkWatchdogTimerExpired:
-            // Behavior depends on power action (FORCE_OFF vs GRACE_OFF)
-            if (action == PowerAction::FORCE_OFF)
+            // Behavior depends on power action (FORCE_OFF vs GRACE_OFF vs POWER_CYCLE)
+            if (action == PowerAction::FORCE_OFF || action == PowerAction::POWER_CYCLE)
             {
+                // Both FORCE_OFF and POWER_CYCLE use forceful shutdown
                 handleCPUShutdownOkWatchdogExpiry_ForceOff();
             }
             else if (action == PowerAction::GRACE_OFF)
@@ -652,6 +653,7 @@ void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
         case Event::powerCycleDelayTimerExpired:
             lg2::info("Power cycle delay complete. Initiating power on sequence");
             powerCycleDelayTimer.cancel();
+            setPowerState(PowerState::off);
             // Keep action = POWER_CYCLE - will be cleared when we reach On state
             // Delegate to base/platform handlePowerStateOff to trigger power on
             sendPowerControlEvent(Event::powerOnRequest);
@@ -694,6 +696,7 @@ std::string_view VRPowerControl::getHostState() const
             }
             else if (action == PowerAction::FORCE_OFF ||
                      action == PowerAction::GRACE_OFF ||
+                     action == PowerAction::POWER_CYCLE ||
                      action == PowerAction::HOST_INITIATED_SHUTDOWN)
             {
                 return "xyz.openbmc_project.State.Host.HostState.Off";
@@ -735,6 +738,7 @@ std::string_view VRPowerControl::getChassisState() const
             }
             else if (action == PowerAction::FORCE_OFF ||
                      action == PowerAction::GRACE_OFF ||
+                     action == PowerAction::POWER_CYCLE ||
                      action == PowerAction::HOST_INITIATED_SHUTDOWN)
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
