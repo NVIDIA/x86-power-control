@@ -51,10 +51,14 @@ ParsecPowerControl::ParsecPowerControl(
 
 void ParsecPowerControl::gb300pdbMainPowerOkHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["GB300PDBMainPowerOk"];
+    auto it = powerSignalMap.find("GB300PDBMainPowerOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "GB300PDBMainPowerOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::gb300pdbMainPowerOkAssert
                                   : Event::gb300pdbMainPowerOkDeAssert;
@@ -162,12 +166,23 @@ void ParsecPowerControl::setDefaultValues()
     // Set Parsec GB300 PDB-specific default values for output signals
     lg2::info("Setting Parsec default values for output signals");
 
+    // Find and validate all Parsec GB300 PDB-specific signals first
+    auto gb300PdbMainPowerEnable =
+        powerSignalMap.find("GB300PDBMainPowerEnable");
+    if (gb300PdbMainPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "GB300PDBMainPowerEnable signal not found in powerSignalMap");
+    }
+
+    // All Parsec signals validated, now set the default states
+
     // GB300 PDB Main Power Enable
     // - ON: Asserted (GB300 PDB should be powered)
     // - OFF: DeAsserted (GB300 PDB should be unpowered)
-    powerSignalMap["GB300PDBMainPowerEnable"]->defaultStateHostStateOn =
+    gb300PdbMainPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["GB300PDBMainPowerEnable"]->defaultStateHostStateOff =
+    gb300PdbMainPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
