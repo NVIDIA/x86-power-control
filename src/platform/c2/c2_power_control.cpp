@@ -52,10 +52,14 @@ C2PowerControl::C2PowerControl(
 
 void C2PowerControl::c2pdbPSUPowerOkHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["C2PDBPSUPowerOk"];
+    auto it = powerSignalMap.find("C2PDBPSUPowerOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "C2PDBPSUPowerOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::c2pdbPSUPowerOkAssert
                                   : Event::c2pdbPSUPowerOkDeAssert;
@@ -151,36 +155,67 @@ void C2PowerControl::setDefaultValues()
     // Set C2 PDB-specific default values for output signals
     lg2::info("Setting C2 default values for output signals");
 
+    // Find and validate all C2 PDB-specific signals first
+    auto c2PdbPsuPowerEnable = powerSignalMap.find("C2PDBPSUPowerEnable");
+    if (c2PdbPsuPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "C2PDBPSUPowerEnable signal not found in powerSignalMap");
+    }
+
+    auto c2Pdb12vHpmEnable = powerSignalMap.find("C2PDB12VHPMEnable");
+    if (c2Pdb12vHpmEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "C2PDB12VHPMEnable signal not found in powerSignalMap");
+    }
+
+    auto c2Pdb12vGpu1Enable = powerSignalMap.find("C2PDB12VGPU1Enable");
+    if (c2Pdb12vGpu1Enable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "C2PDB12VGPU1Enable signal not found in powerSignalMap");
+    }
+
+    auto c2Pdb12vGpu2Enable = powerSignalMap.find("C2PDB12VGPU2Enable");
+    if (c2Pdb12vGpu2Enable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "C2PDB12VGPU2Enable signal not found in powerSignalMap");
+    }
+
+    // All C2 signals validated, now set the default states
+
     // C2 PDB PSU Power Enable
     // - ON: Asserted (C2 PDB PSU output should be enabled)
     // - OFF: DeAsserted (C2 PDB PSU should not be enabled)
-    powerSignalMap["C2PDBPSUPowerEnable"]->defaultStateHostStateOn =
+    c2PdbPsuPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["C2PDBPSUPowerEnable"]->defaultStateHostStateOff =
+    c2PdbPsuPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
-    
+
     // C2 PDB 12V HPM Enable
     // - ON: Asserted (12V HPM rail should be powered)
     // - OFF: DeAsserted (12V HPM rail should be unpowered)
-    powerSignalMap["C2PDB12VHPMEnable"]->defaultStateHostStateOn =
+    c2Pdb12vHpmEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["C2PDB12VHPMEnable"]->defaultStateHostStateOff =
+    c2Pdb12vHpmEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // C2 PDB 12V GPU1 Enable
     // - ON: Asserted (12V GPU1 rail should be powered)
     // - OFF: DeAsserted (12V GPU1 rail should be unpowered)
-    powerSignalMap["C2PDB12VGPU1Enable"]->defaultStateHostStateOn =
+    c2Pdb12vGpu1Enable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["C2PDB12VGPU1Enable"]->defaultStateHostStateOff =
+    c2Pdb12vGpu1Enable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // C2 PDB 12V GPU2 Enable
     // - ON: Asserted (12V GPU2 rail should be powered)
     // - OFF: DeAsserted (12V GPU2 rail should be unpowered)
-    powerSignalMap["C2PDB12VGPU2Enable"]->defaultStateHostStateOn =
+    c2Pdb12vGpu2Enable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["C2PDB12VGPU2Enable"]->defaultStateHostStateOff =
+    c2Pdb12vGpu2Enable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
