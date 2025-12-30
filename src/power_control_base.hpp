@@ -44,6 +44,7 @@ enum class PowerState
     waitForCPUResetAssert,
     waitForCPUResetDeAssert,
     waitForCPUShutdownOk,
+    waitForPowerCycleDelay,
 };
 
 // Configuration type enumeration
@@ -243,6 +244,7 @@ class PowerControl
         gracefulPowerOffRequest,
         gracefulPowerCycleRequest,
         warmResetDetected,
+        powerCycleDelayTimerExpired,
         nvl144pdbMainPowerOkAssert,
         nvl144pdbMainPowerOkDeAssert,
         gb300pdbMainPowerOkAssert,

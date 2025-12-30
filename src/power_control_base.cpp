@@ -1825,10 +1825,13 @@ void PowerControl::registerGPIOHandlers()
 
 void PowerControl::powerOKHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["PowerOk"];
+    auto it = powerSignalMap.find("PowerOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error("PowerOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::powerOKAssert
                                   : Event::powerOKDeAssert;
@@ -1837,10 +1840,14 @@ void PowerControl::powerOKHandler(bool state)
 
 void PowerControl::sioPowerGoodHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["SioPowerGood"];
+    auto it = powerSignalMap.find("SioPowerGood");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "SioPowerGood signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::sioPowerGoodAssert
                                   : Event::sioPowerGoodDeAssert;
@@ -1849,10 +1856,13 @@ void PowerControl::sioPowerGoodHandler(bool state)
 
 void PowerControl::sioS5Handler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["SIOS5"];
+    auto it = powerSignalMap.find("SIOS5");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error("SIOS5 signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent =
         (state == config.polarity) ? Event::sioS5Assert : Event::sioS5DeAssert;
     sendPowerControlEvent(powerControlEvent);
@@ -1860,10 +1870,14 @@ void PowerControl::sioS5Handler(bool state)
 
 void PowerControl::powerButtonHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["PowerButton"];
+    auto it = powerSignalMap.find("PowerButton");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "PowerButton signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     bool asserted = state == config.polarity;
     powerButtonIface->set_property("ButtonPressed", asserted);
     if (asserted)
@@ -1890,7 +1904,15 @@ void PowerControl::resetButtonHandler(bool state)
 {
     // Lookup config for polarity (guaranteed to exist since handler was
     // registered)
-    auto& config = *powerSignalMap["ResetButton"];
+    auto it = powerSignalMap.find("ResetButton");
+
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "ResetButton signal not found in powerSignalMap");
+    }
+
+    auto& config = *it->second;
 
     bool asserted = state == config.polarity;
     resetButtonIface->set_property("ButtonPressed", asserted);
