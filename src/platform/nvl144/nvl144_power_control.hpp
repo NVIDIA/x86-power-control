@@ -144,6 +144,15 @@ class NVL144PowerControl : public VRPowerControl
     void handlePowerOnRequest();
 
     /**
+     * @brief Handle power cycle request when in off state
+     *
+     * Verifies power is actually off by checking Board0RunPowerPG, then
+     * initiates power on sequence. If power is not fully off, initiates
+     * forceful shutdown first.
+     */
+    void handlePowerCycleWhenOff();
+
+    /**
      * @brief Assert HPM board power sequence during power-on
      *
      * Asserts Board 0/1 Pre System Reset, E1S/USB Power Enable, de-asserts BMC

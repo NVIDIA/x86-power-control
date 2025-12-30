@@ -54,10 +54,14 @@ NVL144PowerControl::NVL144PowerControl(
 // NVL144-specific GPIO handler implementations
 void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
 {
-    // Lookup config for polarity (guaranteed to exist since handler was
-    // registered)
-    auto& config = *powerSignalMap["NVL144PDBMainPowerOk"];
+    auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
+    if (it == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+    }
 
+    auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::nvl144pdbMainPowerOkAssert
                                   : Event::nvl144pdbMainPowerOkDeAssert;
@@ -120,8 +124,25 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         "SHUTDOWN_TYPE", shutdownType);
 
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
+    if (board0RunPowerPG == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerPG signal not found in powerSignalMap");
+    }
+
     auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
+    if (nvl144pdbMainPowerOk == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+    }
+
     auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
+    if (shutdownSignal == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            std::string(shutdownSignalName) + " signal not found in powerSignalMap");
+    }
 
     // Check if power is already off
     if (board0RunPowerPG->second->gpioLine.get_value() ==
@@ -131,7 +152,7 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     {
         lg2::info(
             "PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
-        setGPIOsForHostStateOff(); // TODO: fill function implementation
+        setGPIOsForHostStateOff();
         action = PowerAction::NONE;
         setPowerState(PowerState::off);
     }
@@ -158,18 +179,32 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
     // TODO: Move NVL144-specific powerStateOn() implementation here
     switch (event)
     {
+        // case Event::board0ShutdownOkAsserted
+        // case Event::board1ShutdownOkAsserted:
+            // call method for 
+            // log host initiated shutdown request received
+            // assert pre system reset
+            // de-assert run power enables, USB Power Enable, E1S Power Enable, BMC SSD Reset
+            // 
+            // check CPU Boot Done assertion (only accept when OS is booted).
+            // host initiated shutdown request
         case Event::powerOffRequest:
         case Event::gracefulPowerOffRequest:
             handleShutdownRequest(event);
             break;
 
         case Event::powerCycleRequest:
+            lg2::info("Forceful Power Cycle Request received. Initiating forceful shutdown");
+            action = PowerAction::POWER_CYCLE;
+            handleShutdownRequest(Event::powerOffRequest);  // Reuse forceful shutdown
             break;
         case Event::resetRequest:
             break;
         case Event::powerButtonPressed:
             break;
         case Event::gracefulPowerCycleRequest:
+            // handleGracefulPowerCycleRequest(event);
+            break;
         default:
             lg2::info("No action taken.");
             break;
@@ -187,9 +222,26 @@ void NVL144PowerControl::handlePowerOnRequest()
         "Power On Request received. Commencing Host Main Power On sequence.");
 
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
+    if (board0RunPowerPG == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerPG signal not found in powerSignalMap");
+    }
+
     auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
+    if (nvl144pdbMainPowerOk == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+    }
+
     auto nvl144pdbMainPowerEnable =
         powerSignalMap.find("NVL144PDBMainPowerEnable");
+    if (nvl144pdbMainPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+    }
 
     // Check if power is already on
     if (board0RunPowerPG->second->gpioLine.get_value() ==
@@ -217,6 +269,35 @@ void NVL144PowerControl::handlePowerOnRequest()
     }
 }
 
+// Helper function: Handle power cycle request when in off state
+void NVL144PowerControl::handlePowerCycleWhenOff()
+{
+    lg2::info("Power Cycle Request received while in off state");
+
+    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
+    if (board0RunPowerPG == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerPG signal not found in powerSignalMap");
+    }
+
+    // Verify power is actually off
+    if (board0RunPowerPG->second->gpioLine.get_value() ==
+        !board0RunPowerPG->second->polarity)
+    {
+        lg2::info("Verified Board 0 Run Power PG is de-asserted. Initiating Host Power On sequence");
+        action = PowerAction::POWER_CYCLE;
+        handlePowerOnRequest();
+    }
+    else
+    {
+        lg2::warning(
+            "Power cycle requested but Board 0 Run Power PG is not de-asserted. Initiating Host Forceful Shutdown first");
+        action = PowerAction::POWER_CYCLE;
+        handleShutdownRequest(Event::powerOffRequest);
+    }
+}
+
 // ============================================================================
 // handlePowerStateOff state handler
 // ============================================================================
@@ -229,8 +310,9 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
         case Event::powerOnRequest:
             handlePowerOnRequest();
             break;
-
         case Event::powerCycleRequest:
+            // Power cycle requested when already off
+            handlePowerCycleWhenOff();
             break;
         case Event::powerButtonPressed:
             break;
@@ -250,10 +332,39 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
 void NVL144PowerControl::assertHPMBoardPowerSequence()
 {
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
+    if (board0RunPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerEnable signal not found in powerSignalMap");
+    }
+
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
+
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
+    if (usbPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "USBPowerEnable signal not found in powerSignalMap");
+    }
+
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    if (e1sPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "E1SPowerEnable signal not found in powerSignalMap");
+    }
+
     auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
+    if (bmcSSDReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "BMCSSDReset signal not found in powerSignalMap");
+    }
 
     // Assert Pre System Reset for Board 0 and Board 1 (if present)
     setGPIOOutput(board0PreSystemReset->second,
@@ -261,6 +372,11 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
         setGPIOOutput(board1PreSystemReset->second,
                       board1PreSystemReset->second->polarity);
     }
@@ -277,6 +393,11 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     if (boardPresence.board1Present)
     {
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
+        if (board1RunPowerEnable == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1RunPowerEnable signal not found in powerSignalMap");
+        }
         setGPIOOutput(board1RunPowerEnable->second,
                       board1RunPowerEnable->second->polarity);
     }
@@ -313,7 +434,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
                 "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
             action = PowerAction::NONE;
-            setGPIOsForHostStateOff(); // TODO: fill function implementation
+            setGPIOsForHostStateOff();
             setPowerState(PowerState::off);
             break;
 
@@ -339,23 +460,46 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         {
             lg2::info(
                 "NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+            action = PowerAction::NONE;
+            setGPIOsForHostStateOff();
+            setPowerState(PowerState::off);
         }
         else if (action == PowerAction::GRACE_OFF)
         {
             lg2::info(
                 "NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+            action = PowerAction::NONE;
+            setGPIOsForHostStateOff();
+            setPowerState(PowerState::off);
+        }
+        else if (action == PowerAction::POWER_CYCLE)
+        {
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Forceful Power Cycle Host Forceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+            // Keep action = POWER_CYCLE (don't clear it)
+            setGPIOsForHostStateOff();
+            startTimer(TimerMap["PowerCycleDelayMs"], powerCycleDelayTimer,
+                       Event::powerCycleDelayTimerExpired);
+            setPowerState(PowerState::waitForPowerCycleDelay);
+        }
+        else
+        {
+            // Unknown action - default to off
+            lg2::warning("Shutdown complete with unexpected action. Transitioning to off.");
+            action = PowerAction::NONE;
+            setGPIOsForHostStateOff();
+            setPowerState(PowerState::off);
         }
     }
     else
     {
-        // Log failure
+        // Log failure - abort any ongoing action
         lg2::error(
             "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+        action = PowerAction::NONE;
+        setGPIOsForHostStateOff();
+        setPowerState(PowerState::off);
     }
-
-    action = PowerAction::NONE;
-    setGPIOsForHostStateOff(); // TODO: fill function implementation
-    setPowerState(PowerState::off);
 }
 
 // ============================================================================
@@ -388,9 +532,32 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
 void NVL144PowerControl::deassertHPMPowerAndPeripherals()
 {
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
+    if (board0RunPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0RunPowerEnable signal not found in powerSignalMap");
+    }
+
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    if (e1sPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "E1SPowerEnable signal not found in powerSignalMap");
+    }
+
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
+    if (usbPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "USBPowerEnable signal not found in powerSignalMap");
+    }
+
     auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
+    if (bmcSSDReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "BMCSSDReset signal not found in powerSignalMap");
+    }
 
     // De-assert Board 0 Run Power Enable
     setGPIOOutput(board0RunPowerEnable->second,
@@ -400,6 +567,11 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
     if (boardPresence.board1Present)
     {
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
+        if (board1RunPowerEnable == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1RunPowerEnable signal not found in powerSignalMap");
+        }
         setGPIOOutput(board1RunPowerEnable->second,
                       !board1RunPowerEnable->second->polarity);
     }
@@ -441,7 +613,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
                 "CPU Reset Watchdog Timer Expired. CPUs are not in reset. Host Shutdown sequence failed {reccomend checking CPLD  status}. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
 
             action = PowerAction::NONE;
-            setGPIOsForHostStateOff(); // TODO: fill function implementation
+            setGPIOsForHostStateOff();
             setPowerState(PowerState::off);
             break;
 
@@ -459,8 +631,19 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
 {
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
+
     auto nvl144pdbMainPowerEnable =
         powerSignalMap.find("NVL144PDBMainPowerEnable");
+    if (nvl144pdbMainPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+    }
 
     // De-assert Board 0 Pre System Reset
     setGPIOOutput(board0PreSystemReset->second,
@@ -470,6 +653,11 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
         setGPIOOutput(board1PreSystemReset->second,
                       !board1PreSystemReset->second->polarity);
     }
@@ -572,28 +760,53 @@ void NVL144PowerControl::setDefaultValues()
     // Set NVL144 PDB-specific default values for output signals
     lg2::info("Setting NVL144 default values for output signals");
 
+    // Find and validate all NVL144 PDB-specific signals first
+    auto nvl144PdbMainPowerEnable =
+        powerSignalMap.find("NVL144PDBMainPowerEnable");
+    if (nvl144PdbMainPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+    }
+
+    auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    if (e1sPowerEnable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "E1SPowerEnable signal not found in powerSignalMap");
+    }
+
+    auto bmcSsdReset = powerSignalMap.find("BMCSSDReset");
+    if (bmcSsdReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "BMCSSDReset signal not found in powerSignalMap");
+    }
+
+    // All NVL144 signals validated, now set the default states
+
     // NVL144 PDB Main Power Enable
     // - ON: Asserted (PDB should be powered)
     // - OFF: DeAsserted (PDB should be unpowered)
-    powerSignalMap["NVL144PDBMainPowerEnable"]->defaultStateHostStateOn =
+    nvl144PdbMainPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["NVL144PDBMainPowerEnable"]->defaultStateHostStateOff =
+    nvl144PdbMainPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // E1S Power Enable
     // - ON: Asserted (E1S should be powered)
     // - OFF: DeAsserted (E1S should be unpowered)
-    powerSignalMap["E1SPowerEnable"]->defaultStateHostStateOn =
+    e1sPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    powerSignalMap["E1SPowerEnable"]->defaultStateHostStateOff =
+    e1sPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // BMC SSD Reset
     // - ON: DeAsserted (BMC SSD should be out of reset)
     // - OFF: Asserted (BMC SSD should be in reset)
-    powerSignalMap["BMCSSDReset"]->defaultStateHostStateOn =
+    bmcSsdReset->second->defaultStateHostStateOn =
         DefaultState::DeAsserted;
-    powerSignalMap["BMCSSDReset"]->defaultStateHostStateOff =
+    bmcSsdReset->second->defaultStateHostStateOff =
         DefaultState::Asserted;
 
     // Call parent to set common VR/HPM defaults
