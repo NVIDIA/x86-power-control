@@ -39,6 +39,13 @@ NVL144PowerControl::NVL144PowerControl(
     addRequiredSignal("E1SPowerEnable", 0);
     addRequiredSignal("BMCSSDReset", 0);
 
+    if (boardPresence.board1Present)
+    {
+        addRequiredSignal("Board1RunPowerEnable", 1);
+        addRequiredSignal("Board1PreSystemReset", 1);
+        addRequiredSignal("Board1CpuShutdownOk", 1);
+    }
+
     // Validate all required signals (VR + NVL144)
     PowerControl::validateRequiredSignals();
 

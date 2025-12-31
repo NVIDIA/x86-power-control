@@ -49,12 +49,6 @@ VRPowerControl::VRPowerControl(
     addRequiredSignal("CpuResetIndicator", 0);
     addRequiredSignal("USBPowerEnable", 0);
 
-    // Board 1 signals (only required if Board 1 is present)
-    addRequiredSignal("Board1RunPowerEnable", 1);
-    addRequiredSignal("Board1PreSystemReset", 1);
-    addRequiredSignal("Board1CpuShutdownOk", 1);
-    // Note: GPIO properties (CpuResetIndicator, Board0RunPowerPG, etc.)
-    // are registered by base class in registerGpioStateInterface()
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
