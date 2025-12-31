@@ -44,6 +44,7 @@ NVL144PowerControl::NVL144PowerControl(
         addRequiredSignal("Board1RunPowerEnable", 1);
         addRequiredSignal("Board1PreSystemReset", 1);
         addRequiredSignal("Board1CpuShutdownOk", 1);
+        addBoard1GpioStateProperties();
     }
 
     // Validate all required signals (VR + NVL144)
@@ -60,7 +61,6 @@ NVL144PowerControl::NVL144PowerControl(
         this->nvl144pdbMainPowerOkHandler(state);
     };
 
-    addBoard1GpioStateProperties();
     initializeGpioStateInterface();
     // Register all GPIO handlers (from base, VR, and NVL144)
     registerGPIOHandlers();
@@ -75,6 +75,9 @@ void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
         throw std::runtime_error(
             "NVL144PDBMainPowerOk signal not found in powerSignalMap");
     }
+
+    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}",
+              "VALUE", state);
 
     auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
@@ -112,13 +115,15 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
 
 void NVL144PowerControl::addBoard1GpioStateProperties()
 {
-    if(boardPresence.board1Present)
-    {
-        gpioStateIface->register_property_r(
-            "Board1CpuShutdownOk", int{-1},
-            sdbusplus::vtable::property_::emits_change,
-            [this](const auto&) { return board1CpuShutdownOkState; });
-    }
+    gpioStateIface->register_property_r(
+        "Board1CpuShutdownOk", int{-1},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return board1CpuShutdownOkState; });
+    
+    // Add Board1 GPIO property setter for D-Bus
+    gpioPropertySetters["Board1CpuShutdownOk"] = [](PowerControl* pc, int val) {
+        pc->setBoard1CpuShutdownOkState(val);
+    };
 }
 
 // ============================================================================
@@ -327,7 +332,8 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
         case Event::powerButtonPressed:
             break;
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -452,7 +458,8 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
         case Event::resetRequest:
             break;
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -572,7 +579,8 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -670,7 +678,8 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -769,7 +778,8 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -857,7 +867,8 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }

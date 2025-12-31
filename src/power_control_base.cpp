@@ -180,6 +180,15 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     initializeOSInterface();
     initializeRestartCauseInterface();
     registerGpioStateInterface();
+    
+    // Initialize GPIO property setters map with common Board0 signals
+    // Derived classes can add additional signals (e.g., Board1 signals)
+    gpioPropertySetters = {
+        {"CpuResetIndicator", [](PowerControl* pc, int val) { pc->setCpuResetIndicatorState(val); }},
+        {"Board0RunPowerPG", [](PowerControl* pc, int val) { pc->setBoard0RunPowerPGState(val); }},
+        {"Board0CpuShutdownOk", [](PowerControl* pc, int val) { pc->setBoard0CpuShutdownOkState(val); }}
+    };
+    
     // Note: initializeGpioStateInterface() is called by derived classes
     // (e.g., VRPowerControl) after they register any additional GPIO
     // methods/properties
@@ -476,13 +485,14 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
 
     config.eventDescriptor.assign(gpioLineFd);
 
-    // Initialize the GPIO state interface with the current value of the GPIO line
-    // if signalName exists in requiredBoard0Signals or requiredBoard1Signals, set the property in the GPIO state interface
-    if (std::find(requiredBoard0Signals.begin(), requiredBoard0Signals.end(), config.name) != requiredBoard0Signals.end() ||
-        std::find(requiredBoard1Signals.begin(), requiredBoard1Signals.end(), config.name) != requiredBoard1Signals.end())
+    // Initialize D-Bus GPIO property with current hardware value (if mapped)
+    auto setterIt = gpioPropertySetters.find(config.name);
+    if (setterIt != gpioPropertySetters.end())
     {
-        gpioStateIface->set_property(config.name, config.gpioLine.get_value());
-        lg2::info("Successfully initialized GPIO state interface for {GPIO_NAME} to {VALUE}", "GPIO_NAME", config.name, "VALUE", config.gpioLine.get_value());
+        int currentValue = config.gpioLine.get_value();
+        setterIt->second(this, currentValue);
+        lg2::info("Initialized D-Bus property '{SIGNAL}' to {VALUE}", 
+                  "SIGNAL", config.name, "VALUE", currentValue);
     }
 
     waitForGPIOEvent(config);
@@ -585,7 +595,8 @@ void PowerControl::handlePowerStateOn(Event event)
             reset();
             break;
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }

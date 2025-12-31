@@ -29,6 +29,17 @@ ParsecPowerControl::ParsecPowerControl(
     // gpioHandlerMap by VRPowerControl constructor Now add Parsec-specific
     // handlers to the map
 
+    addRequiredSignal("GB300PDBMainPowerOk", 0);
+    addRequiredSignal("GB300PDBMainPowerEnable", 0);
+
+    if (boardPresence.board1Present)
+    {
+        addRequiredSignal("Board1RunPowerEnable", 1);
+        addRequiredSignal("Board1PreSystemReset", 1);
+        addRequiredSignal("Board1CpuShutdownOk", 1);
+        addBoard1GpioStateProperties();
+    }
+
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
@@ -43,7 +54,6 @@ ParsecPowerControl::ParsecPowerControl(
         this->gb300pdbMainPowerOkHandler(state);
     };
 
-    addBoard1GpioStateProperties();
     initializeGpioStateInterface();
     
     // Register all GPIO handlers (from base, VR, and Parsec)
@@ -85,13 +95,15 @@ std::function<void(Event)> ParsecPowerControl::getPowerStateHandler()
 
 void ParsecPowerControl::addBoard1GpioStateProperties()
 {
-    if(boardPresence.board1Present)
-    {
-        gpioStateIface->register_property_r(
-            "Board1CpuShutdownOk", int{-1},
-            sdbusplus::vtable::property_::emits_change,
-            [this](const auto&) { return board1CpuShutdownOkState; });
-    }
+    gpioStateIface->register_property_r(
+        "Board1CpuShutdownOk", int{-1},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return board1CpuShutdownOkState; });
+    
+    // Add Board1 GPIO property setter for D-Bus
+    gpioPropertySetters["Board1CpuShutdownOk"] = [](PowerControl* pc, int val) {
+        pc->setBoard1CpuShutdownOkState(val);
+    };
 }
 
 void ParsecPowerControl::handlePowerStateOn(Event event)

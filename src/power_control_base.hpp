@@ -351,6 +351,15 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> gpioStateIface;
 
+    /**
+     * @brief Map of GPIO signal names to their D-Bus property setter functions
+     * 
+     * Used to initialize D-Bus GPIO properties with actual hardware values.
+     * Base class initializes with common Board0 signals. Derived classes can
+     * add platform-specific signals (e.g., Board1 signals).
+     */
+    std::unordered_map<std::string, std::function<void(PowerControl*, int)>> gpioPropertySetters;
+
     gpiod::line powerButtonMask;
     gpiod::line resetButtonMask;
     bool nmiButtonMasked = false;

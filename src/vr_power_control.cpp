@@ -49,7 +49,6 @@ VRPowerControl::VRPowerControl(
     addRequiredSignal("CpuResetIndicator", 0);
     addRequiredSignal("USBPowerEnable", 0);
 
-
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
@@ -125,7 +124,9 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     auto& config = *it->second;
     
     // Update D-Bus property
-    setBoard0RunPowerPGState((state == config.polarity) ? 1 : 0);
+    setBoard0RunPowerPGState(state);
+    lg2::info("Board0RunPowerPG GPIO event: value={VALUE}",
+              "VALUE", state);
     
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
@@ -161,7 +162,9 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
     auto& config = *it->second;
     
     // Update D-Bus property
-    setBoard0CpuShutdownOkState((state == config.polarity) ? 1 : 0);
+    setBoard0CpuShutdownOkState(state);
+    lg2::info("Board0CpuShutdownOk GPIO event: value={VALUE}",
+              "VALUE", state);
     
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0CpuShutdownOkAssert
@@ -181,7 +184,9 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
     auto& config = *it->second;
     
     // Update D-Bus property
-    setBoard1CpuShutdownOkState((state == config.polarity) ? 1 : 0);
+    setBoard1CpuShutdownOkState(state);
+    lg2::info("Board1CpuShutdownOk GPIO event: value={VALUE}",
+              "VALUE", state);
     
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1CpuShutdownOkAssert
@@ -201,7 +206,9 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     auto& config = *it->second;
     
     // Update D-Bus property
-    setCpuResetIndicatorState((state == config.polarity) ? 1 : 0);
+    setCpuResetIndicatorState(state);
+    lg2::info("CpuResetIndicator GPIO event: value={VALUE}",
+              "VALUE", state);
     
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::cpuResetIndicatorAssert
@@ -343,7 +350,8 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -386,7 +394,8 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             setPowerState(PowerState::off);
             break;
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
@@ -672,7 +681,8 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT", 
+                      getEventName(event));
             break;
     }
 }
