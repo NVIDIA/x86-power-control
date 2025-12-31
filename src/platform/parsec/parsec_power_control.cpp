@@ -43,6 +43,9 @@ ParsecPowerControl::ParsecPowerControl(
         this->gb300pdbMainPowerOkHandler(state);
     };
 
+    addBoard1GpioStateProperties();
+    initializeGpioStateInterface();
+    
     // Register all GPIO handlers (from base, VR, and Parsec)
     registerGPIOHandlers();
 }
@@ -77,6 +80,17 @@ std::function<void(Event)> ParsecPowerControl::getPowerStateHandler()
         // Delegate all states to parent VRPowerControl
         default:
             return VRPowerControl::getPowerStateHandler();
+    }
+}
+
+void ParsecPowerControl::addBoard1GpioStateProperties()
+{
+    if(boardPresence.board1Present)
+    {
+        gpioStateIface->register_property_r(
+            "Board1CpuShutdownOk", int{-1},
+            sdbusplus::vtable::property_::emits_change,
+            [this](const auto&) { return board1CpuShutdownOkState; });
     }
 }
 

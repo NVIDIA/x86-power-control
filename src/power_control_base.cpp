@@ -179,6 +179,10 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     initializeButtonInterfaces();
     initializeOSInterface();
     initializeRestartCauseInterface();
+    registerGpioStateInterface();
+    // Note: initializeGpioStateInterface() is called by derived classes
+    // (e.g., VRPowerControl) after they register any additional GPIO
+    // methods/properties
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler()
@@ -471,6 +475,15 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
     }
 
     config.eventDescriptor.assign(gpioLineFd);
+
+    // Initialize the GPIO state interface with the current value of the GPIO line
+    // if signalName exists in requiredBoard0Signals or requiredBoard1Signals, set the property in the GPIO state interface
+    if (std::find(requiredBoard0Signals.begin(), requiredBoard0Signals.end(), config.name) != requiredBoard0Signals.end() ||
+        std::find(requiredBoard1Signals.begin(), requiredBoard1Signals.end(), config.name) != requiredBoard1Signals.end())
+    {
+        gpioStateIface->set_property(config.name, config.gpioLine.get_value());
+        lg2::info("Successfully initialized GPIO state interface for {GPIO_NAME} to {VALUE}", "GPIO_NAME", config.name, "VALUE", config.gpioLine.get_value());
+    }
 
     waitForGPIOEvent(config);
     return true;
@@ -1489,6 +1502,119 @@ void PowerControl::initializeRestartCauseInterface()
     restartCauseIface->initialize();
 
     lg2::info("Created the restart cause interface successfully");
+}
+
+void PowerControl::registerGpioStateInterface()
+{
+    // GPIO State Service
+    sdbusplus::asio::object_server gpioStateServer =
+        sdbusplus::asio::object_server(conn);
+
+    // GPIO State Interface
+    gpioStateIface = gpioStateServer.add_interface(
+        "/xyz/openbmc_project/state/host" + nodeId,
+        "xyz.openbmc_project.State.Gpio");
+
+    // Register method: SetCpuBootDone(i state)
+    gpioStateIface->register_method(
+        "SetCpuBootDone", [this](const int& state) {
+            // Validate input: only accept 0 or 1
+            if (state != 0 && state != 1)
+            {
+                lg2::error(
+                    "SetCpuBootDone rejected: Invalid state value {STATE}. "
+                    "Only 0 (de-asserted) or 1 (asserted) are allowed.",
+                    "STATE", state);
+                throw std::invalid_argument(
+                    "Invalid state value. Only 0 or 1 allowed.");
+            }
+
+            // Update member variable
+            cpuBootDone = state;
+
+            // Log state change
+            const char* stateStr = (state == 1) ? "ASSERTED" : "DE-ASSERTED";
+            lg2::info("CPU Boot Done state changed to: {STATE}", "STATE",
+                      stateStr);
+
+            // Update property value
+            gpioStateIface->set_property("CpuBootDone", state);
+        });
+
+    // Register property: CpuBootDone (read-only, int type, initialized to -1)
+    gpioStateIface->register_property_r(
+        "CpuBootDone", int{-1}, sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return cpuBootDone; });
+
+    // Register VR GPIO state properties (read-only)
+    gpioStateIface->register_property_r(
+        "CpuResetIndicator", int{-1},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return cpuResetIndicatorState; });
+
+    gpioStateIface->register_property_r(
+        "Board0RunPowerPG", int{-1},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return board0RunPowerPGState; });
+
+    gpioStateIface->register_property_r(
+        "Board0CpuShutdownOk", int{-1},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return board0CpuShutdownOkState; });
+
+    // Note: Does NOT call initialize() - derived classes may register
+    // additional GPIO methods/properties before calling
+    // initializeGpioStateInterface()
+}
+
+void PowerControl::initializeGpioStateInterface()
+{
+    // Initialize the D-Bus interface (makes it visible on D-Bus)
+    if (gpioStateIface)
+    {    
+        gpioStateIface->initialize();
+        lg2::info("GPIO state interface initialized successfully");
+    }
+}
+
+// =============================================================================
+// VR GPIO STATE SETTERS (Update D-Bus properties)
+// =============================================================================
+
+void PowerControl::setCpuResetIndicatorState(int state)
+{
+    cpuResetIndicatorState = state;
+    if (gpioStateIface)
+    {
+        gpioStateIface->set_property("CpuResetIndicator", state);
+    }
+}
+
+void PowerControl::setBoard0RunPowerPGState(int state)
+{
+    board0RunPowerPGState = state;
+    if (gpioStateIface)
+    {
+        gpioStateIface->set_property("Board0RunPowerPG", state);
+    }
+}
+
+void PowerControl::setBoard0CpuShutdownOkState(int state)
+{
+    board0CpuShutdownOkState = state;
+    if (gpioStateIface)
+    {
+        gpioStateIface->set_property("Board0CpuShutdownOk", state);
+    }
+}
+
+void PowerControl::setBoard1CpuShutdownOkState(int state)
+{
+    board1CpuShutdownOkState = state;
+    if (gpioStateIface)
+    {
+        gpioStateIface->set_property("Board1CpuShutdownOk", state);
+    }
 }
 
 bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config,

@@ -106,6 +106,16 @@ class ParsecPowerControl : public VRPowerControl
         // Empty for now - add "ParsecPdbMainPowerOkWatchdogMs" when needed
     };
 
+    /**
+     * @brief Add Board 1 GPIO state properties
+     *
+     * Adds Board 1 GPIO state properties to the GPIO state interface. 
+     * Board 1 SHDN OK is only present if Board 1 is present.
+     *
+     * @return void
+    */
+    void addBoard1GpioStateProperties();
+
   protected:
     /**
      * @brief Handler for PowerState::on (Parsec Override)

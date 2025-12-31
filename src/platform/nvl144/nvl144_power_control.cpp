@@ -53,6 +53,8 @@ NVL144PowerControl::NVL144PowerControl(
         this->nvl144pdbMainPowerOkHandler(state);
     };
 
+    addBoard1GpioStateProperties();
+    initializeGpioStateInterface();
     // Register all GPIO handlers (from base, VR, and NVL144)
     registerGPIOHandlers();
 }
@@ -98,6 +100,17 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
         // NVL144PowerControl
         default:
             return VRPowerControl::getPowerStateHandler();
+    }
+}
+
+void NVL144PowerControl::addBoard1GpioStateProperties()
+{
+    if(boardPresence.board1Present)
+    {
+        gpioStateIface->register_property_r(
+            "Board1CpuShutdownOk", int{-1},
+            sdbusplus::vtable::property_::emits_change,
+            [this](const auto&) { return board1CpuShutdownOkState; });
     }
 }
 
@@ -195,6 +208,34 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     int shutdownOkTimeout = isForceful
                                 ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"]
                                 : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
+
+    // Validate CPU Boot Done state for graceful operations
+    if (!isForceful)
+    {
+        int bootDoneState = getCPUBootDoneState();
+
+        if (bootDoneState == -1)
+        {
+            lg2::error(
+                "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor!"
+                "Host Graceful Shutdown operation cannot proceed.");
+            return; // No-op, stay in current power state
+        }
+
+        else if (bootDoneState == 0)
+        {
+            lg2::error(
+                "CPU Boot Done is DE-ASSERTED. Host Graceful Shutdown operation cannot proceed");
+            return; // No-op, stay in current power state
+        }
+        else
+        {
+            lg2::info(
+                "CPU Boot Done is ASSERTED. Proceeding with Host Graceful Shutdown operation");
+        }
+
+        // bootDoneState == 1, proceed with graceful operation
+    }
 
     // Preserve power cycle context; only set action for direct shutdown requests
     if (action != PowerAction::POWER_CYCLE &&

@@ -68,6 +68,16 @@ class NVL144PowerControl : public VRPowerControl
      */
     void validateTimerConfigs() override;
 
+    /**
+     * @brief Add Board 1 GPIO state properties
+     *
+     * Adds Board 1 GPIO state properties to the GPIO state interface. 
+     * Board 1 SHDN OK is only present if Board 1 is present.
+     *
+     * @return void
+    */
+    void addBoard1GpioStateProperties();
+     
   protected:
     // NVL144 uses the default VR implementations (which are NVL144 behavior)
     // Override only if NVL144 needs platform-specific variations

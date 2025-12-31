@@ -284,6 +284,16 @@ class PowerControl
      */
     static void logEvent(std::string_view stateHandler, Event event);
 
+    /**
+     * @brief Get the CPU Boot Done state
+     *
+     * @return int CPU Boot Done state:
+     *         -1 = Uninitialized (not set by GPIO monitor yet)
+     *          0 = De-asserted (CPU boot not complete)
+     *          1 = Asserted (CPU boot complete)
+     */
+    int getCPUBootDoneState() const { return cpuBootDone; }
+
     std::string hostDbusName = "xyz.openbmc_project.State.Host";
     std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
@@ -339,6 +349,7 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> gpioStateIface;
 
     gpiod::line powerButtonMask;
     gpiod::line resetButtonMask;
@@ -357,6 +368,31 @@ class PowerControl
      */
     OperatingSystemStateStage operatingSystemState =
         OperatingSystemStateStage::Inactive;
+
+    /**
+     * @brief GPIO state tracking for D-Bus properties
+     *
+     * These track the current state of common GPIO signals owned and will be exposed via D-Bus:
+     * -1 = Uninitialized (no event received yet)
+     *  0 = De-asserted
+     *  1 = Asserted
+     */
+    int cpuBootDone{-1};
+    int cpuResetIndicatorState{-1};
+    int board0RunPowerPGState{-1};
+    int board0CpuShutdownOkState{-1};
+    int board1CpuShutdownOkState{-1};
+
+    /**
+     * @brief Setter methods for VR GPIO states
+     *
+     * These update both the member variable and the D-Bus property.
+     * Called from GPIO event handlers in derived classes.
+     */
+    void setCpuResetIndicatorState(int state);
+    void setBoard0RunPowerPGState(int state);
+    void setBoard0CpuShutdownOkState(int state);
+    void setBoard1CpuShutdownOkState(int state);
 
     /**
      * @brief Get the handler function for the current power state
@@ -914,6 +950,24 @@ class PowerControl
      * why the host was restarted.
      */
     void initializeRestartCauseInterface();
+
+    /**
+     * @brief Register GPIO State D-Bus interface
+     *
+     * Creates xyz.openbmc_project.State.Gpio interface and registers
+     * common GPIO methods/properties (CPU Boot Done). Does NOT call
+     * initialize() - derived classes can add additional GPIO methods/
+     * properties before calling initializeGpioStateInterface().
+     */
+    void registerGpioStateInterface();
+
+    /**
+     * @brief Initialize GPIO State D-Bus interface
+     *
+     * Calls initialize() on gpioStateIface to make it visible on D-Bus.
+     * Should be called after all GPIO methods/properties have been registered.
+     */
+    void initializeGpioStateInterface();
 
     /**
      * @brief Request GPIO events for a signal

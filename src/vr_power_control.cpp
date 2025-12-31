@@ -53,6 +53,8 @@ VRPowerControl::VRPowerControl(
     addRequiredSignal("Board1RunPowerEnable", 1);
     addRequiredSignal("Board1PreSystemReset", 1);
     addRequiredSignal("Board1CpuShutdownOk", 1);
+    // Note: GPIO properties (CpuResetIndicator, Board0RunPowerPG, etc.)
+    // are registered by base class in registerGpioStateInterface()
 
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
@@ -127,6 +129,10 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     }
 
     auto& config = *it->second;
+    
+    // Update D-Bus property
+    setBoard0RunPowerPGState((state == config.polarity) ? 1 : 0);
+    
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
                                   : Event::board0RunPowerPGDeAssert;
@@ -159,6 +165,10 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
     }
 
     auto& config = *it->second;
+    
+    // Update D-Bus property
+    setBoard0CpuShutdownOkState((state == config.polarity) ? 1 : 0);
+    
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0CpuShutdownOkAssert
                                   : Event::board0CpuShutdownOkDeAssert;
@@ -175,6 +185,10 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
     }
 
     auto& config = *it->second;
+    
+    // Update D-Bus property
+    setBoard1CpuShutdownOkState((state == config.polarity) ? 1 : 0);
+    
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1CpuShutdownOkAssert
                                   : Event::board1CpuShutdownOkDeAssert;
@@ -191,6 +205,10 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     }
 
     auto& config = *it->second;
+    
+    // Update D-Bus property
+    setCpuResetIndicatorState((state == config.polarity) ? 1 : 0);
+    
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::cpuResetIndicatorAssert
                                   : Event::cpuResetIndicatorDeAssert;
