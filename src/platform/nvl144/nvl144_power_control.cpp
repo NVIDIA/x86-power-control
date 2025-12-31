@@ -33,8 +33,14 @@ NVL144PowerControl::NVL144PowerControl(
     // gpioHandlerMap by VRPowerControl constructor Now add NVL144-specific
     // handlers to the map
 
-    // call validateRequiredSignals() to validate all required signals
-    validateRequiredSignals();
+    // Add NVL144 PDB-specific required signals (Board 0)
+    addRequiredSignal("NVL144PDBMainPowerOk", 0);
+    addRequiredSignal("NVL144PDBMainPowerEnable", 0);
+    addRequiredSignal("E1SPowerEnable", 0);
+    addRequiredSignal("BMCSSDReset", 0);
+
+    // Validate all required signals (VR + NVL144)
+    PowerControl::validateRequiredSignals();
 
     // call validateTimerConfigs() to validate all required timers
     validateTimerConfigs();
@@ -806,28 +812,6 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
             lg2::info("No action taken.");
             break;
     }
-}
-
-void NVL144PowerControl::validateRequiredSignals()
-{
-    // Validate NVL144 PDB signals (always required for NVL144 platform)
-    for (const auto& signalName : requiredSignals)
-    {
-        if (powerSignalMap.find(signalName) == powerSignalMap.end())
-        {
-            lg2::error(
-                "Required NVL144 PDB signal '{SIGNAL}' not found in config",
-                "SIGNAL", signalName);
-            throw std::runtime_error(
-                "NVL144: Required PDB signal missing from config: " +
-                signalName);
-        }
-    }
-
-    // Call VRPowerControl to validate common VR signals
-    VRPowerControl::validateRequiredSignals();
-
-    lg2::info("NVL144 signal validation complete - all required signals present");
 }
 
 void NVL144PowerControl::validateTimerConfigs()

@@ -705,6 +705,27 @@ class PowerControl
     PowerState powerState;
 
     /**
+     * @brief Required Board 0 signals
+     * Add all REQUIRED signals to board0 by default, 
+     * as board 0 is always present.
+     */
+    std::vector<std::string> requiredBoard0Signals;
+
+    /**
+     * @brief Required Board 1 signals
+     * These could potentially be empty, if board 1 is not present.
+     */
+    std::vector<std::string> requiredBoard1Signals;
+
+    /**
+     * @brief Add a required signal to the appropriate board's signal list
+     *
+     * @param signalName The name of the GPIO signal to add
+     * @param boardIndex The board index (0 or 1)
+     */
+    void addRequiredSignal(const std::string& signalName, int boardIndex);
+
+    /**
      * @brief Map of GPIO signal names to their handler functions
      *
      * This map is built up by each class in the hierarchy (PowerControl,

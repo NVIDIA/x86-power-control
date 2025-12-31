@@ -1711,6 +1711,24 @@ void PowerControl::startTimer(int timeoutMs, boost::asio::steady_timer& timer,
         });
 }
 
+void PowerControl::addRequiredSignal(const std::string& signalName,
+                                     int boardIndex)
+{
+    if (boardIndex == 0)
+    {
+        requiredBoard0Signals.push_back(signalName);
+    }
+    else if (boardIndex == 1)
+    {
+        requiredBoard1Signals.push_back(signalName);
+    }
+    else
+    {
+        lg2::error("Invalid board index {INDEX} for signal {SIGNAL}", "INDEX",
+                   boardIndex, "SIGNAL", signalName);
+    }
+}
+
 void PowerControl::validateRequiredSignals()
 {
     // TODO: Determine which configs are required by upstream PowerControl
@@ -1729,6 +1747,32 @@ void PowerControl::validateRequiredSignals()
     // {"NMIButton", &nmiButtonConfig},
     // {"SlotPower", &slotPowerConfig},
     // {"HpmStbyEn", &hpmStbyEnConfig}};
+
+    // Validate Board 0 signals (always required)
+    for (const auto& signalName : requiredBoard0Signals)
+    {
+        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        {
+            lg2::error("Required Board 0 signal '{SIGNAL}' not found in config",
+                       "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Required Board 0 signal missing from config: " + signalName);
+        }
+    }
+
+    // Validate Board 1 signals (if any were added)
+    for (const auto& signalName : requiredBoard1Signals)
+    {
+        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        {
+            lg2::error("Required Board 1 signal '{SIGNAL}' not found in config",
+                       "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Required Board 1 signal missing from config: " + signalName);
+        }
+    }
+
+    lg2::info("Signal validation complete - all required signals present");
 }
 
 void PowerControl::validateTimerConfigs()

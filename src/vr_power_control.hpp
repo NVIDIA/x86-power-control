@@ -125,7 +125,6 @@ class VRPowerControl : public PowerControl
      *
      * @throws std::runtime_error if any required signal is missing from config
      */
-    void validateRequiredSignals() override;
 
     /**
      * @brief Validate that all required VR/HPM timer configurations are present
@@ -244,23 +243,6 @@ class VRPowerControl : public PowerControl
      * This will be populated by detectBoardPresence() method
      */
     BoardPresence boardPresence;
-
-    /**
-     * @brief Required Board 0 signals (always required for VR platforms)
-     */
-
-    // ToDo: Move this to the new "map" that stores ground truth for GPIO values
-    const std::vector<std::string> requiredBoard0Signals = {
-        "Board0RunPowerEnable",     "Board0RunPowerPG",
-        "Board0PreSystemReset",     "Board0CpuShutdownForce",
-        "Board0CpuShutdownRequest", "Board0CpuShutdownOk",
-        "CpuResetIndicator",        "USBPowerEnable"};
-
-    /**
-     * @brief Required Board 1 signals (only required if Board 1 is present)
-     */
-    const std::vector<std::string> requiredBoard1Signals = {
-        "Board1RunPowerEnable", "Board1PreSystemReset", "Board1CpuShutdownOk"};
 
     /**
      * @brief List of required VR/HPM common timer configurations

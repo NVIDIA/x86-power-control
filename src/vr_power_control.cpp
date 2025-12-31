@@ -38,6 +38,22 @@ VRPowerControl::VRPowerControl(
     // Assign handlers and register events for common VR/HPM signals
     detectBoardPresence();
 
+    // Add VR-specific required signals
+    // Board 0 signals (always required for VR platforms)
+    addRequiredSignal("Board0RunPowerEnable", 0);
+    addRequiredSignal("Board0RunPowerPG", 0);
+    addRequiredSignal("Board0PreSystemReset", 0);
+    addRequiredSignal("Board0CpuShutdownForce", 0);
+    addRequiredSignal("Board0CpuShutdownRequest", 0);
+    addRequiredSignal("Board0CpuShutdownOk", 0);
+    addRequiredSignal("CpuResetIndicator", 0);
+    addRequiredSignal("USBPowerEnable", 0);
+
+    // Board 1 signals (only required if Board 1 is present)
+    addRequiredSignal("Board1RunPowerEnable", 1);
+    addRequiredSignal("Board1PreSystemReset", 1);
+    addRequiredSignal("Board1CpuShutdownOk", 1);
+
     // call validateRequiredSignals() to validate all required signals
     validateRequiredSignals();
 
@@ -797,40 +813,8 @@ std::string VRPowerControl::getPowerStateName()
     return PowerControl::getPowerStateName();
 }
 
-void VRPowerControl::validateRequiredSignals()
-{
-    // Validate Board 0 signals (always required)
-    for (const auto& signalName : requiredBoard0Signals)
-    {
-        if (powerSignalMap.find(signalName) == powerSignalMap.end())
-        {
-            lg2::error("Required Board 0 signal '{SIGNAL}' not found in config",
-                       "SIGNAL", signalName);
-            throw std::runtime_error(
-                "VR: Required Board 0 signal missing from config: " +
-                signalName);
-        }
-    }
-
-    // Conditionally validate Board 1 signals (only if Board 1 is present)
-    if (boardPresence.board1Present)
-    {
-        for (const auto& signalName : requiredBoard1Signals)
-        {
-            if (powerSignalMap.find(signalName) == powerSignalMap.end())
-            {
-                lg2::error(
-                    "Required Board 1 signal '{SIGNAL}' not found in config",
-                    "SIGNAL", signalName);
-                throw std::runtime_error(
-                    "VR: Required Board 1 signal missing from config: " +
-                    signalName);
-            }
-        }
-    }
-
-    lg2::info("VR signal validation complete - all required signals present");
-}
+// validateRequiredSignals() is inherited from PowerControl base class.
+// VR signals are added via addRequiredSignal() in constructor.
 
 void VRPowerControl::validateTimerConfigs()
 {

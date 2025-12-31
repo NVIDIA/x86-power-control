@@ -56,7 +56,6 @@ class NVL144PowerControl : public VRPowerControl
      *
      * @throws std::runtime_error if any required signal is missing from config
      */
-    void validateRequiredSignals() override;
 
     /**
      * @brief Validate that all required timer configurations for NVL144
@@ -257,12 +256,6 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Required NVL144 PDB signals (always required for NVL144 platform)
      */
-    const std::vector<std::string> requiredSignals = {
-        "NVL144PDBMainPowerOk", "NVL144PDBMainPowerEnable", "E1SPowerEnable",
-        "BMCSSDReset",
-        // TODO: Add E1S, BMC SSD signals when implemented
-    };
-
     /**
      * @brief List of required NVL144 platform-specific timer configurations
      */
