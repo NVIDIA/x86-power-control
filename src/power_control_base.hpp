@@ -738,6 +738,14 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::connection> conn;
 
     /**
+     * @brief Object server for managing D-Bus objects
+     * 
+     * Must persist for the lifetime of the daemon to keep ObjectManager
+     * and all D-Bus interfaces alive.
+     */
+    sdbusplus::asio::object_server objServer;
+
+    /**
      * @brief Node identifier
      */
     std::string nodeId;
@@ -885,6 +893,20 @@ class PowerControl
      * @param io The io_context for initializing stream descriptors
      */
     void loadConfigValues();
+
+    /**
+     * @brief Initialize ObjectManager D-Bus interface
+     *
+     * Creates the org.freedesktop.DBus.ObjectManager interface on the parent
+     * path (/xyz/openbmc_project/state). This MUST be called BEFORE claiming
+     * service names to ensure the Mapper daemon can track all child objects.
+     *
+     * Uses sdbusplus::asio::object_server::add_manager() which automatically
+     * provides GetManagedObjects() method and emits InterfacesAdded/Removed
+     * signals when child interfaces are initialized, allowing the Mapper to
+     * update its cache in real-time.
+     */
+    void initializeObjectManager();
 
     /**
      * @brief Initialize Host D-Bus interface

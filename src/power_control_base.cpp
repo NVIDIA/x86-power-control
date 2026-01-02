@@ -128,7 +128,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& node, PersistentState& appState,
                            const std::string& configFilePath) :
-    ioContext(ioContext), conn(conn), nodeId(node), appState(appState),
+    ioContext(ioContext), conn(conn), objServer(conn), nodeId(node), appState(appState),
     appName("power-control"), 
     configFilePath(configFilePath.empty()
                        ? "/usr/share/x86-power-control/power-config-host" + node + ".json"
@@ -160,6 +160,11 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     gpioHandlerMap["ResetButton"] = [this](bool state) {
         this->resetButtonHandler(state);
     };
+
+    // Initialize ObjectManager BEFORE claiming service names
+    // Ensuring the Mapper daemon can track all child objects via
+    // InterfacesAdded signals
+    initializeObjectManager();
 
     // Request all the dbus names
     conn->request_name(hostDbusName.c_str());
@@ -918,6 +923,27 @@ void PowerControl::savePowerState(const PowerState state)
     });
 }
 
+void PowerControl::initializeObjectManager()
+{
+    // Create ObjectManager on the parent path /xyz/openbmc_project/state
+    // MUST be done BEFORE claiming service names to ensure proper
+    // Mapper synchronization
+    //
+    // When ObjectManager is present on a parent path, sdbusplus automatically
+    // emits InterfacesAdded signals when child interfaces (like
+    // /xyz/openbmc_project/state/host0) are initialized. The Mapper daemon
+    // subscribes to these signals and updates its cache in real-time.
+    //
+    // Without ObjectManager, "mapper wait" will hang even though the
+    // interface exists.
+    
+    // Use the member objServer (which persists for daemon lifetime)
+    // to ensure ObjectManager stays alive
+    objServer.add_manager("/xyz/openbmc_project/state");
+    
+    lg2::info("ObjectManager interface created on /xyz/openbmc_project/state");
+}
+
 void PowerControl::initializeHostInterface()
 {
     // Note: Button masking (powerButtonMask, resetButtonMask) and restart cause
@@ -925,11 +951,8 @@ void PowerControl::initializeHostInterface()
     // checks are commented out.
 
     // Create Host Interface
-    sdbusplus::asio::object_server hostServer =
-        sdbusplus::asio::object_server(conn);
-
     hostIface =
-        hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
+        objServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                  "xyz.openbmc_project.State.Host");
 
     // Interface for IPMI/Redfish initiated host state transitions
@@ -1052,10 +1075,7 @@ void PowerControl::initializeHostInterface()
 void PowerControl::initializeChassisInterface()
 {
     // Create Chassis Interface
-    sdbusplus::asio::object_server chassisServer =
-        sdbusplus::asio::object_server(conn);
-
-    chassisIface = chassisServer.add_interface(
+    chassisIface = objServer.add_interface(
         "/xyz/openbmc_project/state/chassis" + nodeId,
         "xyz.openbmc_project.State.Chassis");
 
@@ -1143,10 +1163,7 @@ void PowerControl::initializeChassisInterface()
 void PowerControl::initializeChassisSystemInterface()
 {
     // Chassis System Interface
-    sdbusplus::asio::object_server chassisSysServer =
-        sdbusplus::asio::object_server(conn);
-
-    chassisSysIface = chassisSysServer.add_interface(
+    chassisSysIface = objServer.add_interface(
         "/xyz/openbmc_project/state/chassis_system0",
         "xyz.openbmc_project.State.Chassis");
 
@@ -1188,11 +1205,8 @@ void PowerControl::initializeBootProgressInterface()
     // Boot Progress Interface
     // This interface allows external entities (IPMI, PLDM, etc.) to update boot
     // progress
-    sdbusplus::asio::object_server hostServer =
-        sdbusplus::asio::object_server(conn);
-
     bootProgressIface =
-        hostServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
+        objServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                  "xyz.openbmc_project.State.Boot.Progress");
 
     // BootProgress property - indicates the current boot stage
@@ -1244,15 +1258,12 @@ void PowerControl::initializeBootProgressInterface()
 void PowerControl::initializeButtonInterfaces()
 {
     // Buttons Service
-    sdbusplus::asio::object_server buttonsServer =
-        sdbusplus::asio::object_server(conn);
-
     // Power Button Interface
     auto powerButtonConfig = powerSignalMap.find("PowerButton");
     if (powerButtonConfig != powerSignalMap.end() &&
         !powerButtonConfig->second->lineName.empty())
     {
-        powerButtonIface = buttonsServer.add_interface(
+        powerButtonIface = objServer.add_interface(
             "/xyz/openbmc_project/chassis/buttons/power",
             "xyz.openbmc_project.Chassis.Buttons");
 
@@ -1311,7 +1322,7 @@ void PowerControl::initializeButtonInterfaces()
     if (resetButtonConfig != powerSignalMap.end() &&
         !resetButtonConfig->second->lineName.empty())
     {
-        resetButtonIface = buttonsServer.add_interface(
+        resetButtonIface = objServer.add_interface(
             "/xyz/openbmc_project/chassis/buttons/reset",
             "xyz.openbmc_project.Chassis.Buttons");
 
@@ -1370,7 +1381,7 @@ void PowerControl::initializeButtonInterfaces()
     if (nmiButtonConfig != powerSignalMap.end() &&
         nmiButtonConfig->second->gpioLine)
     {
-        nmiButtonIface = buttonsServer.add_interface(
+        nmiButtonIface = objServer.add_interface(
             "/xyz/openbmc_project/chassis/buttons/nmi",
             "xyz.openbmc_project.Chassis.Buttons");
 
@@ -1414,10 +1425,7 @@ void PowerControl::initializeButtonInterfaces()
     auto nmiOutConfig = powerSignalMap.find("NMIOut");
     if (nmiOutConfig != powerSignalMap.end() && nmiOutConfig->second->gpioLine)
     {
-        sdbusplus::asio::object_server nmiOutServer =
-            sdbusplus::asio::object_server(conn);
-
-        nmiOutIface = nmiOutServer.add_interface(
+        nmiOutIface = objServer.add_interface(
             "/xyz/openbmc_project/control/host" + nodeId + "/nmi",
             "xyz.openbmc_project.Control.Host.NMI");
 
@@ -1432,7 +1440,7 @@ void PowerControl::initializeButtonInterfaces()
     if (idButtonConfig != powerSignalMap.end() &&
         idButtonConfig->second->gpioLine)
     {
-        idButtonIface = buttonsServer.add_interface(
+        idButtonIface = objServer.add_interface(
             "/xyz/openbmc_project/chassis/buttons/id",
             "xyz.openbmc_project.Chassis.Buttons");
 
@@ -1452,12 +1460,8 @@ void PowerControl::initializeButtonInterfaces()
 
 void PowerControl::initializeOSInterface()
 {
-    // OS State Service
-    sdbusplus::asio::object_server osServer =
-        sdbusplus::asio::object_server(conn);
-
     // OS State Interface
-    osIface = osServer.add_interface(
+    osIface = objServer.add_interface(
         "/xyz/openbmc_project/state/host" + nodeId,
         "xyz.openbmc_project.State.OperatingSystem.Status");
 
@@ -1474,12 +1478,8 @@ void PowerControl::initializeOSInterface()
 
 void PowerControl::initializeRestartCauseInterface()
 {
-    // Restart Cause Service
-    sdbusplus::asio::object_server restartCauseServer =
-        sdbusplus::asio::object_server(conn);
-
     // Restart Cause Interface
-    restartCauseIface = restartCauseServer.add_interface(
+    restartCauseIface = objServer.add_interface(
         "/xyz/openbmc_project/control/host" + nodeId + "/restart_cause",
         "xyz.openbmc_project.Control.Host.RestartCause");
 
@@ -1517,12 +1517,8 @@ void PowerControl::initializeRestartCauseInterface()
 
 void PowerControl::registerGpioStateInterface()
 {
-    // GPIO State Service
-    sdbusplus::asio::object_server gpioStateServer =
-        sdbusplus::asio::object_server(conn);
-
     // GPIO State Interface
-    gpioStateIface = gpioStateServer.add_interface(
+    gpioStateIface = objServer.add_interface(
         "/xyz/openbmc_project/state/host" + nodeId,
         "xyz.openbmc_project.State.Gpio");
 
