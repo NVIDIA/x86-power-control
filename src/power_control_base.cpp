@@ -166,14 +166,6 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // InterfacesAdded signals
     initializeObjectManager();
 
-    // Request all the dbus names
-    conn->request_name(hostDbusName.c_str());
-    conn->request_name(chassisDbusName.c_str());
-    conn->request_name(osDbusName.c_str());
-    conn->request_name(buttonDbusName.c_str());
-    conn->request_name(nmiDbusName.c_str());
-    conn->request_name(rstCauseDbusName.c_str());
-
     // Initialize D-Bus interfaces
     initializeHostInterface();
     initializeChassisInterface();
