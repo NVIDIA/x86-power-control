@@ -59,3 +59,15 @@ option(
     value: '/sys/bus/i2c/drivers/pca953x/7-0020',
     description: 'Board 1 IOX PCA953x driver bound path',
 )
+option(
+    'obmc-standby-target',
+    type: 'string',
+    value: 'multi-user.target',
+    description: 'The default obmc standby target.',
+)
+option(
+    'enable-bmc-poweroff',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable BMC PowerOff transition (requires custom phosphor-dbus-interfaces with PowerOff enum)',
+)

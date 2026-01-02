@@ -35,6 +35,9 @@ endif
 if get_option('button-passthrough').allowed()
     cpp_args += '-DUSE_BUTTON_PASSTHROUGH'
 endif
+if get_option('enable-bmc-poweroff').allowed()
+    cpp_args += '-DENABLE_BMC_POWEROFF'
+endif
 
 # Configure IOX paths
 conf_data = configuration_data()
@@ -59,18 +62,36 @@ conf_data.set_quoted(
     get_option('board1-iox-path'),
 )
 
+conf_data.set_quoted(
+    'OBMC_STANDBY_TARGET',
+    get_option('obmc-standby-target'),
+)
+conf_data.set_quoted('CHASSIS_LOST_POWER_FILE', '/run/openbmc/chassis@{}-lost-power')
+
+
 configure_file(
     output: 'config.h',
     configuration: conf_data,
 )
 
+# Include directory for generated config.h (available to subdirectories)
+root_build_inc = include_directories('.')
+
+libgpiodcxx = dependency('libgpiodcxx', default_options: ['bindings=cxx'])
+libsystemd = dependency('libsystemd')
+nlohmann_json_dep = dependency('nlohmann_json', include_type: 'system')
+phosphordbusinterfaces = dependency('phosphor-dbus-interfaces')
+phosphorlogging = dependency('phosphor-logging')
+sdbusplus = dependency('sdbusplus')
+sdeventplus = dependency('sdeventplus')
+boost = dependency('boost')
 deps = [
-    dependency('libgpiodcxx', default_options: ['bindings=cxx']),
-    dependency('libsystemd'),
-    dependency('sdbusplus'),
-    dependency('phosphor-logging'),
-    dependency('nlohmann_json', include_type: 'system'),
-    dependency('boost'),
+   libgpiodcxx,
+    libsystemd,
+    sdbusplus,
+    phosphorlogging,
+    nlohmann_json_dep,
+    boost,
 ]
 
 executable(
@@ -100,3 +121,5 @@ install_data(
     'config/power-config-host0.json',
     install_dir: '/usr/share/x86-power-control/',
 )
+
+subdir('src/bmc')
