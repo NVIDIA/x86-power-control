@@ -8,7 +8,7 @@ executable(
     'utils.cpp',
     cpp_args: cpp_args,
     dependencies: [
-        libgpiodcxx,
+        libgpiod,
         phosphordbusinterfaces,
         phosphorlogging,
         sdbusplus,

@@ -77,6 +77,7 @@ configure_file(
 # Include directory for generated config.h (available to subdirectories)
 root_build_inc = include_directories('.')
 
+libgpiod = dependency('libgpiod')
 libgpiodcxx = dependency('libgpiodcxx', default_options: ['bindings=cxx'])
 libsystemd = dependency('libsystemd')
 nlohmann_json_dep = dependency('nlohmann_json', include_type: 'system')
