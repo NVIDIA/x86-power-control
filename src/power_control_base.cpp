@@ -166,6 +166,9 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // InterfacesAdded signals
     initializeObjectManager();
 
+    // DON'T claim bus names yet! Must wait until all interfaces are initialized.
+    // Names will be claimed by derived class after all initialization is complete.
+    
     // Initialize D-Bus interfaces
     initializeHostInterface();
     initializeChassisInterface();
@@ -934,6 +937,32 @@ void PowerControl::initializeObjectManager()
     objServer.add_manager("/xyz/openbmc_project/state");
     
     lg2::info("ObjectManager interface created on /xyz/openbmc_project/state");
+}
+
+void PowerControl::requestBusNames()
+{
+    lg2::info("Claiming D-Bus service names...");
+    
+    // Claim primary names
+    conn->request_name(hostDbusName.c_str());
+    conn->request_name(chassisDbusName.c_str());
+    conn->request_name(osDbusName.c_str());
+    conn->request_name(nmiDbusName.c_str());
+    conn->request_name(rstCauseDbusName.c_str());
+    
+    // Only claim buttons name if we created button interfaces
+    // (avoid conflict with separate buttons daemon)
+    if (powerButtonIface || resetButtonIface || nmiButtonIface || idButtonIface)
+    {
+        lg2::info("Claiming Buttons service name (button interfaces present)");
+        conn->request_name(buttonDbusName.c_str());
+    }
+    else
+    {
+        lg2::info("Skipping Buttons service name (no button interfaces)");
+    }
+    
+    lg2::info("D-Bus service names claimed successfully");
 }
 
 void PowerControl::initializeHostInterface()

@@ -300,15 +300,7 @@ class PowerControl
      * This should be called after all initialization is complete,
      * so clients don't discover the service before it's ready.
      */
-    void requestBusNames()
-    {
-        conn->request_name(hostDbusName.c_str());
-        conn->request_name(chassisDbusName.c_str());
-        conn->request_name(osDbusName.c_str());
-        conn->request_name(buttonDbusName.c_str());
-        conn->request_name(nmiDbusName.c_str());
-        conn->request_name(rstCauseDbusName.c_str());
-    }
+    void requestBusNames();
 
     std::string hostDbusName = "xyz.openbmc_project.State.Host";
     std::string chassisDbusName = "xyz.openbmc_project.State.Chassis";

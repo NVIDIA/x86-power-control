@@ -235,6 +235,7 @@ int main(int argc, char* argv[])
     
     NVL144PowerControl powerControl(io, conn, "/usr/share/x86-power-control/power-config-host0.json",
                                     node, appState);
+    
     PowerRestoreController powerRestore(io, conn, node, powerControl, appState);
 
 #ifdef USE_PLT_RST
