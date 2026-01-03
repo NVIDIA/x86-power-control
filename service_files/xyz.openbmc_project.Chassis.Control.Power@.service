@@ -17,7 +17,7 @@ Wants=mapper-wait@-xyz-openbmc_project-object_mapper.service
 [Service]
 Restart=always
 RestartSec=3
-ExecStart=/usr/bin/power-control %i
+ExecStart=/usr/bin/x86-power-control %i
 Type=dbus
 BusName=xyz.openbmc_project.State.Host
 

@@ -1,5 +1,5 @@
 project(
-    'power-control',
+    'x86-power-control',
     'cpp',
     default_options: ['warning_level=3', 'cpp_std=c++23'],
     license: 'Apache-2.0',
@@ -96,7 +96,7 @@ deps = [
 ]
 
 executable(
-    'power-control',
+    'x86-power-control',
     'src/power_control.cpp',
     'src/power_control_base.cpp',
     'src/vr_power_control.cpp',
