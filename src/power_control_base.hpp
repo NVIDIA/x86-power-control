@@ -995,18 +995,28 @@ class PowerControl
      *
      * Creates xyz.openbmc_project.State.Gpio interface and registers
      * common GPIO methods/properties (CPU Boot Done). Does NOT call
-     * initialize() - derived classes can add additional GPIO methods/
-     * properties before calling initializeGpioStateInterface().
+     * initialize() - derived classes can add additional GPIO properties
+     * before calling initializeHostStateInterface().
      */
     void registerGpioStateInterface();
 
     /**
-     * @brief Initialize GPIO State D-Bus interface
+     * @brief Initialize ALL D-Bus interfaces on host0 path (call from derived class)
      *
-     * Calls initialize() on gpioStateIface to make it visible on D-Bus.
-     * Should be called after all GPIO methods/properties have been registered.
+     * Initializes all interfaces on /xyz/openbmc_project/state/host0:
+     * - xyz.openbmc_project.State.Gpio
+     * - xyz.openbmc_project.State.Boot.Progress
+     * - xyz.openbmc_project.State.OperatingSystem.Status
+     * - xyz.openbmc_project.State.Host
+     *
+     * This should be called from the most-derived class constructor AFTER
+     * all interface properties have been registered (including platform-specific
+     * GPIO properties like Board1CpuShutdownOk).
+     *
+     * By initializing all interfaces at once, "mapper wait /xyz/openbmc_project/state/host0"
+     * will only return when ALL interfaces are ready.
      */
-    void initializeGpioStateInterface();
+    void initializeHostStateInterface();
 
     /**
      * @brief Request GPIO events for a signal

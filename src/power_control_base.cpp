@@ -189,9 +189,9 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
         {"Board0CpuShutdownOk", [](PowerControl* pc, int val) { pc->setBoard0CpuShutdownOkState(val); }}
     };
     
-    // Note: initializeGpioStateInterface() is called by derived classes
-    // (e.g., VRPowerControl) after they register any additional GPIO
-    // methods/properties
+    // Note: initializeHostStateInterface() is called by derived classes
+    // (e.g., NVL144PowerControl) after they register any additional GPIO
+    // properties. It initializes ALL host0 interfaces at once.
 }
 
 std::function<void(Event)> PowerControl::getPowerStateHandler()
@@ -1088,9 +1088,13 @@ void PowerControl::initializeHostInterface()
     hostIface->register_property("CurrentHostState",
                                  std::string(getHostState()));
 
-    hostIface->initialize();
+    // NOTE: Do NOT call hostIface->initialize() here!
+    // The Host interface should be initialized LAST (after all other interfaces
+    // including Gpio) so that when the path /xyz/openbmc_project/state/host0
+    // becomes visible, ALL interfaces are ready.
+    // Call initializeHostStateInterface() from the most-derived class constructor.
 
-    lg2::info("Created the host interface successfully");
+    lg2::info("Host interface registered (not yet initialized)");
 }
 
 void PowerControl::initializeChassisInterface()
@@ -1271,9 +1275,8 @@ void PowerControl::initializeBootProgressInterface()
             return 1;
         });
 
-    bootProgressIface->initialize();
-
-    lg2::info("Created the Boot.Progress interface successfully");
+    // NOTE: Do NOT call initialize() here - deferred to initializeHostStateInterface()
+    lg2::info("Boot.Progress interface registered (not yet initialized)");
 }
 
 void PowerControl::initializeButtonInterfaces()
@@ -1492,9 +1495,8 @@ void PowerControl::initializeOSInterface()
         std::string(
             "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive"));
 
-    osIface->initialize();
-
-    lg2::info("Created the OS state interface successfully");
+    // NOTE: Do NOT call initialize() here - deferred to initializeHostStateInterface()
+    lg2::info("OS state interface registered (not yet initialized)");
 }
 
 void PowerControl::initializeRestartCauseInterface()
@@ -1591,17 +1593,41 @@ void PowerControl::registerGpioStateInterface()
         [this](const auto&) { return board0CpuShutdownOkState; });
 
     // Note: Does NOT call initialize() - derived classes may register
-    // additional GPIO methods/properties before calling
-    // initializeGpioStateInterface()
+    // additional GPIO properties before calling initializeHostStateInterface()
+    // which initializes ALL host0 interfaces at once.
 }
 
-void PowerControl::initializeGpioStateInterface()
+void PowerControl::initializeHostStateInterface()
 {
-    // Initialize the D-Bus interface (makes it visible on D-Bus)
+    // Initialize ALL interfaces on /xyz/openbmc_project/state/host0 at once
+    // This ensures that when the path becomes visible to ObjectMapper,
+    // ALL interfaces are ready. This allows "mapper wait /path" to work
+    // reliably for dependent services.
+    
+    // Initialize in order: Gpio first (since it was registered last in base),
+    // then the rest, with Host last (as it's the primary interface)
     if (gpioStateIface)
-    {    
+    {
         gpioStateIface->initialize();
-        lg2::info("GPIO state interface initialized successfully");
+        lg2::info("GPIO state interface initialized");
+    }
+    
+    if (bootProgressIface)
+    {
+        bootProgressIface->initialize();
+        lg2::info("Boot.Progress interface initialized");
+    }
+    
+    if (osIface)
+    {
+        osIface->initialize();
+        lg2::info("OS state interface initialized");
+    }
+    
+    if (hostIface)
+    {
+        hostIface->initialize();
+        lg2::info("Host state interface initialized - all host0 interfaces now ready");
     }
 }
 

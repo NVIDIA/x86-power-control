@@ -54,7 +54,10 @@ ParsecPowerControl::ParsecPowerControl(
         this->gb300pdbMainPowerOkHandler(state);
     };
 
-    initializeGpioStateInterface();
+    // Initialize ALL host0 interfaces at once - this makes the path visible to ObjectMapper
+    // After this, mapper wait /xyz/openbmc_project/state/host0 will return
+    // and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be ready
+    initializeHostStateInterface();
     
     // Register all GPIO handlers (from base, VR, and Parsec)
     registerGPIOHandlers();

@@ -61,7 +61,11 @@ NVL144PowerControl::NVL144PowerControl(
         this->nvl144pdbMainPowerOkHandler(state);
     };
 
-    initializeGpioStateInterface();
+    // Initialize ALL host0 interfaces at once - this makes the path visible to ObjectMapper
+    // After this, mapper wait /xyz/openbmc_project/state/host0 will return
+    // and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be ready
+    initializeHostStateInterface();
+    
     // Register all GPIO handlers (from base, VR, and NVL144)
     registerGPIOHandlers();
 }
@@ -75,9 +79,6 @@ void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
         throw std::runtime_error(
             "NVL144PDBMainPowerOk signal not found in powerSignalMap");
     }
-
-    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}",
-              "VALUE", state);
 
     auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
@@ -332,8 +333,7 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
         case Event::powerButtonPressed:
             break;
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
@@ -458,8 +458,7 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
         case Event::resetRequest:
             break;
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
@@ -579,8 +578,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
             break;
 
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
@@ -678,8 +676,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
             break;
 
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
@@ -778,8 +775,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             break;
 
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
@@ -867,8 +863,7 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
             break;
 
         default:
-            lg2::info("No action taken for event: {EVENT}", "EVENT", 
-                      getEventName(event));
+            lg2::info("No action taken.");
             break;
     }
 }
