@@ -248,10 +248,10 @@ int main(int argc, char* argv[])
         });
 #endif
 
-    if (powerControl.getPowerStateName() != "On")
-    {
-        powerRestore.run();
-    }
+    // Always run power restore policy regardless of initial state
+    // The policy controller will determine the appropriate action based on
+    // the configured policy and saved power state
+    powerRestore.run();
 
     // NMI source property monitor is initialized by the powerControl object
     // if NMIOut is configured in powerSignalMap

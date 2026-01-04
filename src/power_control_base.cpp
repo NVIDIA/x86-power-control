@@ -139,7 +139,9 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     warmResetCheckTimer(ioContext), powerOKWatchdogTimer(ioContext),
     sioPowerGoodWatchdogTimer(ioContext), powerStateSaveTimer(ioContext),
     pohCounterTimer(ioContext), restartCauseTimer(ioContext),
-    slotPowerCycleTimer(ioContext)
+    slotPowerCycleTimer(ioContext),
+    // Initialize powerState to off - power restore policy will determine if it should be on
+    powerState(PowerState::off)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
