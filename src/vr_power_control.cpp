@@ -108,6 +108,47 @@ bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
     return std::filesystem::exists(ioxPath);
 }
 
+// board0RunPowerPGHandler Helper Function
+bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
+{
+    // Power fault detection: Check for unexpected de-assertion
+    if (powerControlEvent == Event::board0RunPowerPGDeAssert)
+    {
+        if (powerState != PowerState::waitForHPMPowerGoodDeAssert)
+        {
+            // POWER FAULT: Run Power Good de-asserted unexpectedly
+            lg2::error(
+                "POWER FAULT DETECTED: Board0RunPowerPG de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+            
+            // Set GPIOs for host state OFF
+            setGPIOsForHostStateOff();
+            
+            // Force transition to off state
+            setPowerState(PowerState::off);
+            
+            // Return true to indicate fault was handled
+            return true;
+        }
+        // else: Expected de-assertion in waitForHPMPowerGoodDeAssert state
+    }
+    else if (powerControlEvent == Event::board0RunPowerPGAssert)
+    {
+        if (powerState != PowerState::waitForHPMPowerGoodAssert)
+        {
+            // Unexpected assertion (not critical, but worth logging)
+            lg2::info(
+                "Board0RunPowerPG asserted unexpectedly while in power state {STATE}. Continuing with normal event processing.",
+                "STATE", getPowerStateName());
+        }
+        // else: Expected assertion in waitForHPMPowerGoodAssert state
+    }
+    
+    // Return false to indicate normal processing should continue
+    return false;
+}
+
 // =============================================================================
 // GPIO EVENT HANDLERS (Member functions)
 // =============================================================================
@@ -131,6 +172,14 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
                                   : Event::board0RunPowerPGDeAssert;
+    
+    // Check for power faults and handle if detected
+    if (checkAndHandleRunPowerFault(powerControlEvent))
+    {
+        return; // Fault was handled, exit early
+    }
+    
+    // Normal event processing for expected state transitions
     this->sendPowerControlEvent(powerControlEvent);
 }
 

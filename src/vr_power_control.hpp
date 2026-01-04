@@ -506,6 +506,23 @@ class VRPowerControl : public PowerControl
      * @param event The event to process
      */
     virtual void handleWaitForPowerCycleDelay(Event event);
+
+    // GPIO EVENT HANDLER HELPER FUNCTIONS
+
+    /**
+     * @brief Check for and handle run power faults
+     *
+     * Detects when Board0RunPowerPG de-asserts or asserts unexpectedly (i.e., outside
+     * of a controlled power action). When a fault is detected:
+     * - Logs an error message
+     * - Sets GPIOs to OFF state
+     * - Forces transition to PowerState::off
+     *
+     * @param powerControlEvent The event to check (assert or de-assert)
+     * @return true if a fault was detected and handled (caller should return)
+     * @return false if normal processing should continue
+     */
+    bool checkAndHandleRunPowerFault(Event powerControlEvent);
 };
 
 } // namespace power_control
