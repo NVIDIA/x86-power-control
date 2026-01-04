@@ -993,7 +993,10 @@ void PowerControl::initializeHostInterface()
                 {
                     addRestartCause(RestartCause::command);
                     lg2::info("Host transition to Off requested");
-                    sendPowerControlEvent(Event::gracefulPowerOffRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::gracefulPowerOffRequest);
+                    });
                 }
                 else
                 {
@@ -1001,9 +1004,6 @@ void PowerControl::initializeHostInterface()
                     throw std::invalid_argument("Transition Request Masked");
                     return 0;
                 }
-
-                addRestartCause(RestartCause::command);
-                sendPowerControlEvent(Event::gracefulPowerOffRequest);
             }
             else if (requested ==
                      "xyz.openbmc_project.State.Host.Transition.On")
@@ -1013,7 +1013,10 @@ void PowerControl::initializeHostInterface()
                 {
                     lg2::info("Host transition to On requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::powerOnRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::powerOnRequest);
+                    });
                 }
                 else
                 {
@@ -1030,7 +1033,10 @@ void PowerControl::initializeHostInterface()
                 {
                     lg2::info("Host transition to Reboot requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::powerCycleRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::powerCycleRequest);
+                    });
                 }
                 else
                 {
@@ -1048,7 +1054,10 @@ void PowerControl::initializeHostInterface()
                 {
                     addRestartCause(RestartCause::command);
                     lg2::info("Host transition to GracefulWarmReboot requested");
-                    sendPowerControlEvent(Event::gracefulPowerCycleRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::gracefulPowerCycleRequest);
+                    });
                 }
                 else
                 {
@@ -1066,7 +1075,10 @@ void PowerControl::initializeHostInterface()
                 {
                     lg2::info("Host transition to ForceWarmReboot requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::resetRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::resetRequest);
+                    });
                 }
                 else
                 {
@@ -1120,8 +1132,10 @@ void PowerControl::initializeChassisInterface()
                 {
                     lg2::info("Chassis transition to Off requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::powerOffRequest);
-                    
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::powerOffRequest);
+                    });
                 }
                 else
                 {
@@ -1138,8 +1152,10 @@ void PowerControl::initializeChassisInterface()
                 {
                     lg2::info("Chassis transition to On requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::powerOnRequest);
-
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::powerOnRequest);
+                    });
                 }
                 else
                 {
@@ -1156,7 +1172,10 @@ void PowerControl::initializeChassisInterface()
                 {
                     lg2::info("Chassis transition to PowerCycle requested");
                     addRestartCause(RestartCause::command);
-                    sendPowerControlEvent(Event::powerCycleRequest);
+                    // Defer event processing to avoid D-Bus reentrancy
+                    boost::asio::post(ioContext, [this]() {
+                        sendPowerControlEvent(Event::powerCycleRequest);
+                    });
                 }
                 else
                 {
