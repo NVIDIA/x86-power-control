@@ -145,6 +145,16 @@ class NVL144PowerControl : public VRPowerControl
     void handleShutdownRequest(Event event);
 
     /**
+     * @brief Handle host-initiated shutdown from PowerState::on
+     *
+     * Validates CPU Boot Done state to ensure this is a legitimate host shutdown
+     * request (not hardware strapping). If valid, asserts Pre System Reset lines
+     * for both boards and transitions to waitForCPUResetAssert to leverage the
+     * common shutdown FSM.
+     */
+    void handleHostInitiatedShutdown();
+
+    /**
      * @brief Check if system power is already off
      *
      * @return true if both Board0RunPowerPG and NVL144PDBMainPowerOk are de-asserted

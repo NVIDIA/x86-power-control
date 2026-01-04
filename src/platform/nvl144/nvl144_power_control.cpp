@@ -127,6 +127,35 @@ void NVL144PowerControl::addBoard1GpioStateProperties()
     };
 }
 
+// Helper function: Handle host-initiated shutdown
+void NVL144PowerControl::handleHostInitiatedShutdown()
+{
+    // Check CPU Boot Done state to validate this is a legitimate host shutdown
+    int bootDoneState = getCPUBootDoneState();
+
+    if (bootDoneState == -1 || bootDoneState == 0)
+    {
+        lg2::warning(
+            "Host-initiated shutdown (CPU Shutdown OK assertion) received, but CPU Boot Done is not asserted (state={STATE}). Host-initiated shutdown cannot be performed.",
+            "STATE", bootDoneState);
+        return; // No-op, stay in current power state
+    }
+
+    // CPU Boot Done is asserted (bootDoneState == 1), proceed with host-initiated shutdown
+    lg2::info(
+        "Valid host-initiated shutdown request received from host. CPU Boot Done is asserted. Asserting Pre System Reset lines. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
+
+    action = PowerAction::HOST_INITIATED_SHUTDOWN;
+
+    // Assert Pre System Reset for both boards
+    assertBoardPreSystemResets();
+
+    // Start CPU reset watchdog and transition to wait for CPU reset assertion
+    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
 // ============================================================================
 // HELPER FUNCTIONS for handlePowerStateOn
 // ============================================================================
@@ -302,15 +331,12 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
     // TODO: Move NVL144-specific powerStateOn() implementation here
     switch (event)
     {
-        // case Event::board0ShutdownOkAsserted
-        // case Event::board1ShutdownOkAsserted:
-            // call method for 
-            // log host initiated shutdown request received
-            // assert pre system reset
-            // de-assert run power enables, USB Power Enable, E1S Power Enable, BMC SSD Reset
-            // 
-            // check CPU Boot Done assertion (only accept when OS is booted).
-            // host initiated shutdown request
+        case Event::board0CpuShutdownOkAssert:
+        case Event::board1CpuShutdownOkAssert:
+            // Host-initiated shutdown: CPU has asserted SHDN_OK
+            handleHostInitiatedShutdown();
+            break;
+
         case Event::powerOffRequest:
         case Event::gracefulPowerOffRequest:
             handleShutdownRequest(event);
@@ -633,6 +659,12 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         case PowerAction::GRACE_OFF:
             lg2::info(
                 "NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::HOST_INITIATED_SHUTDOWN:
+            lg2::info(
+                "NVL144 PDB Main Power OK De-Asserted. Host-Initiated Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
