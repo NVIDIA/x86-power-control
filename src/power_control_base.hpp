@@ -1550,6 +1550,28 @@ class PowerControl
      */
     void setInitialValue(std::shared_ptr<ConfigData> configData,
                          bool initialValue);
+
+    /**
+     * @brief Initialize power state based on hardware GPIO indicators
+     *
+     * Reads the specified GPIO signals and sets the initial power state
+     * based on their current values. Sets output GPIOs to match the detected
+     * state. Should be called after registerGPIOHandlers() but before power
+     * restore runs.
+     *
+     * This allows platforms to determine the actual hardware power state on
+     * boot rather than assuming a default state. Useful for warm boots, BMC
+     * reboots during host operation, or recovering from external power
+     * changes.
+     *
+     * @param powerIndicatorSignals List of GPIO signal names to check for
+     * power state
+     * @param requireAllAsserted If true, ALL signals must be asserted for ON
+     * state If false, ANY signal asserted means ON state (default: true)
+     */
+    void initializePowerStateFromHardware(
+        const std::vector<std::string>& powerIndicatorSignals,
+        bool requireAllAsserted = true);
 };
 
 } // namespace power_control

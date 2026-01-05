@@ -139,9 +139,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     warmResetCheckTimer(ioContext), powerOKWatchdogTimer(ioContext),
     sioPowerGoodWatchdogTimer(ioContext), powerStateSaveTimer(ioContext),
     pohCounterTimer(ioContext), restartCauseTimer(ioContext),
-    slotPowerCycleTimer(ioContext),
-    // Initialize powerState to off - power restore policy will determine if it should be on
-    powerState(PowerState::off)
+    slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
@@ -3246,6 +3244,90 @@ void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData,
         lg2::info("Unknown signal name {NAME} for setInitialValue", "NAME",
                   configData->name);
     }
+}
+
+void PowerControl::initializePowerStateFromHardware(
+    const std::vector<std::string>& powerIndicatorSignals,
+    bool requireAllAsserted)
+{
+    if (powerIndicatorSignals.empty())
+    {
+        lg2::error(
+            "initializePowerStateFromHardware called with empty signal list");
+        return;
+    }
+
+    std::vector<bool> signalStates;
+
+    // Read all power indicator signals
+    for (const auto& signalName : powerIndicatorSignals)
+    {
+        auto it = powerSignalMap.find(signalName);
+        if (it == powerSignalMap.end())
+        {
+            lg2::error(
+                "Power indicator signal '{SIGNAL}' not found in powerSignalMap",
+                "SIGNAL", signalName);
+            throw std::runtime_error("Required power indicator not found: " +
+                                     signalName);
+        }
+
+        // Verify GPIO line is available
+        if (!it->second->gpioLine)
+        {
+            lg2::error(
+                "Power indicator signal '{SIGNAL}' GPIO line not initialized",
+                "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Power indicator GPIO not initialized: " + signalName);
+        }
+
+        // Read current GPIO value
+        int gpioValue = it->second->gpioLine.get_value();
+        // Consider polarity: signal is asserted when GPIO value matches polarity
+        bool isAsserted = (gpioValue == it->second->polarity);
+        signalStates.push_back(isAsserted);
+
+        lg2::info("Power indicator '{SIGNAL}' is {STATE}", "SIGNAL", signalName,
+                  "STATE", (isAsserted ? "asserted" : "de-asserted"));
+    }
+
+    // Determine power state based on signal states
+    bool hostIsOn;
+    if (requireAllAsserted)
+    {
+        // ALL signals must be asserted for host to be considered ON
+        hostIsOn = std::all_of(signalStates.begin(), signalStates.end(),
+                               [](bool state) { return state; });
+    }
+    else
+    {
+        // ANY signal asserted means host is ON
+        hostIsOn = std::any_of(signalStates.begin(), signalStates.end(),
+                               [](bool state) { return state; });
+    }
+
+    // Set power state based on hardware
+    if (hostIsOn)
+    {
+        lg2::info(
+            "Hardware indicates host is ON, initializing to PowerState::on");
+        powerState = PowerState::on;
+        setGPIOsForHostStateOn();
+    }
+    else
+    {
+        lg2::info(
+            "Hardware indicates host is OFF, initializing to PowerState::off");
+        powerState = PowerState::off;
+        setGPIOsForHostStateOff();
+    }
+
+    // Update D-Bus interfaces to reflect actual hardware state
+    hostIface->set_property("CurrentHostState", std::string(getHostState()));
+    chassisIface->set_property("CurrentPowerState",
+                               std::string(getChassisState()));
+    chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 }
 
 void PowerControl::setGPIOsForHostStateOn()

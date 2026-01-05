@@ -531,6 +531,10 @@ class PowerRestoreController
             else
             {
                 lg2::info("No power drop, restoring Host Off state");
+                powerControl.sendPowerControlEvent(
+                    PowerControl::Event::powerOffRequest);
+                powerControl.setRestartCauseProperty(
+                    getRestartCause(RestartCause::powerPolicyRestore));
             }
         }
         // We're done with the previous power state for the restore policy, so

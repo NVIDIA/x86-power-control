@@ -68,6 +68,10 @@ NVL144PowerControl::NVL144PowerControl(
     
     // Register all GPIO handlers (from base, VR, and NVL144)
     registerGPIOHandlers();
+    
+    // Initialize power state from actual hardware before power restore runs
+    // For NVL144: Host is ON only if BOTH Board0RunPowerPG AND NVL144PDBMainPowerOk are asserted
+    initializePowerStateFromHardware(powerIndicators, true);
 }
 
 // NVL144-specific GPIO handler implementations

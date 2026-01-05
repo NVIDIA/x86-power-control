@@ -284,6 +284,17 @@ class NVL144PowerControl : public VRPowerControl
     };
 
     /**
+     * @brief Power indicator signals used to determine initial hardware power
+     * state
+     *
+     * For NVL144, the host is considered ON only if BOTH Board0RunPowerPG AND
+     * NVL144PDBMainPowerOk are asserted. If either is de-asserted, the host is
+     * in an OFF or bad state.
+     */
+    const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
+                                                      "NVL144PDBMainPowerOk"};
+
+    /**
      * @brief Timer for NVL144 PDB main power OK assertion/de-assertion in PDB
      * power sequencing
      */
