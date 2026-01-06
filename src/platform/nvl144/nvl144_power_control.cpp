@@ -43,9 +43,11 @@ NVL144PowerControl::NVL144PowerControl(
 
     if (boardPresence.board1Present)
     {
-        addRequiredSignal("Board1RunPowerEnable", 1, GPIODirection::OUT);
-        addRequiredSignal("Board1PreSystemReset", 1, GPIODirection::OUT);
-        addRequiredSignal("Board1CpuShutdownOk", 1, GPIODirection::IN);
+        addRequiredSignal("Board1RunPowerEnable", 1);
+        addRequiredSignal("Board1PreSystemReset", 1);
+        addRequiredSignal("Board1CpuShutdownOk", 1);
+        addRequiredSignal("Board1CpuShutdownForce", 1);
+        addRequiredSignal("Board1CpuShutdownRequest", 1);
         addBoard1GpioStateProperties();
     }
 
