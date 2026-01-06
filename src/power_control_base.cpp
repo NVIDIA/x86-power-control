@@ -147,19 +147,14 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // Register base class GPIO handlers
     // These handlers are available in all platforms and can be overridden by
     // derived classes
-    gpioHandlerMap["PowerOk"] = [this](bool state) {
-        this->powerOKHandler(state);
-    };
-    gpioHandlerMap["SioPowerGood"] = [this](bool state) {
-        this->sioPowerGoodHandler(state);
-    };
-    gpioHandlerMap["SIOS5"] = [this](bool state) { this->sioS5Handler(state); };
-    gpioHandlerMap["PowerButton"] = [this](bool state) {
-        this->powerButtonHandler(state);
-    };
-    gpioHandlerMap["ResetButton"] = [this](bool state) {
-        this->resetButtonHandler(state);
-    };
+
+    // We do not currently use the below GPIOs, so let's not enforce them in the base class
+    // GpioName: Handler function
+    // PowerOk: powerOKHandler
+    // SioPowerGood: sioPowerGoodHandler
+    // SIOS5: sioS5Handler
+    // PowerButton: powerButtonHandler
+    // ResetButton: resetButtonHandler
 
     // Initialize ObjectManager BEFORE claiming service names
     // Ensuring the Mapper daemon can track all child objects via
@@ -170,7 +165,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // Names will be claimed by derived class after all initialization is complete.
     
     // Initialize D-Bus interfaces
-    initializeHostInterface();
+    registerHostInterface();
     initializeChassisInterface();
     initializeBootProgressInterface();
 #ifdef CHASSIS_SYSTEM_RESET
@@ -965,7 +960,7 @@ void PowerControl::requestBusNames()
     lg2::info("D-Bus service names claimed successfully");
 }
 
-void PowerControl::initializeHostInterface()
+void PowerControl::registerHostInterface()
 {
     // Note: Button masking (powerButtonMask, resetButtonMask) and restart cause
     // tracking (addRestartCause) are not yet moved to the class, so those
@@ -1911,7 +1906,9 @@ void PowerControl::startTimer(int timeoutMs, boost::asio::steady_timer& timer,
 }
 
 void PowerControl::addRequiredSignal(const std::string& signalName,
-                                     int boardIndex)
+                                     int boardIndex,
+                                     GPIODirection direction,
+                                     std::function<void(bool)> handler)
 {
     if (boardIndex == 0)
     {
@@ -1925,6 +1922,12 @@ void PowerControl::addRequiredSignal(const std::string& signalName,
     {
         lg2::error("Invalid board index {INDEX} for signal {SIGNAL}", "INDEX",
                    boardIndex, "SIGNAL", signalName);
+        return;
+    }
+
+    if (handler)
+    {
+        registerGPIOHandler(signalName, direction, handler);
     }
 }
 
@@ -1946,28 +1949,48 @@ void PowerControl::validateRequiredSignals()
     // {"NMIButton", &nmiButtonConfig},
     // {"SlotPower", &slotPowerConfig},
     // {"HpmStbyEn", &hpmStbyEnConfig}};
-
+    lg2::info("Validating required signals");
     // Validate Board 0 signals (always required)
     for (const auto& signalName : requiredBoard0Signals)
     {
-        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        lg2::info("Required Board 0 signal: '{SIGNAL}'", "SIGNAL", signalName);
+        auto it = powerSignalMap.find(signalName);
+        if (it == powerSignalMap.end())
         {
             lg2::error("Required Board 0 signal '{SIGNAL}' not found in config",
                        "SIGNAL", signalName);
             throw std::runtime_error(
                 "Required Board 0 signal missing from config: " + signalName);
         }
+        
+        lg2::info("'{SIGNAL}' found in config",
+                    "SIGNAL", signalName);
+        if (it->second->direction == GPIODirection::IN && it->second->gpioHandler == nullptr)
+        {
+            lg2::error("Required Board 0 signal '{SIGNAL}' is an input signal, but no handler function was provided",
+                        "SIGNAL", signalName);
+        }
+        
     }
 
     // Validate Board 1 signals (if any were added)
     for (const auto& signalName : requiredBoard1Signals)
     {
-        if (powerSignalMap.find(signalName) == powerSignalMap.end())
+        lg2::info("Required Board 1 signal: '{SIGNAL}'", "SIGNAL", signalName);
+        auto it = powerSignalMap.find(signalName);
+        if (it == powerSignalMap.end())
         {
             lg2::error("Required Board 1 signal '{SIGNAL}' not found in config",
                        "SIGNAL", signalName);
             throw std::runtime_error(
                 "Required Board 1 signal missing from config: " + signalName);
+        }
+        lg2::info("'{SIGNAL}' found in config",
+                    "SIGNAL", signalName);
+        if (it->second->direction == GPIODirection::IN && it->second->gpioHandler == nullptr)
+        {
+            lg2::error("Required Board 1 signal '{SIGNAL}' is an input signal, but no handler function was provided",
+                       "SIGNAL", signalName);
         }
     }
 
@@ -1991,75 +2014,74 @@ void PowerControl::validateTimerConfigs()
     lg2::info("PowerControl timer configuration validation complete");
 }
 
-void PowerControl::registerGPIOHandlers()
+void PowerControl::registerGPIOHandler(const std::string& signalName,
+                                        GPIODirection direction,
+                                        std::function<void(bool)> handler)
 {
-    lg2::info("Registering GPIO handlers from gpioHandlerMap");
+    lg2::info("Registering GPIO handler for signal '{SIGNAL}'", "SIGNAL", signalName);
 
-    for (const auto& [signalName, handler] : gpioHandlerMap)
+    // Find the signal in powerSignalMap
+    auto it = powerSignalMap.find(signalName);
+    if (it == powerSignalMap.end())
     {
-        // Find the signal in powerSignalMap
-        auto it = powerSignalMap.find(signalName);
-        if (it == powerSignalMap.end())
-        {
-            // TBD: revisit this and get deisgn feedback
-            lg2::info(
-                "GPIO signal '{SIGNAL}' not found in config, skipping handler registration",
-                "SIGNAL", signalName);
-            continue;
-        }
-
-        // Assign the handler to the ConfigData object
-        it->second->gpioHandler = handler;
-
-        // Check if this signal uses input event monitoring (gpio_keys_polled
-        // driver)
-        if (it->second->useInputEvents)
-        {
-            // Validate input event configuration
-            if (!it->second->inputEventConfig.has_value())
-            {
-                lg2::error(
-                    "Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
-                    "SIGNAL", signalName);
-                throw std::runtime_error(
-                    "Signal '" + signalName + "' missing inputEventConfig");
-            }
-
-            auto& inputConfig = it->second->inputEventConfig.value();
-
-            // Request input events for this signal
-            if (!requestInputEvents(inputConfig.deviceName,
-                                    inputConfig.signalName, inputConfig.keyCode,
-                                    handler, it->second->eventDescriptor,
-                                    inputConfig.stateTracker))
-            {
-                lg2::error("Failed to register input events for '{SIGNAL}'",
-                           "SIGNAL", signalName);
-                throw std::runtime_error(
-                    "Failed to register input events for '" + signalName + "'");
-            }
-
-            lg2::info(
-                "Successfully registered input event handler for '{SIGNAL}'",
-                "SIGNAL", signalName);
-        }
-        else
-        {
-            // Request GPIO events for this signal (traditional method)
-            if (!requestGPIOEvents(*it->second))
-            {
-                lg2::error("Failed to register GPIO events for '{SIGNAL}'",
-                           "SIGNAL", signalName);
-                throw std::runtime_error(
-                    "Failed to register GPIO events for '" + signalName + "'");
-            }
-
-            lg2::info("Successfully registered GPIO handler for '{SIGNAL}'",
-                      "SIGNAL", signalName);
-        }
+        lg2::error(
+            "GPIO signal '{SIGNAL}' not found in config, handler not registered",
+            "SIGNAL", signalName);
+        return;
     }
 
-    lg2::info("All GPIO handlers registered successfully");
+    // Set the direction of the GPIO
+    it->second->direction = direction;
+
+    // Assign the handler to the ConfigData object
+    it->second->gpioHandler = handler;
+
+    // Check if this signal uses input event monitoring (gpio_keys_polled
+    // driver)
+    if (it->second->useInputEvents)
+    {
+        // Validate input event configuration
+        if (!it->second->inputEventConfig.has_value())
+        {
+            lg2::error(
+                "Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
+                "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Signal '" + signalName + "' missing inputEventConfig");
+        }
+
+        auto& inputConfig = it->second->inputEventConfig.value();
+
+        // Request input events for this signal
+        if (!requestInputEvents(inputConfig.deviceName,
+                                inputConfig.signalName, inputConfig.keyCode,
+                                handler, it->second->eventDescriptor,
+                                inputConfig.stateTracker))
+        {
+            lg2::error("Failed to register input events for '{SIGNAL}'",
+                        "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Failed to register input events for '" + signalName + "'");
+        }
+
+        lg2::info(
+            "Successfully registered input event handler for '{SIGNAL}'",
+            "SIGNAL", signalName);
+    }
+    else
+    {
+        // Request GPIO events for this signal (traditional method)
+        if (!requestGPIOEvents(*it->second))
+        {
+            lg2::error("Failed to register GPIO events for '{SIGNAL}'",
+                        "SIGNAL", signalName);
+            throw std::runtime_error(
+                "Failed to register GPIO events for '" + signalName + "'");
+        }
+
+        lg2::info("Successfully registered GPIO handler for '{SIGNAL}'",
+                    "SIGNAL", signalName);
+    }
 }
 
 // ===========================================================================

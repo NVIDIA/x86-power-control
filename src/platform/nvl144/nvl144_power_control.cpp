@@ -34,16 +34,18 @@ NVL144PowerControl::NVL144PowerControl(
     // handlers to the map
 
     // Add NVL144 PDB-specific required signals (Board 0)
-    addRequiredSignal("NVL144PDBMainPowerOk", 0);
-    addRequiredSignal("NVL144PDBMainPowerEnable", 0);
-    addRequiredSignal("E1SPowerEnable", 0);
-    addRequiredSignal("BMCSSDReset", 0);
+    addRequiredSignal("NVL144PDBMainPowerOk", 0, GPIODirection::IN, [this](bool state) {
+        this->nvl144pdbMainPowerOkHandler(state);
+    });
+    addRequiredSignal("NVL144PDBMainPowerEnable", 0, GPIODirection::OUT);
+    addRequiredSignal("E1SPowerEnable", 0, GPIODirection::OUT);
+    addRequiredSignal("BMCSSDReset", 0, GPIODirection::OUT);
 
     if (boardPresence.board1Present)
     {
-        addRequiredSignal("Board1RunPowerEnable", 1);
-        addRequiredSignal("Board1PreSystemReset", 1);
-        addRequiredSignal("Board1CpuShutdownOk", 1);
+        addRequiredSignal("Board1RunPowerEnable", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1PreSystemReset", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1CpuShutdownOk", 1, GPIODirection::IN);
         addBoard1GpioStateProperties();
     }
 
@@ -56,18 +58,11 @@ NVL144PowerControl::NVL144PowerControl(
     // call setDefaultValues() to set the default values for output signals
     setDefaultValues();
 
-    // Add NVL144-specific GPIO handler to the map
-    gpioHandlerMap["NVL144PDBMainPowerOk"] = [this](bool state) {
-        this->nvl144pdbMainPowerOkHandler(state);
-    };
-
     // Initialize ALL host0 interfaces at once - this makes the path visible to ObjectMapper
     // After this, mapper wait /xyz/openbmc_project/state/host0 will return
     // and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be ready
     initializeHostStateInterface();
     
-    // Register all GPIO handlers (from base, VR, and NVL144)
-    registerGPIOHandlers();
     
     // Initialize power state from actual hardware before power restore runs
     // For NVL144: Host is ON only if BOTH Board0RunPowerPG AND NVL144PDBMainPowerOk are asserted

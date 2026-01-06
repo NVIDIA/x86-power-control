@@ -38,40 +38,33 @@ VRPowerControl::VRPowerControl(
     // Assign handlers and register events for common VR/HPM signals
     detectBoardPresence();
 
-    // Add VR-specific required signals
+    // Add VR-specific required signals with handlers
     // Board 0 signals (always required for VR platforms)
-    addRequiredSignal("Board0RunPowerEnable", 0);
-    addRequiredSignal("Board0RunPowerPG", 0);
-    addRequiredSignal("Board0PreSystemReset", 0);
-    addRequiredSignal("Board0CpuShutdownForce", 0);
-    addRequiredSignal("Board0CpuShutdownRequest", 0);
-    addRequiredSignal("Board0CpuShutdownOk", 0);
-    addRequiredSignal("CpuResetIndicator", 0);
-    addRequiredSignal("USBPowerEnable", 0);
-
-    // call validateRequiredSignals() to validate all required signals
-    validateRequiredSignals();
-
-
-    // Add VR-specific GPIO handlers to the map (will be registered by most
-    // derived class)
-    gpioHandlerMap["Board0RunPowerPG"] = [this](bool state) {
+    addRequiredSignal("Board0RunPowerEnable", 0, GPIODirection::OUT);
+    addRequiredSignal("Board0RunPowerPG", 0, GPIODirection::IN, [this](bool state) {
         this->board0RunPowerPGHandler(state);
-    };
-    gpioHandlerMap["Board0CpuShutdownOk"] = [this](bool state) {
+    });
+    addRequiredSignal("Board0PreSystemReset", 0, GPIODirection::OUT);
+    addRequiredSignal("Board0CpuShutdownForce", 0, GPIODirection::OUT);
+    addRequiredSignal("Board0CpuShutdownRequest", 0, GPIODirection::OUT);
+    addRequiredSignal("Board0CpuShutdownOk", 0, GPIODirection::IN, [this](bool state) {
         this->board0CpuShutdownOkHandler(state);
-    };
-    gpioHandlerMap["CpuResetIndicator"] = [this](bool state) {
+    });
+    addRequiredSignal("CpuResetIndicator", 0, GPIODirection::IN, [this](bool state) {
         this->cpuResetIndicatorHandler(state);
-    };
+    });
+    addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
-    // Add Board 1 handlers if Board 1 is present
+    // Add Board 1 handler if Board 1 is present
     if (boardPresence.board1Present)
     {
-        gpioHandlerMap["Board1CpuShutdownOk"] = [this](bool state) {
+        addRequiredSignal("Board1CpuShutdownOk", 1, GPIODirection::IN, [this](bool state) {
             this->board1CpuShutdownOkHandler(state);
-        };
+        });
     }
+
+    // call validateRequiredSignals() in the platform-specific class constructor
+    // validateRequiredSignals();
 }
 
 void VRPowerControl::detectBoardPresence()

@@ -54,6 +54,13 @@ enum class ConfigType
     DBUS
 };
 
+// In tca spec, 0 indicates output and 1 indicates input
+enum class GPIODirection
+{
+    OUT = 0,
+    IN
+};
+
 /**
  * @brief Restart Cause enumeration
  *
@@ -163,6 +170,7 @@ struct ConfigData
     bool polarity;
     ConfigType type;
     gpiod::line gpioLine; // GPIO line handle
+    GPIODirection direction; // GPIO direction (input or output)
     boost::asio::posix::stream_descriptor
         eventDescriptor;  // Event descriptor for async monitoring
     std::function<void(bool)>
@@ -781,35 +789,31 @@ class PowerControl
     /**
      * @brief Add a required signal to the appropriate board's signal list
      *
+     * Checks if the signal is present in powerSignalMap and optionally assigns
+     * a handler to its ConfigData. If a handler is provided and the signal
+     * exists in powerSignalMap, the handler is assigned directly to the
+     * ConfigData's gpioHandler field.
+     *
      * @param signalName The name of the GPIO signal to add
      * @param boardIndex The board index (0 or 1)
+     * @param handler Optional handler function to assign to the signal's
+     *                ConfigData
      */
-    void addRequiredSignal(const std::string& signalName, int boardIndex);
+    void addRequiredSignal(
+        const std::string& signalName, int boardIndex,
+        GPIODirection direction,
+        std::function<void(bool)> handler = nullptr);
 
     /**
      * @brief Map of GPIO signal names to their handler functions
      *
      * This map is built up by each class in the hierarchy (PowerControl,
      * VRPowerControl, and platform-specific classes) in their constructors. The
-     * registerGPIOHandlers() method then assigns these handlers to the
+     * registerGPIOHandler() method then assigns these handlers to the
      * corresponding ConfigData objects in the powerSignalMap and calls
      * requestGPIOEvents() for each.
      */
-    std::map<std::string, std::function<void(bool)>> gpioHandlerMap;
-
-    /**
-     * @brief Register all GPIO handlers and request GPIO events
-     *
-     * This method should be called in the most derived class's constructor
-     * after all classes have added their handlers to gpioHandlerMap. It
-     * iterates through the map, assigns the handler functions to the
-     * corresponding ConfigData objects in the powerSignalMap, and calls
-     * requestGPIOEvents() for each signal.
-     *
-     * @throws std::runtime_error if a signal in gpioHandlerMap is not found in
-     * powerSignalMap or if requestGPIOEvents() fails for any signal
-     */
-    void registerGPIOHandlers();
+    void registerGPIOHandler(const std::string& signalName, GPIODirection direction, std::function<void(bool)> handler);
 
     /**
      * @brief D-Bus connection
@@ -922,7 +926,7 @@ class PowerControl
      * Creates and registers the host state D-Bus interface for host power
      * transitions.
      */
-    void initializeHostInterface();
+    void registerHostInterface();
 
     /**
      * @brief Initialize Chassis D-Bus interface

@@ -29,14 +29,16 @@ ParsecPowerControl::ParsecPowerControl(
     // gpioHandlerMap by VRPowerControl constructor Now add Parsec-specific
     // handlers to the map
 
-    addRequiredSignal("GB300PDBMainPowerOk", 0);
-    addRequiredSignal("GB300PDBMainPowerEnable", 0);
+    addRequiredSignal("GB300PDBMainPowerOk", 0, GPIODirection::IN, [this](bool state) {
+        this->gb300pdbMainPowerOkHandler(state);
+    });
+    addRequiredSignal("GB300PDBMainPowerEnable", 0, GPIODirection::OUT);
 
     if (boardPresence.board1Present)
     {
-        addRequiredSignal("Board1RunPowerEnable", 1);
-        addRequiredSignal("Board1PreSystemReset", 1);
-        addRequiredSignal("Board1CpuShutdownOk", 1);
+        addRequiredSignal("Board1RunPowerEnable", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1PreSystemReset", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1CpuShutdownOk", 1, GPIODirection::IN);
         addBoard1GpioStateProperties();
     }
 
@@ -48,11 +50,6 @@ ParsecPowerControl::ParsecPowerControl(
 
     // call setDefaultValues() to set the default values for output signals
     setDefaultValues();
-
-    // Add Parsec-specific GPIO handler to the map
-    gpioHandlerMap["GB300PDBMainPowerOk"] = [this](bool state) {
-        this->gb300pdbMainPowerOkHandler(state);
-    };
 
     // Initialize ALL host0 interfaces at once - this makes the path visible to ObjectMapper
     // After this, mapper wait /xyz/openbmc_project/state/host0 will return
