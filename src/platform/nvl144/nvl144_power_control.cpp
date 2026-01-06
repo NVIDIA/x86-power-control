@@ -43,11 +43,11 @@ NVL144PowerControl::NVL144PowerControl(
 
     if (boardPresence.board1Present)
     {
-        addRequiredSignal("Board1RunPowerEnable", 1);
-        addRequiredSignal("Board1PreSystemReset", 1);
-        addRequiredSignal("Board1CpuShutdownOk", 1);
-        addRequiredSignal("Board1CpuShutdownForce", 1);
-        addRequiredSignal("Board1CpuShutdownRequest", 1);
+        addRequiredSignal("Board1RunPowerEnable", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1PreSystemReset", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1CpuShutdownOk", 1, GPIODirection::IN);
+        addRequiredSignal("Board1CpuShutdownForce", 1, GPIODirection::OUT);
+        addRequiredSignal("Board1CpuShutdownRequest", 1, GPIODirection::OUT);
         addBoard1GpioStateProperties();
     }
 
@@ -806,7 +806,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             if (action == PowerAction::FORCE_WARM_REBOOT)
             {
                 // Warm reboot: start delay timer before de-asserting Pre System Reset
-                lg2::info("Starting force warm reboot delay");
+                lg2::info("Starting force warm reboot delay of {DELAY}ms", "DELAY", TimerMap["ForceWarmRebootDelayMs"]);
                 startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
                           Event::warmRebootDelayTimerExpired);
                 setPowerState(PowerState::waitForRebootDelay);
