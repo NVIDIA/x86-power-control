@@ -356,7 +356,10 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             break;
 
         case Event::resetRequest:
+            // Initiate force warm reboot using common VR helper
+            initiateForceWarmReboot();
             break;
+            
         case Event::powerButtonPressed:
             break;
         default:
@@ -792,23 +795,48 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
 
 void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 {
+    logEvent(__FUNCTION__, event);
     switch (event)
     {
         case Event::cpuResetIndicatorAssert:
-            transitionToHPMPowerGoodDeAssertState();
+            cpuResetWatchdogTimer.cancel();
+            lg2::info("CPU Reset Indicator asserted - CPUs entered reset");
+            
+            // Check if this is a warm reboot flow
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                // Warm reboot: start delay timer before de-asserting Pre System Reset
+                lg2::info("Starting force warm reboot delay");
+                startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
+                          Event::warmRebootDelayTimerExpired);
+                setPowerState(PowerState::waitForRebootDelay);
+            }
+            else
+            {
+                // Shutdown flow: transition to HPM power good de-assert
+                transitionToHPMPowerGoodDeAssertState();
+            }
             break;
 
         case Event::cpuResetWatchdogTimerExpired:
-            lg2::error(
-                "CPU Reset Watchdog Timer Expired. CPUs are not in reset. Host Shutdown sequence failed {reccomend checking CPLD  status}. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
-
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                lg2::error("CPU Reset Assert Watchdog expired during warm reboot. CPUs did not enter reset. Aborting warm reboot");
+            }
+            else
+            {
+                lg2::error("CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence failed {recommend checking CPLD status}");
+            }
+            
+            lg2::error("Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off");
             action = PowerAction::NONE;
             setGPIOsForHostStateOff();
             setPowerState(PowerState::off);
             break;
 
         default:
-            lg2::info("No action taken.");
+            lg2::info("No action taken for event: {EVENT}", "EVENT",
+                     getEventName(event));
             break;
     }
 }

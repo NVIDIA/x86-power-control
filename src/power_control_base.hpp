@@ -45,6 +45,7 @@ enum class PowerState
     waitForCPUResetDeAssert,
     waitForCPUShutdownOk,
     waitForPowerCycleDelay,
+    waitForRebootDelay,
 };
 
 // Configuration type enumeration
@@ -253,6 +254,7 @@ class PowerControl
         gracefulPowerCycleRequest,
         warmResetDetected,
         powerCycleDelayTimerExpired,
+        warmRebootDelayTimerExpired,
         nvl144pdbMainPowerOkAssert,
         nvl144pdbMainPowerOkDeAssert,
         gb300pdbMainPowerOkAssert,
@@ -328,6 +330,7 @@ class PowerControl
         GRACEFUL_POWER_CYCLE,
         SYSTEM_RESET,
         HOST_INITIATED_SHUTDOWN,
+        FORCE_WARM_REBOOT,
     };
 
     // This map contains all timer values that are to be read from json config

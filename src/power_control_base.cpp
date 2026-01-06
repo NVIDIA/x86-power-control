@@ -81,6 +81,10 @@ std::string PowerControl::getEventName(Event event)
             return "graceful power-cycle request";
         case Event::warmResetDetected:
             return "warm reset detected";
+        case Event::powerCycleDelayTimerExpired:
+            return "power cycle delay timer expired";
+        case Event::warmRebootDelayTimerExpired:
+            return "warm reboot delay timer expired";
         case Event::nvl144pdbMainPowerOkAssert:
             return "NVL144 PDB main power OK assert";
         case Event::nvl144pdbMainPowerOkDeAssert:
@@ -1030,7 +1034,7 @@ void PowerControl::registerHostInterface()
                     addRestartCause(RestartCause::command);
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        sendPowerControlEvent(Event::powerCycleRequest);
+                        sendPowerControlEvent(Event::gracefulPowerCycleRequest);
                     });
                 }
                 else
@@ -1051,7 +1055,8 @@ void PowerControl::registerHostInterface()
                     lg2::info("Host transition to GracefulWarmReboot requested");
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        sendPowerControlEvent(Event::gracefulPowerCycleRequest);
+                        // TODO: Currently performs a Force Warm Reboot. To be replaced with a graceful warm reboot.
+                        sendPowerControlEvent(Event::resetRequest);
                     });
                 }
                 else

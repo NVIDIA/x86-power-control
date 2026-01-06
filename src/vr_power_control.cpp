@@ -32,7 +32,8 @@ VRPowerControl::VRPowerControl(
     hpmPowerGoodWatchdogTimer(ioContext),
     cpuResetWatchdogTimer(ioContext),
     cpuShutdownOkWatchdogTimer(ioContext),
-    powerCycleDelayTimer(ioContext)
+    powerCycleDelayTimer(ioContext),
+    warmRebootDelayTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
@@ -290,6 +291,9 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
         case PowerState::waitForPowerCycleDelay:
             return [this](Event e) { this->handleWaitForPowerCycleDelay(e); };
 
+        case PowerState::waitForRebootDelay:
+            return [this](Event e) { this->handleWaitForRebootDelay(e); };
+
         // Delegate upstream states to base class
         default:
             return PowerControl::getPowerStateHandler();
@@ -321,11 +325,45 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
     // TODO: Move powerStateWaitForPDBMainPowerOff() implementation here
 }
 
+// Helper function: Initiate a force warm reboot sequence
+void VRPowerControl::initiateForceWarmReboot()
+{
+    lg2::info("Force Warm Reboot request received - asserting Pre System Reset signals");
+    action = PowerAction::FORCE_WARM_REBOOT;
+
+    // Assert Pre System Reset for Board 0
+    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
+    if (board0PreSystemReset == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "Board0PreSystemReset signal not found in powerSignalMap");
+    }
+    setGPIOOutput(board0PreSystemReset->second,
+                  board0PreSystemReset->second->polarity);
+
+    // Assert Pre System Reset for Board 1 if present
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
+        if (board1PreSystemReset == powerSignalMap.end())
+        {
+            throw std::runtime_error(
+                "Board1PreSystemReset signal not found in powerSignalMap");
+        }
+        setGPIOOutput(board1PreSystemReset->second,
+                      board1PreSystemReset->second->polarity);
+    }
+
+    // Start CPU Reset Assert watchdog and wait for CPU_RESET_L to assert
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
 // ============================================================================
 // HELPER FUNCTIONS for handleWaitForHPMPowerGoodAssert
 // ============================================================================
 
-// Helper function: De-assert Pre System Resets during power-on
 void VRPowerControl::deassertPreSystemResets()
 {
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
@@ -412,29 +450,43 @@ void VRPowerControl::handleWaitForCPUResetAssert(Event event)
 
 void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 {
-    // TODO: Move powerStateWaitForCPUResetDeAssert() implementation here
+    logEvent(__FUNCTION__, event);
     switch (event)
     {
         case Event::cpuResetIndicatorDeAssert:
-            cpuResetWatchdogTimer
-                .cancel(); // Cancel the CPU Reset Watchdog Timer
-            lg2::info(
-                "CPU Reset Indicator De-asserted. CPUs are out of reset. Setting Host Power State to On/Running.");
-
-            setGPIOsForHostStateOn(); // TODO: fill function implementation
-
+            cpuResetWatchdogTimer.cancel();
+            
+            // Check if this is warm reboot or normal power-on
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                // Warm reboot complete - GPIOs already in correct state
+                lg2::info("CPU Reset Indicator de-asserted. CPUs are out of reset. Warm reboot complete! Setting Host State to On/Running.");
+            }
+            else
+            {
+                // Normal power-on - need to set GPIOs
+                lg2::info("CPU Reset Indicator de-asserted. CPUs are out of reset. Setting Host Power State to On/Running");
+            }
+            setGPIOsForHostStateOn();
             action = PowerAction::NONE;
             setPowerState(PowerState::on);
             break;
+            
         case Event::cpuResetWatchdogTimerExpired:
-            lg2::error(
-                "CPU Reset Watchdog Timer Expired. CPUs are not out of reset. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
-
-            setGPIOsForHostStateOff(); // TODO: fill function implementation
-
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                lg2::error("CPU Reset Watchdog expired during warm reboot. CPUs did not come out of reset. Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+            }
+            else
+            {
+                lg2::error("CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+            }
+            
+            setGPIOsForHostStateOff();
             action = PowerAction::NONE;
             setPowerState(PowerState::off);
             break;
+            
         default:
             lg2::info("No action taken for event: {EVENT}", "EVENT", 
                       getEventName(event));
@@ -751,6 +803,33 @@ void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
     }
 }
 
+void VRPowerControl::handleWaitForRebootDelay(Event event)
+{
+    logEvent(__FUNCTION__, event);
+    switch (event)
+    {
+        case Event::warmRebootDelayTimerExpired:
+            lg2::info("Warm reboot delay complete - de-asserting Pre System Reset signals");
+            warmRebootDelayTimer.cancel();
+            
+            // De-assert Pre System Reset signals (Board 0 and Board 1 if present)
+            deassertPreSystemResets();
+            
+            // Start CPU Reset De-Assert watchdog
+            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                      Event::cpuResetWatchdogTimerExpired);
+            
+            setPowerState(PowerState::waitForCPUResetDeAssert);
+            break;
+
+        default:
+            // Reject all other events during warm reboot delay
+            lg2::warning("Event {EVENT} rejected - warm reboot delay in progress",
+                        "EVENT", static_cast<int>(event));
+            break;
+    }
+}
+
 std::string_view VRPowerControl::getHostState() const
 {
     // VR-specific implementation - maps VR PowerState extensions to D-Bus host
@@ -767,6 +846,8 @@ std::string_view VRPowerControl::getHostState() const
             return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
             break;
         case PowerState::waitForPowerCycleDelay:
+        case PowerState::waitForRebootDelay:
+            // During power cycle delay or warm reboot delay, host is Off
             return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
         case PowerState::waitForHPMPowerGoodDeAssert:
@@ -805,14 +886,24 @@ std::string_view VRPowerControl::getChassisState() const
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";
             break;
         case PowerState::waitForHPMPowerGoodDeAssert:
-        case PowerState::waitForCPUResetAssert:
         case PowerState::waitForCPUShutdownOk:
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForCPUResetAssert:
+            // For warm reboot, chassis stays On (no power cycle)
+            // For shutdown, chassis is transitioning to off
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            }
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
             break;
         case PowerState::waitForPowerCycleDelay:
             return "xyz.openbmc_project.State.Chassis.PowerState.Off";
             break;
+        case PowerState::waitForRebootDelay:
         case PowerState::waitForCPUResetDeAssert:
+            // During warm reboot delay and CPU reset de-assert, chassis stays On
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         case PowerState::waitForPDBMainPowerOff:
@@ -867,6 +958,9 @@ std::string VRPowerControl::getPowerStateName()
             break;
         case PowerState::waitForPowerCycleDelay:
             return "Wait for Power Cycle Delay";
+            break;
+        case PowerState::waitForRebootDelay:
+            return "Wait for Reboot Delay";
             break;
         default:
             // Fall through to base class for upstream states

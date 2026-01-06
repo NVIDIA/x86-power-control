@@ -253,6 +253,7 @@ class VRPowerControl : public PowerControl
         "CpuResetWatchdogMs",
         "HPMPowerGoodWatchdogMs",
         "PowerCycleDelayMs",
+        "ForceWarmRebootDelayMs",
     };
 
   protected:
@@ -279,6 +280,11 @@ class VRPowerControl : public PowerControl
      * @brief Timer for power cycle delay between shutdown and power on
      */
     boost::asio::steady_timer powerCycleDelayTimer;
+
+    /**
+     * @brief Timer for warm reboot delay (generic timer, can be reused for graceful warm reboot)
+     */
+    boost::asio::steady_timer warmRebootDelayTimer;
 
   protected:
     // GPIO EVENT HANDLERS (Member functions)
@@ -507,7 +513,26 @@ class VRPowerControl : public PowerControl
      */
     virtual void handleWaitForPowerCycleDelay(Event event);
 
+    /**
+     * @brief Handler for waitForRebootDelay state (warm reboot delay)
+     * @param event Event that triggered this handler
+     */
+    virtual void handleWaitForRebootDelay(Event event);
+
     // GPIO EVENT HANDLER HELPER FUNCTIONS
+
+    /**
+     * @brief Initiate a force warm reboot sequence
+     * 
+     * This is a common helper function that can be used by any VR platform.
+     * It performs the following:
+     * - Sets action to FORCE_WARM_REBOOT
+     * - Asserts Board0PreSystemReset
+     * - Asserts Board1PreSystemReset (if Board1 is present)
+     * - Starts CPU Reset watchdog timer
+     * - Transitions to waitForCPUResetAssert state
+     */
+    void initiateForceWarmReboot();
 
     /**
      * @brief Check for and handle run power faults
