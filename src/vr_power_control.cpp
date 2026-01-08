@@ -504,8 +504,13 @@ bool VRPowerControl::areAllRequiredBoardsShutdownOk()
     auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
     if (board0CpuShutdownOk == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0CpuShutdownOk signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
+        return false;
+    }
+    if (!board0CpuShutdownOk->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+        return false;
     }
 
     bool board0ShutdownOkAsserted =
@@ -522,8 +527,13 @@ bool VRPowerControl::areAllRequiredBoardsShutdownOk()
     auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
     if (board1CpuShutdownOk == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board1CpuShutdownOk signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board1CpuShutdownOk signal not found in powerSignalMap");
+        return false;
+    }
+    if (!board1CpuShutdownOk->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board1CpuShutdownOk GPIO line not initialized");
+        return false;
     }
 
     bool board1ShutdownOkAsserted =
@@ -541,8 +551,13 @@ int VRPowerControl::getShutdownOkAssertedCount()
     auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
     if (board0CpuShutdownOk == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0CpuShutdownOk signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
+        return 0;
+    }
+    if (!board0CpuShutdownOk->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+        return 0;
     }
 
     if (board0CpuShutdownOk->second->gpioLine.get_value() ==
@@ -556,8 +571,13 @@ int VRPowerControl::getShutdownOkAssertedCount()
         auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
         if (board1CpuShutdownOk == powerSignalMap.end())
         {
-            throw std::runtime_error(
-                "Board1CpuShutdownOk signal not found in powerSignalMap");
+            lg2::error("CRITICAL: Board1CpuShutdownOk signal not found in powerSignalMap");
+            return count;
+        }
+        if (!board1CpuShutdownOk->second->gpioLine)
+        {
+            lg2::error("CRITICAL: Board1CpuShutdownOk GPIO line not initialized");
+            return count;
         }
 
         if (board1CpuShutdownOk->second->gpioLine.get_value() ==
@@ -681,17 +701,23 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
         {
             // Only one board asserted SHDN_OK - system in bad state, proceed
             // anyway
+            bool board0Asserted = false;
             auto board0CpuShutdownOk =
                 powerSignalMap.find("Board0CpuShutdownOk");
             if (board0CpuShutdownOk == powerSignalMap.end())
             {
-                throw std::runtime_error(
-                    "Board0CpuShutdownOk signal not found in powerSignalMap");
+                lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
             }
-
-            bool board0Asserted =
-                board0CpuShutdownOk->second->gpioLine.get_value() ==
-                board0CpuShutdownOk->second->polarity;
+            else if (!board0CpuShutdownOk->second->gpioLine)
+            {
+                lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+            }
+            else
+            {
+                board0Asserted =
+                    board0CpuShutdownOk->second->gpioLine.get_value() ==
+                    board0CpuShutdownOk->second->polarity;
+            }
 
             if (board0Asserted)
             {

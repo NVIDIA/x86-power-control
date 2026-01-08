@@ -167,15 +167,25 @@ bool NVL144PowerControl::isSystemPowerOff()
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
     if (board0RunPowerPG == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerPG signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap");
+        return false;
+    }
+    if (!board0RunPowerPG->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized");
+        return false;
     }
 
     auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
     if (nvl144pdbMainPowerOk == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        return false;
+    }
+    if (!nvl144pdbMainPowerOk->second->gpioLine)
+    {
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk GPIO line not initialized");
+        return false;
     }
 
     return (board0RunPowerPG->second->gpioLine.get_value() ==
@@ -381,23 +391,33 @@ void NVL144PowerControl::handlePowerOnRequest()
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
     if (board0RunPowerPG == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerPG signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap - cannot power on");
+        return;
     }
 
     auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
     if (nvl144pdbMainPowerOk == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk signal not found in powerSignalMap - cannot power on");
+        return;
     }
 
     auto nvl144pdbMainPowerEnable =
         powerSignalMap.find("NVL144PDBMainPowerEnable");
     if (nvl144pdbMainPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+        lg2::error("CRITICAL: NVL144PDBMainPowerEnable signal not found in powerSignalMap - cannot power on");
+        return;
+    }
+    if (!board0RunPowerPG->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized - cannot power on");
+        return;
+    }
+    if (!nvl144pdbMainPowerOk->second->gpioLine)
+    {
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk GPIO line not initialized - cannot power on");
+        return;
     }
 
     // Check if power is already on
@@ -443,8 +463,13 @@ void NVL144PowerControl::handlePowerCycleWhenOff(Event event)
     auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
     if (board0RunPowerPG == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerPG signal not found in powerSignalMap");
+        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap - cannot power cycle");
+        return;
+    }
+    if (!board0RunPowerPG->second->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized - cannot power cycle");
+        return;
     }
 
     // Verify power is actually off
