@@ -501,21 +501,16 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 // Helper function: Check if all required boards have asserted SHDN_OK
 bool VRPowerControl::areAllRequiredBoardsShutdownOk()
 {
-    auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
-    if (board0CpuShutdownOk == powerSignalMap.end())
+    auto board0CpuShutdownOk = getSignal("Board0CpuShutdownOk");
+    if (!board0CpuShutdownOk || !board0CpuShutdownOk->gpioLine)
     {
-        lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
-        return false;
-    }
-    if (!board0CpuShutdownOk->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+        lg2::error("CRITICAL: Board0CpuShutdownOk not available");
         return false;
     }
 
     bool board0ShutdownOkAsserted =
-        board0CpuShutdownOk->second->gpioLine.get_value() ==
-        board0CpuShutdownOk->second->polarity;
+        board0CpuShutdownOk->gpioLine.get_value() ==
+        board0CpuShutdownOk->polarity;
 
     if (!boardPresence.board1Present)
     {
@@ -524,21 +519,16 @@ bool VRPowerControl::areAllRequiredBoardsShutdownOk()
     }
 
     // 2P system - need both Board 0 and Board 1
-    auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
-    if (board1CpuShutdownOk == powerSignalMap.end())
+    auto board1CpuShutdownOk = getSignal("Board1CpuShutdownOk");
+    if (!board1CpuShutdownOk || !board1CpuShutdownOk->gpioLine)
     {
-        lg2::error("CRITICAL: Board1CpuShutdownOk signal not found in powerSignalMap");
-        return false;
-    }
-    if (!board1CpuShutdownOk->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board1CpuShutdownOk GPIO line not initialized");
+        lg2::error("CRITICAL: Board1CpuShutdownOk not available");
         return false;
     }
 
     bool board1ShutdownOkAsserted =
-        board1CpuShutdownOk->second->gpioLine.get_value() ==
-        board1CpuShutdownOk->second->polarity;
+        board1CpuShutdownOk->gpioLine.get_value() ==
+        board1CpuShutdownOk->polarity;
 
     return board0ShutdownOkAsserted && board1ShutdownOkAsserted;
 }
@@ -548,40 +538,28 @@ int VRPowerControl::getShutdownOkAssertedCount()
 {
     int count = 0;
 
-    auto board0CpuShutdownOk = powerSignalMap.find("Board0CpuShutdownOk");
-    if (board0CpuShutdownOk == powerSignalMap.end())
+    auto board0CpuShutdownOk = getSignal("Board0CpuShutdownOk");
+    if (!board0CpuShutdownOk || !board0CpuShutdownOk->gpioLine)
     {
-        lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
-        return 0;
-    }
-    if (!board0CpuShutdownOk->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+        lg2::error("CRITICAL: Board0CpuShutdownOk not available");
         return 0;
     }
 
-    if (board0CpuShutdownOk->second->gpioLine.get_value() ==
-        board0CpuShutdownOk->second->polarity)
+    if (board0CpuShutdownOk->gpioLine.get_value() == board0CpuShutdownOk->polarity)
     {
         count++;
     }
 
     if (boardPresence.board1Present)
     {
-        auto board1CpuShutdownOk = powerSignalMap.find("Board1CpuShutdownOk");
-        if (board1CpuShutdownOk == powerSignalMap.end())
+        auto board1CpuShutdownOk = getSignal("Board1CpuShutdownOk");
+        if (!board1CpuShutdownOk || !board1CpuShutdownOk->gpioLine)
         {
-            lg2::error("CRITICAL: Board1CpuShutdownOk signal not found in powerSignalMap");
-            return count;
-        }
-        if (!board1CpuShutdownOk->second->gpioLine)
-        {
-            lg2::error("CRITICAL: Board1CpuShutdownOk GPIO line not initialized");
+            lg2::error("CRITICAL: Board1CpuShutdownOk not available");
             return count;
         }
 
-        if (board1CpuShutdownOk->second->gpioLine.get_value() ==
-            board1CpuShutdownOk->second->polarity)
+        if (board1CpuShutdownOk->gpioLine.get_value() == board1CpuShutdownOk->polarity)
         {
             count++;
         }
@@ -702,21 +680,16 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Only one board asserted SHDN_OK - system in bad state, proceed
             // anyway
             bool board0Asserted = false;
-            auto board0CpuShutdownOk =
-                powerSignalMap.find("Board0CpuShutdownOk");
-            if (board0CpuShutdownOk == powerSignalMap.end())
+            auto board0CpuShutdownOk = getSignal("Board0CpuShutdownOk");
+            if (!board0CpuShutdownOk || !board0CpuShutdownOk->gpioLine)
             {
-                lg2::error("CRITICAL: Board0CpuShutdownOk signal not found in powerSignalMap");
-            }
-            else if (!board0CpuShutdownOk->second->gpioLine)
-            {
-                lg2::error("CRITICAL: Board0CpuShutdownOk GPIO line not initialized");
+                lg2::error("CRITICAL: Board0CpuShutdownOk not available");
             }
             else
             {
                 board0Asserted =
-                    board0CpuShutdownOk->second->gpioLine.get_value() ==
-                    board0CpuShutdownOk->second->polarity;
+                    board0CpuShutdownOk->gpioLine.get_value() ==
+                    board0CpuShutdownOk->polarity;
             }
 
             if (board0Asserted)

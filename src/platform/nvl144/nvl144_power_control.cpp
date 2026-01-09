@@ -164,34 +164,24 @@ void NVL144PowerControl::handleHostInitiatedShutdown()
 // Helper function: Check if system power is already off
 bool NVL144PowerControl::isSystemPowerOff()
 {
-    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
-    if (board0RunPowerPG == powerSignalMap.end())
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
     {
-        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap");
-        return false;
-    }
-    if (!board0RunPowerPG->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized");
+        lg2::error("CRITICAL: Board0RunPowerPG not available");
         return false;
     }
 
-    auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
-    if (nvl144pdbMainPowerOk == powerSignalMap.end())
+    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
+    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
     {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk signal not found in powerSignalMap");
-        return false;
-    }
-    if (!nvl144pdbMainPowerOk->second->gpioLine)
-    {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk GPIO line not initialized");
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk not available");
         return false;
     }
 
-    return (board0RunPowerPG->second->gpioLine.get_value() ==
-                !board0RunPowerPG->second->polarity &&
-            nvl144pdbMainPowerOk->second->gpioLine.get_value() ==
-                !nvl144pdbMainPowerOk->second->polarity);
+    return (board0RunPowerPG->gpioLine.get_value() ==
+                !board0RunPowerPG->polarity &&
+            nvl144pdbMainPowerOk->gpioLine.get_value() ==
+                !nvl144pdbMainPowerOk->polarity);
 }
 
 // Helper function: Initiate CPU shutdown sequence
@@ -388,47 +378,34 @@ void NVL144PowerControl::handlePowerOnRequest()
     lg2::info(
         "Power On Request received. Commencing Host Main Power On sequence.");
 
-    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
-    if (board0RunPowerPG == powerSignalMap.end())
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
     {
-        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap - cannot power on");
+        lg2::error("CRITICAL: Board0RunPowerPG not available - cannot power on");
         return;
     }
 
-    auto nvl144pdbMainPowerOk = powerSignalMap.find("NVL144PDBMainPowerOk");
-    if (nvl144pdbMainPowerOk == powerSignalMap.end())
+    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
+    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
     {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk signal not found in powerSignalMap - cannot power on");
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk not available - cannot power on");
         return;
     }
 
-    auto nvl144pdbMainPowerEnable =
-        powerSignalMap.find("NVL144PDBMainPowerEnable");
-    if (nvl144pdbMainPowerEnable == powerSignalMap.end())
+    auto nvl144pdbMainPowerEnable = getSignal("NVL144PDBMainPowerEnable");
+    if (!nvl144pdbMainPowerEnable)
     {
-        lg2::error("CRITICAL: NVL144PDBMainPowerEnable signal not found in powerSignalMap - cannot power on");
-        return;
-    }
-    if (!board0RunPowerPG->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized - cannot power on");
-        return;
-    }
-    if (!nvl144pdbMainPowerOk->second->gpioLine)
-    {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk GPIO line not initialized - cannot power on");
+        lg2::error("CRITICAL: NVL144PDBMainPowerEnable not available - cannot power on");
         return;
     }
 
     // Check if power is already on
-    if (board0RunPowerPG->second->gpioLine.get_value() ==
-            board0RunPowerPG->second->polarity &&
-        nvl144pdbMainPowerOk->second->gpioLine.get_value() ==
-            nvl144pdbMainPowerOk->second->polarity)
+    if (board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity &&
+        nvl144pdbMainPowerOk->gpioLine.get_value() == nvl144pdbMainPowerOk->polarity)
     {
         lg2::info(
             "PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
-        setGPIOsForHostStateOn(); // TODO: fill function implementation
+        setGPIOsForHostStateOn();
         action = PowerAction::NONE;
         setPowerState(PowerState::on);
     }
@@ -437,8 +414,7 @@ void NVL144PowerControl::handlePowerOnRequest()
         lg2::info(
             "Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
         action = PowerAction::POWER_ON;
-        setGPIOOutput(nvl144pdbMainPowerEnable->second,
-                      nvl144pdbMainPowerEnable->second->polarity);
+        setGPIOOutput(nvl144pdbMainPowerEnable, nvl144pdbMainPowerEnable->polarity);
         startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
                    pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
@@ -460,21 +436,15 @@ void NVL144PowerControl::handlePowerCycleWhenOff(Event event)
     lg2::info("{CYCLE_TYPE} Power Cycle Request received while in off state",
               "CYCLE_TYPE", cycleType);
 
-    auto board0RunPowerPG = powerSignalMap.find("Board0RunPowerPG");
-    if (board0RunPowerPG == powerSignalMap.end())
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
     {
-        lg2::error("CRITICAL: Board0RunPowerPG signal not found in powerSignalMap - cannot power cycle");
-        return;
-    }
-    if (!board0RunPowerPG->second->gpioLine)
-    {
-        lg2::error("CRITICAL: Board0RunPowerPG GPIO line not initialized - cannot power cycle");
+        lg2::error("CRITICAL: Board0RunPowerPG not available - cannot power cycle");
         return;
     }
 
     // Verify power is actually off
-    if (board0RunPowerPG->second->gpioLine.get_value() ==
-        !board0RunPowerPG->second->polarity)
+    if (board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity)
     {
         lg2::info("Verified Board 0 Run Power PG is de-asserted. Initiating Host Power On sequence");
         action = cycleAction;

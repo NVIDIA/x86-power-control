@@ -522,6 +522,17 @@ class PowerControl
     uint64_t getCurrentTimeMs();
 
     /**
+     * @brief Get a signal from powerSignalMap by name
+     *
+     * Looks up a signal in powerSignalMap and returns its ConfigData.
+     * Logs a CRITICAL error if the signal is not found.
+     *
+     * @param signalName Name of the signal to find
+     * @return Shared pointer to ConfigData, or nullptr if not found
+     */
+    std::shared_ptr<ConfigData> getSignal(const std::string& signalName);
+
+    /**
      * @brief Set a GPIO output to a specified value
      *
      * Finds a GPIO line by name, requests it as an output, and sets its value.

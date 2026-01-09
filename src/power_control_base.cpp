@@ -1690,6 +1690,18 @@ void PowerControl::setBoard1CpuShutdownOkState(int state)
     }
 }
 
+std::shared_ptr<ConfigData> PowerControl::getSignal(const std::string& signalName)
+{
+    auto it = powerSignalMap.find(signalName);
+    if (it == powerSignalMap.end())
+    {
+        lg2::error("CRITICAL: {SIGNAL} signal not found in powerSignalMap",
+                   "SIGNAL", signalName);
+        return nullptr;
+    }
+    return it->second;
+}
+
 bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config,
                                  const int value)
 {
