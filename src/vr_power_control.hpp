@@ -522,6 +522,21 @@ class VRPowerControl : public PowerControl
     // GPIO EVENT HANDLER HELPER FUNCTIONS
 
     /**
+     * @brief Transition to OFF state with Board0RunPowerPG check
+     *
+     * This helper function intelligently transitions to the appropriate state
+     * based on the current state of Board0RunPowerPG:
+     * - If Board0RunPowerPG is asserted: Transitions to waitForHPMPowerGoodDeAssert
+     *   and starts watchdog timer to wait for de-assertion
+     * - If Board0RunPowerPG is already de-asserted: Transitions directly to
+     *   PowerState::off
+     *
+     * This prevents the bug where we wait for a de-assert event that will never
+     * come (when power never came up in the first place).
+     */
+    void transitionToOffStateWithRunPowerCheck();
+
+    /**
      * @brief Initiate a force warm reboot sequence
      * 
      * This is a common helper function that can be used by any VR platform.

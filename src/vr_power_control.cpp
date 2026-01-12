@@ -102,6 +102,43 @@ bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
     return std::filesystem::exists(ioxPath);
 }
 
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+void VRPowerControl::transitionToOffStateWithRunPowerCheck()
+{
+    // Check current state of Board0RunPowerPG
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
+    {
+        lg2::error("CRITICAL: Board0RunPowerPG not available - transitioning directly to off");
+        setGPIOsForHostStateOff();
+        setPowerState(PowerState::off);
+        return;
+    }
+    
+    bool runPowerPGAsserted = 
+        board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity;
+    
+    if (runPowerPGAsserted)
+    {
+        // Run Power is still asserted - need to wait for de-assertion
+        lg2::info("Board0RunPowerPG is currently asserted. Transitioning to waitForHPMPowerGoodDeAssert to wait for de-assertion.");
+        setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
+        setGPIOsForHostStateOff();
+        startTimer(TimerMap["HPMPowerGoodWatchdogMs"], hpmPowerGoodWatchdogTimer,
+                   Event::hpmPowerGoodWatchdogTimerExpired);
+    }
+    else
+    {
+        // Run Power is already de-asserted - go directly to off
+        lg2::info("Board0RunPowerPG is already de-asserted. Transitioning directly to PowerState::off.");
+        setGPIOsForHostStateOff();
+        setPowerState(PowerState::off);
+    }
+}
+
 // board0RunPowerPGHandler Helper Function
 bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
 {
@@ -115,14 +152,11 @@ bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
                 "POWER FAULT DETECTED: Board0RunPowerPG de-asserted unexpectedly while in power state {STATE}. "
                 "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
                 "STATE", getPowerStateName());
+
+            // Transition to off, checking if we need to wait for de-assertion
+            action = PowerAction::NONE;
+            transitionToOffStateWithRunPowerCheck();
             
-            // Set GPIOs for host state OFF
-            setGPIOsForHostStateOff();
-            
-            // Force transition to off state
-            setPowerState(PowerState::off);
-            
-            // Return true to indicate fault was handled
             return true;
         }
         // else: Expected de-assertion in waitForHPMPowerGoodDeAssert state
@@ -422,11 +456,10 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
 
         case Event::hpmPowerGoodWatchdogTimerExpired:
             lg2::error(
-                "HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+                "HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
-            setGPIOsForHostStateOff(); // TODO: fill function implementation
             action = PowerAction::NONE;
-            setPowerState(PowerState::off);
+            transitionToOffStateWithRunPowerCheck();
             break;
 
         default:
@@ -475,16 +508,15 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
         case Event::cpuResetWatchdogTimerExpired:
             if (action == PowerAction::FORCE_WARM_REBOOT)
             {
-                lg2::error("CPU Reset Watchdog expired during warm reboot. CPUs did not come out of reset. Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+                lg2::error("CPU Reset Watchdog expired during warm reboot. CPUs did not come out of reset. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
             }
             else
             {
-                lg2::error("CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+                lg2::error("CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
             }
             
-            setGPIOsForHostStateOff();
             action = PowerAction::NONE;
-            setPowerState(PowerState::off);
+            transitionToOffStateWithRunPowerCheck();
             break;
             
         default:
@@ -623,9 +655,9 @@ void VRPowerControl::abortGracefulShutdown()
 {
     lg2::error(
         "Graceful shutdown aborted - CPU(s) failed to assert SHDN_OK within timeout. Returning to powered-on state.");
-    setGPIOsForHostStateOn();
     action = PowerAction::NONE;
-    setPowerState(PowerState::on);
+    setPowerState(PowerState::on);  // no transition to waitForHPMPowerGoodDeAssert, because Run Power PG is already asserted, and was never de-asserted
+    setGPIOsForHostStateOn();
 }
 
 // Helper function: Handle CPU Shutdown OK watchdog expiry during FORCE_OFF

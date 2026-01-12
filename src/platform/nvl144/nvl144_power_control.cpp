@@ -74,6 +74,9 @@ NVL144PowerControl::NVL144PowerControl(
 // NVL144-specific GPIO handler implementations
 void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
 {
+    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}",
+              "VALUE", state);
+
     auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
     if (it == powerSignalMap.end())
     {
@@ -595,11 +598,10 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
 
         case Event::pdbMainPowerOkWatchdogTimerExpired:
             lg2::error(
-                "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
+                "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
-            setGPIOsForHostStateOff();
-            setPowerState(PowerState::off);
+            transitionToOffStateWithRunPowerCheck();
             break;
 
         default:
@@ -641,8 +643,8 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         lg2::error(
             "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
         action = PowerAction::NONE;
-        setGPIOsForHostStateOff();
         setPowerState(PowerState::off);
+        setGPIOsForHostStateOff();
         return;
     }
 
@@ -682,10 +684,10 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         default:
             // Unknown action - default to off
             lg2::warning(
-                "Shutdown complete with unexpected action. Transitioning to off.");
-    action = PowerAction::NONE;
+                "NVL144 PDB Powered Down. Setting GPIO states to match Host State OFF. Transitioning to PowerState::off.");
+            action = PowerAction::NONE;
+            setPowerState(PowerState::off);
             setGPIOsForHostStateOff();
-    setPowerState(PowerState::off);
             break;
     }
 }
@@ -823,10 +825,9 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
                 lg2::error("CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence failed {recommend checking CPLD status}");
             }
             
-            lg2::error("Conducting cleanup: Setting GPIO states to match Host State OFF. Setting Host Power State to Off");
+            lg2::error("Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
             action = PowerAction::NONE;
-            setGPIOsForHostStateOff();
-            setPowerState(PowerState::off);
+            transitionToOffStateWithRunPowerCheck();
             break;
 
         default:
