@@ -5,13 +5,6 @@
 
 #include "parsec_power_control.hpp"
 
-// External references to global variables/functions from power_control.cpp
-namespace power_control
-{
-// External global variables (runtime variables, not types)
-extern PowerState powerState;
-} // namespace power_control
-
 namespace power_control
 {
 

@@ -11,12 +11,6 @@
 
 #include <filesystem>
 
-// External references to global variables from power_control.cpp
-namespace power_control
-{
-extern PowerState powerState;
-}
-
 namespace power_control
 {
 // Type aliases for convenience

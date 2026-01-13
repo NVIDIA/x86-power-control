@@ -5,12 +5,6 @@
 
 #include "c2_power_control.hpp"
 
-// External references to global variables from power_control.cpp
-namespace power_control
-{
-extern PowerState powerState;
-}
-
 namespace power_control
 {
 
