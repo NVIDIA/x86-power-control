@@ -2802,7 +2802,7 @@ void PowerControl::currentHostStateMonitor()
                 // Set the restart cause set for this restart
                 setRestartCause();
 #ifdef USE_ACBOOT
-                resetACBootProperty();
+                this->resetACBootProperty();
 #endif // USE_ACBOOT
                 sd_journal_send("MESSAGE=Host system DC power is off",
                                 "PRIORITY=%i", LOG_INFO,
@@ -2813,9 +2813,6 @@ void PowerControl::currentHostStateMonitor()
 }
 
 // RestartCause Implementation (available in the power_control namespace)
-
-// Initialize the global causeSet
-boost::container::flat_set<RestartCause> causeSet;
 
 std::string getRestartCause(RestartCause cause)
 {
@@ -2848,16 +2845,16 @@ std::string getRestartCause(RestartCause cause)
     }
 }
 
-void addRestartCause(const RestartCause cause)
+void PowerControl::addRestartCause(const RestartCause cause)
 {
     // Add this to the set of causes for this restart
-    causeSet.insert(cause);
+    this->causeSet.insert(cause);
 }
 
-void clearRestartCause()
+void PowerControl::clearRestartCause()
 {
     // Clear the set for the next restart
-    causeSet.clear();
+    this->causeSet.clear();
 }
 
 void PowerControl::setRestartCauseProperty(const std::string& cause)
@@ -2871,31 +2868,31 @@ void PowerControl::setRestartCause()
     // Determine the actual restart cause based on the set of causes
     std::string restartCause =
         "xyz.openbmc_project.State.Host.RestartCause.Unknown";
-    if (causeSet.contains(RestartCause::watchdog))
+    if (this->causeSet.contains(RestartCause::watchdog))
     {
         restartCause = getRestartCause(RestartCause::watchdog);
     }
-    else if (causeSet.contains(RestartCause::command))
+    else if (this->causeSet.contains(RestartCause::command))
     {
         restartCause = getRestartCause(RestartCause::command);
     }
-    else if (causeSet.contains(RestartCause::resetButton))
+    else if (this->causeSet.contains(RestartCause::resetButton))
     {
         restartCause = getRestartCause(RestartCause::resetButton);
     }
-    else if (causeSet.contains(RestartCause::powerButton))
+    else if (this->causeSet.contains(RestartCause::powerButton))
     {
         restartCause = getRestartCause(RestartCause::powerButton);
     }
-    else if (causeSet.contains(RestartCause::powerPolicyOn))
+    else if (this->causeSet.contains(RestartCause::powerPolicyOn))
     {
         restartCause = getRestartCause(RestartCause::powerPolicyOn);
     }
-    else if (causeSet.contains(RestartCause::powerPolicyRestore))
+    else if (this->causeSet.contains(RestartCause::powerPolicyRestore))
     {
         restartCause = getRestartCause(RestartCause::powerPolicyRestore);
     }
-    else if (causeSet.contains(RestartCause::softReset))
+    else if (this->causeSet.contains(RestartCause::softReset))
     {
 #if IGNORE_SOFT_RESETS_DURING_POST
         if (PowerControl::ignoreNextSoftReset)
@@ -2909,6 +2906,28 @@ void PowerControl::setRestartCause()
 
     setRestartCauseProperty(restartCause);
 }
+
+#ifdef USE_ACBOOT
+void PowerControl::resetACBootProperty()
+{
+    if ((this->causeSet.contains(RestartCause::command)) ||
+        (this->causeSet.contains(RestartCause::softReset)))
+    {
+        conn->async_method_call(
+            [](boost::system::error_code ec) {
+                if (ec)
+                {
+                    lg2::error("failed to reset ACBoot property");
+                }
+            },
+            "xyz.openbmc_project.Settings",
+            "/xyz/openbmc_project/control/host0/ac_boot",
+            "org.freedesktop.DBus.Properties", "Set",
+            "xyz.openbmc_project.Common.ACBoot", "ACBoot",
+            std::variant<std::string>{"False"});
+    }
+}
+#endif // USE_ACBOOT
 
 // INPUT EVENT HANDLING (for gpio_keys_polled driver)
 

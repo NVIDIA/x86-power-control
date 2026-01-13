@@ -88,28 +88,6 @@ static void setSlotPowerState(const SlotPowerState state)
 }
 #endif
 #ifdef USE_ACBOOT
-static void resetACBootProperty()
-{
-    if ((causeSet.contains(RestartCause::command)) ||
-        (causeSet.contains(RestartCause::softReset)))
-    {
-        conn->async_method_call(
-            [](boost::system::error_code ec) {
-                if (ec)
-                {
-                    lg2::error("failed to reset ACBoot property");
-                }
-            },
-            "xyz.openbmc_project.Settings",
-            "/xyz/openbmc_project/control/host0/ac_boot",
-            "org.freedesktop.DBus.Properties", "Set",
-            "xyz.openbmc_project.Common.ACBoot", "ACBoot",
-            std::variant<std::string>{"False"});
-    }
-}
-#endif // USE_ACBOOT
-
-#ifdef USE_ACBOOT
 static constexpr const char* powerACBootObject =
     "/xyz/openbmc_project/control/host0/ac_boot";
 static constexpr const char* powerACBootIface =

@@ -104,32 +104,12 @@ enum class DefaultState
 };
 
 /**
- * @brief Global set of restart causes for the current restart
- *
- * Multiple causes can be added during a restart sequence.
- * The highest priority cause is selected and reported.
- */
-extern boost::container::flat_set<RestartCause> causeSet;
-
-/**
  * @brief Convert RestartCause enum to D-Bus string
  *
  * @param cause The restart cause to convert
  * @return D-Bus RestartCause property string
  */
 std::string getRestartCause(RestartCause cause);
-
-/**
- * @brief Add a restart cause to the set
- *
- * @param cause The restart cause to add
- */
-void addRestartCause(const RestartCause cause);
-
-/**
- * @brief Clear the restart cause set for next restart
- */
-void clearRestartCause();
 
 /**
  * @brief Input event configuration for gpio_keys_polled driver signals
@@ -750,6 +730,28 @@ class PowerControl
      */
     void setRestartCause();
 
+    /**
+     * @brief Add a restart cause to the set
+     *
+     * @param cause The restart cause to add
+     */
+    void addRestartCause(const RestartCause cause);
+
+    /**
+     * @brief Clear the restart cause set for next restart
+     */
+    void clearRestartCause();
+
+#ifdef USE_ACBOOT
+    /**
+     * @brief Reset the ACBoot property based on restart cause
+     *
+     * If the restart was caused by a command or soft reset, resets
+     * the ACBoot property to False.
+     */
+    void resetACBootProperty();
+#endif
+
   protected:
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -786,6 +788,14 @@ class PowerControl
      * @brief Current power state
      */
     PowerState powerState;
+
+    /**
+     * @brief Set of restart causes for the current restart
+     *
+     * Multiple causes can be added during a restart sequence.
+     * The highest priority cause is selected and reported.
+     */
+    boost::container::flat_set<RestartCause> causeSet;
 
     /**
      * @brief Required Board 0 signals
