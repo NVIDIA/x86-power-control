@@ -889,11 +889,63 @@ void NVL144PowerControl::transitionToPDBMainPowerOffState()
     lg2::info(
         "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
 
+    setPowerState(PowerState::waitForPDBMainPowerOff);
     deassertPreSystemResetsAndPDBMainPower();
     startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
                pdbMainPowerOkWatchdogTimer,
                Event::pdbMainPowerOkWatchdogTimerExpired);
+}
+
+// Helper function: Transition to PDB Main Power Off state with PDB Main Power OK check
+void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
+{
+    hpmPowerGoodWatchdogTimer.cancel();
+
+    // Check current state of PDB Main Power OK
+    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
+    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
+    {
+        lg2::error("CRITICAL: NVL144PDBMainPowerOk not available");
+        // Fallback: assume worst case and transition to waitForPDBMainPowerOff
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
     setPowerState(PowerState::waitForPDBMainPowerOff);
+        deassertPreSystemResetsAndPDBMainPower();
+        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
+                   pdbMainPowerOkWatchdogTimer,
+                   Event::pdbMainPowerOkWatchdogTimerExpired);
+        return;
+    }
+
+    bool pdbMainPowerOkAsserted =
+        nvl144pdbMainPowerOk->gpioLine.get_value() ==
+        nvl144pdbMainPowerOk->polarity;
+
+    if (pdbMainPowerOkAsserted)
+    {
+        // PDB Main Power OK is still asserted, wait for it to de-assert
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is currently asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
+        
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+        deassertPreSystemResetsAndPDBMainPower();
+        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
+                   pdbMainPowerOkWatchdogTimer,
+                   Event::pdbMainPowerOkWatchdogTimerExpired);
+    }
+    else
+    {
+        // PDB Main Power OK is already de-asserted, bypass wait state and proceed directly
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is already de-asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Bypassing PowerState::waitForPDBMainPowerOff...");
+        
+        // Still need to de-assert the GPIOs
+        deassertPreSystemResetsAndPDBMainPower();
+        
+        // Call the same completion logic as if we received the de-assert event
+        // This ensures we handle FORCE_OFF, GRACE_OFF, POWER_CYCLE, etc. correctly
+        completeShutdownAndTransitionToOff(true);
+    }
 }
 
 // ============================================================================
@@ -905,7 +957,7 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
     switch (event)
     {
         case Event::board0RunPowerPGDeAssert:
-            transitionToPDBMainPowerOffState();
+            transitionToPDBMainPowerOffStateWithCheck();
             break;
 
         case Event::hpmPowerGoodWatchdogTimerExpired:

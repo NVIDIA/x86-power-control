@@ -514,7 +514,7 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             {
                 lg2::error("CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
             }
-            
+
             action = PowerAction::NONE;
             transitionToOffStateWithRunPowerCheck();
             break;
@@ -856,7 +856,7 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
         default:
             // Reject all other events during warm reboot delay
             lg2::warning("Event {EVENT} rejected - warm reboot delay in progress",
-                        "EVENT", static_cast<int>(event));
+                "EVENT", static_cast<int>(event));
             break;
     }
 }

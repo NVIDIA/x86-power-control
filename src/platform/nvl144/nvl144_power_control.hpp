@@ -272,6 +272,15 @@ class NVL144PowerControl : public VRPowerControl
      */
     void transitionToPDBMainPowerOffState();
 
+    /**
+     * @brief Transition to PDB Main Power Off state with PDB Main Power OK check
+     *
+     * Checks current state of NVL144PDBMainPowerOk before transitioning:
+     * - If asserted: transitions to waitForPDBMainPowerOff and waits for de-assertion
+     * - If de-asserted: bypasses wait state and calls completeShutdownAndTransitionToOff directly
+     */
+    void transitionToPDBMainPowerOffStateWithCheck();
+
   private:
     /**
      * @brief Required NVL144 PDB signals (always required for NVL144 platform)
