@@ -10,6 +10,9 @@
 
 #include <cassert>
 #include <chrono>
+#include <string>
+#include <unordered_map>
+#include <variant>
 
 namespace phosphor
 {
@@ -32,9 +35,8 @@ class BMC : public BMCInherit
   public:
     /** @brief Constructs BMC State Manager
      *
-     * @param[in] bus       - The Dbus bus object
-     * @param[in] busName   - The Dbus name to own
-     * @param[in] objPath   - The Dbus object path
+     * @param[in] bus     - The D-Bus bus object
+     * @param[in] objPath - The D-Bus object path
      */
     BMC(sdbusplus::bus_t& bus, const char* objPath) :
         BMCInherit(bus, objPath, BMCInherit::action::defer_emit), bus(bus),
@@ -158,7 +160,7 @@ class BMC : public BMCInherit
     /**
      * @brief the lastRebootTime calculated at startup.
      **/
-    uint64_t rebootTime;
+    uint64_t rebootTime{0};
 };
 
 } // namespace manager

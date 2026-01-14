@@ -117,6 +117,11 @@ class PersistentState
         saveState();
     }
 
+    PersistentState(const PersistentState&) = delete;
+    PersistentState& operator=(const PersistentState&) = delete;
+    PersistentState(PersistentState&&) = delete;
+    PersistentState& operator=(PersistentState&&) = delete;
+
     /**
      * @brief Get parameter value from the storage
      *

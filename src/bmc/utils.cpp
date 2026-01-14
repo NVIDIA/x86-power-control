@@ -34,10 +34,10 @@ constexpr auto SYSTEMD_INTERFACE = "org.freedesktop.systemd1.Manager";
 constexpr auto PROPERTY_INTERFACE = "org.freedesktop.DBus.Properties";
 
 // Get the property value
-PropertyValue getPropertyV2(
-    sdbusplus::bus::bus& bus, const std::string& service,
-    const std::string& objectPath, const std::string& interface,
-    const std::string& propertyName)
+PropertyValue getPropertyV2(sdbusplus::bus_t& bus, const std::string& service,
+                            const std::string& objectPath,
+                            const std::string& interface,
+                            const std::string& propertyName)
 {
     PropertyValue value{};
 

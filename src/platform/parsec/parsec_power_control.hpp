@@ -32,7 +32,7 @@ class ParsecPowerControl : public VRPowerControl
                        std::shared_ptr<sdbusplus::asio::connection> conn,
                        const std::string& configFilePath,
                        const std::string& node, PersistentState& appState);
-    virtual ~ParsecPowerControl() = default;
+    ~ParsecPowerControl() override = default;
 
     /**
      * @brief Get the handler function for a given power state
@@ -116,7 +116,6 @@ class ParsecPowerControl : public VRPowerControl
     */
     void addBoard1GpioStateProperties();
 
-  protected:
     /**
      * @brief Handler for PowerState::on (Parsec Override)
      *
