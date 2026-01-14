@@ -33,7 +33,7 @@ class NVL144PowerControl : public VRPowerControl
                        const std::string& configFilePath,
                        const std::string& node, PersistentState& appState);
 
-    virtual ~NVL144PowerControl() = default;
+    ~NVL144PowerControl() override = default;
 
     /**
      * @brief Get the handler function for a given power state
@@ -46,17 +46,6 @@ class NVL144PowerControl : public VRPowerControl
     std::function<void(Event)> getPowerStateHandler() override;
 
   protected:
-    /**
-     * @brief Validate that all required signals for NVL144 platform are present
-     * in config
-     *
-     * Checks for NVL144-specific PDB signals, then calls
-     * VRPowerControl::validateRequiredSignals() to check common VR signals
-     * based on board presence.
-     *
-     * @throws std::runtime_error if any required signal is missing from config
-     */
-
     /**
      * @brief Validate that all required timer configurations for NVL144
      * platform are present in TimerMap
@@ -77,8 +66,7 @@ class NVL144PowerControl : public VRPowerControl
      * @return void
     */
     void addBoard1GpioStateProperties();
-     
-  protected:
+
     // NVL144 uses the default VR implementations (which are NVL144 behavior)
     // Override only if NVL144 needs platform-specific variations
 
@@ -309,7 +297,6 @@ class NVL144PowerControl : public VRPowerControl
      */
     boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
 
-  private:
     // NVL144-SPECIFIC GPIO HANDLERS (Member functions)
 
     /**
