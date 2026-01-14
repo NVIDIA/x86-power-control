@@ -170,7 +170,7 @@ power_cycle()
 {
     echo "Power Cycle Host"
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
-        RequestedPowerTransition s "$HOST_TRANSITION_REBOOT"
+        RequestedHostTransition s "$HOST_TRANSITION_REBOOT"
     if [ $? -eq 0 ]; then
         echo "Power cycle request sent successfully"
     else

@@ -109,11 +109,11 @@ class ParsecPowerControl : public VRPowerControl
     /**
      * @brief Add Board 1 GPIO state properties
      *
-     * Adds Board 1 GPIO state properties to the GPIO state interface. 
+     * Adds Board 1 GPIO state properties to the GPIO state interface.
      * Board 1 SHDN OK is only present if Board 1 is present.
      *
      * @return void
-    */
+     */
     void addBoard1GpioStateProperties();
 
     /**

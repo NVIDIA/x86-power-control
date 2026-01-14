@@ -90,13 +90,8 @@ class C2PowerControl : public VRPowerControl
      * @brief Required C2 PDB signals
      */
     const std::vector<std::string> requiredSignals = {
-        "C2PDBPSUPowerOk",
-        "C2PDBPSUPowerEnable",
-        "C2PDBType",
-        "C2PDB12VHPMEnable",
-        "C2PDB12VGPU1Enable",
-        "C2PDB12VGPU2Enable"
-    };
+        "C2PDBPSUPowerOk",   "C2PDBPSUPowerEnable", "C2PDBType",
+        "C2PDB12VHPMEnable", "C2PDB12VGPU1Enable",  "C2PDB12VGPU2Enable"};
 
     /**
      * @brief List of required C2 platform-specific timer configurations

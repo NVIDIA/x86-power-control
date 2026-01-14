@@ -105,10 +105,9 @@ bool checkACLoss(size_t& chassisId);
  * @param[in] interface    - The Dbus interface
  * @param[in] property     - The property name to get
  */
-PropertyValue getPropertyV2(sdbusplus::bus_t& bus, const std::string& service,
-                            const std::string& path,
-                            const std::string& interface,
-                            const std::string& property);
+PropertyValue getPropertyV2(
+    sdbusplus::bus_t& bus, const std::string& service, const std::string& path,
+    const std::string& interface, const std::string& property);
 /** @brief Determine if the BMC is at its Ready state
  *
  * @param[in] bus          - The Dbus bus object

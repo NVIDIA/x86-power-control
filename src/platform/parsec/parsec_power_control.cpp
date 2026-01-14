@@ -22,9 +22,10 @@ ParsecPowerControl::ParsecPowerControl(
     // gpioHandlerMap by VRPowerControl constructor Now add Parsec-specific
     // handlers to the map
 
-    addRequiredSignal("GB300PDBMainPowerOk", 0, GPIODirection::IN, [this](bool state) {
-        this->gb300pdbMainPowerOkHandler(state);
-    });
+    addRequiredSignal("GB300PDBMainPowerOk", 0, GPIODirection::IN,
+                      [this](bool state) {
+                          this->gb300pdbMainPowerOkHandler(state);
+                      });
     addRequiredSignal("GB300PDBMainPowerEnable", 0, GPIODirection::OUT);
 
     if (boardPresence.board1Present)
@@ -44,11 +45,12 @@ ParsecPowerControl::ParsecPowerControl(
     // call setDefaultValues() to set the default values for output signals
     setDefaultValues();
 
-    // Initialize ALL host0 interfaces at once - this makes the path visible to ObjectMapper
-    // After this, mapper wait /xyz/openbmc_project/state/host0 will return
-    // and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be ready
+    // Initialize ALL host0 interfaces at once - this makes the path visible to
+    // ObjectMapper After this, mapper wait /xyz/openbmc_project/state/host0
+    // will return and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be
+    // ready
     initializeHostStateInterface();
-    
+
     // Register all GPIO handlers (from base, VR, and Parsec)
     registerGPIOHandlers();
 }
@@ -92,7 +94,7 @@ void ParsecPowerControl::addBoard1GpioStateProperties()
         "Board1CpuShutdownOk", int{-1},
         sdbusplus::vtable::property_::emits_change,
         [this](const auto&) { return board1CpuShutdownOkState; });
-    
+
     // Add Board1 GPIO property setter for D-Bus
     gpioPropertySetters["Board1CpuShutdownOk"] = [](PowerControl* pc, int val) {
         pc->setBoard1CpuShutdownOkState(val);

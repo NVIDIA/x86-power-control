@@ -282,7 +282,8 @@ class VRPowerControl : public PowerControl
     boost::asio::steady_timer powerCycleDelayTimer;
 
     /**
-     * @brief Timer for warm reboot delay (generic timer, can be reused for graceful warm reboot)
+     * @brief Timer for warm reboot delay (generic timer, can be reused for
+     * graceful warm reboot)
      */
     boost::asio::steady_timer warmRebootDelayTimer;
 
@@ -526,8 +527,9 @@ class VRPowerControl : public PowerControl
      *
      * This helper function intelligently transitions to the appropriate state
      * based on the current state of Board0RunPowerPG:
-     * - If Board0RunPowerPG is asserted: Transitions to waitForHPMPowerGoodDeAssert
-     *   and starts watchdog timer to wait for de-assertion
+     * - If Board0RunPowerPG is asserted: Transitions to
+     * waitForHPMPowerGoodDeAssert and starts watchdog timer to wait for
+     * de-assertion
      * - If Board0RunPowerPG is already de-asserted: Transitions directly to
      *   PowerState::off
      *
@@ -538,7 +540,7 @@ class VRPowerControl : public PowerControl
 
     /**
      * @brief Initiate a force warm reboot sequence
-     * 
+     *
      * This is a common helper function that can be used by any VR platform.
      * It performs the following:
      * - Sets action to FORCE_WARM_REBOOT
@@ -552,8 +554,8 @@ class VRPowerControl : public PowerControl
     /**
      * @brief Check for and handle run power faults
      *
-     * Detects when Board0RunPowerPG de-asserts or asserts unexpectedly (i.e., outside
-     * of a controlled power action). When a fault is detected:
+     * Detects when Board0RunPowerPG de-asserts or asserts unexpectedly (i.e.,
+     * outside of a controlled power action). When a fault is detected:
      * - Logs an error message
      * - Sets GPIOs to OFF state
      * - Forces transition to PowerState::off

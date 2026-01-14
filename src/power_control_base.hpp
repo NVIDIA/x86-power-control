@@ -150,13 +150,13 @@ struct ConfigData
     std::optional<std::regex> matchRegex;
     bool polarity;
     ConfigType type;
-    gpiod::line gpioLine; // GPIO line handle
+    gpiod::line gpioLine;    // GPIO line handle
     GPIODirection direction; // GPIO direction (input or output)
     boost::asio::posix::stream_descriptor
-        eventDescriptor;  // Event descriptor for async monitoring
+        eventDescriptor;     // Event descriptor for async monitoring
     std::function<void(bool)>
-        gpioHandler;      // Handler function for GPIO events (initially null,
-                          // populated after loadConfigValues)
+        gpioHandler; // Handler function for GPIO events (initially null,
+                     // populated after loadConfigValues)
 
     // Input event monitoring (for gpio_keys_polled driver)
     bool useInputEvents;  // Use input event monitoring instead of direct GPIO
@@ -169,9 +169,7 @@ struct ConfigData
 
     // Constructor to initialize event descriptor with io_context
     ConfigData(boost::asio::io_context& io) :
-        eventDescriptor(io),
-        gpioHandler(nullptr),
-        useInputEvents(false),
+        eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false),
         defaultStateHostStateOn(DefaultState::NA),
         defaultStateHostStateOff(DefaultState::NA)
     {}
@@ -342,12 +340,13 @@ class PowerControl
 
     /**
      * @brief Map of GPIO signal names to their D-Bus property setter functions
-     * 
+     *
      * Used to initialize D-Bus GPIO properties with actual hardware values.
      * Base class initializes with common Board0 signals. Derived classes can
      * add platform-specific signals (e.g., Board1 signals).
      */
-    std::unordered_map<std::string, std::function<void(PowerControl*, int)>> gpioPropertySetters;
+    std::unordered_map<std::string, std::function<void(PowerControl*, int)>>
+        gpioPropertySetters;
 
     gpiod::line powerButtonMask;
     gpiod::line resetButtonMask;
@@ -370,10 +369,9 @@ class PowerControl
     /**
      * @brief GPIO state tracking for D-Bus properties
      *
-     * These track the current state of common GPIO signals owned and will be exposed via D-Bus:
-     * -1 = Uninitialized (no event received yet)
-     *  0 = De-asserted
-     *  1 = Asserted
+     * These track the current state of common GPIO signals owned and will be
+     * exposed via D-Bus: -1 = Uninitialized (no event received yet) 0 =
+     * De-asserted 1 = Asserted
      */
     int cpuBootDone{-1};
     int cpuResetIndicatorState{-1};
@@ -609,7 +607,7 @@ class PowerControl
      * This method checks that timeout values for all required timers exist in
      * TimerMap after loadConfigValues() has populated it from the JSON config.
      *
-     * Derived classes override to check for platform-specific timeout values. 
+     * Derived classes override to check for platform-specific timeout values.
      * Base class implementation validates upstream/base timers.
      *
      * @throws std::runtime_error if any required timer config is missing
@@ -683,17 +681,10 @@ class PowerControl
      * @brief List of required base/upstream timer configurations
      */
     const std::vector<std::string> baseRequiredTimers = {
-        "PowerPulseMs", 
-        "ForceOffPulseMs",
-        "ResetPulseMs",
-        "PowerCycleMs",
-        "SioPowerGoodWatchdogMs",
-        "PowerOKWatchdogMs",
-        "GracefulPowerOffS",
-        "WarmResetCheckMs",
-        "PowerOffSaveMs",
-        "DbusGetPropertyRetry"
-    };
+        "PowerPulseMs",        "ForceOffPulseMs",        "ResetPulseMs",
+        "PowerCycleMs",        "SioPowerGoodWatchdogMs", "PowerOKWatchdogMs",
+        "GracefulPowerOffS",   "WarmResetCheckMs",       "PowerOffSaveMs",
+        "DbusGetPropertyRetry"};
 
     /**
      * @brief Monitor current host state changes
@@ -751,7 +742,10 @@ class PowerControl
      *          0 = De-asserted (CPU boot not complete)
      *          1 = Asserted (CPU boot complete)
      */
-    int getCPUBootDoneState() const { return cpuBootDone; }
+    int getCPUBootDoneState() const
+    {
+        return cpuBootDone;
+    }
 
     /**
      * @brief Power signal map - maps signal names to ConfigData
@@ -771,7 +765,7 @@ class PowerControl
 
     /**
      * @brief Object server for managing D-Bus objects
-     * 
+     *
      * Must persist for the lifetime of the daemon to keep ObjectManager
      * and all D-Bus interfaces alive.
      */
@@ -799,7 +793,7 @@ class PowerControl
 
     /**
      * @brief Required Board 0 signals
-     * Add all REQUIRED signals to board0 by default, 
+     * Add all REQUIRED signals to board0 by default,
      * as board 0 is always present.
      */
     std::vector<std::string> requiredBoard0Signals;
@@ -823,10 +817,9 @@ class PowerControl
      * @param handler Optional handler function to assign to the signal's
      *                ConfigData
      */
-    void addRequiredSignal(
-        const std::string& signalName, int boardIndex,
-        GPIODirection direction,
-        std::function<void(bool)> handler = nullptr);
+    void addRequiredSignal(const std::string& signalName, int boardIndex,
+                           GPIODirection direction,
+                           std::function<void(bool)> handler = nullptr);
 
     /**
      * @brief Map of GPIO signal names to their handler functions
@@ -837,7 +830,9 @@ class PowerControl
      * corresponding ConfigData objects in the powerSignalMap and calls
      * requestGPIOEvents() for each.
      */
-    void registerGPIOHandler(const std::string& signalName, GPIODirection direction, std::function<void(bool)> handler);
+    void registerGPIOHandler(const std::string& signalName,
+                             GPIODirection direction,
+                             std::function<void(bool)> handler);
 
     /**
      * @brief D-Bus connection
@@ -877,7 +872,6 @@ class PowerControl
      * @brief Timer for warm reset check
      */
     boost::asio::steady_timer warmResetCheckTimer;
-
 
     /**
      * @brief Timer for power OK watchdog on power-on
@@ -1029,7 +1023,8 @@ class PowerControl
     void registerGpioStateInterface();
 
     /**
-     * @brief Initialize ALL D-Bus interfaces on host0 path (call from derived class)
+     * @brief Initialize ALL D-Bus interfaces on host0 path (call from derived
+     * class)
      *
      * Initializes all interfaces on /xyz/openbmc_project/state/host0:
      * - xyz.openbmc_project.State.Gpio
@@ -1038,11 +1033,12 @@ class PowerControl
      * - xyz.openbmc_project.State.Host
      *
      * This should be called from the most-derived class constructor AFTER
-     * all interface properties have been registered (including platform-specific
-     * GPIO properties like Board1CpuShutdownOk).
+     * all interface properties have been registered (including
+     * platform-specific GPIO properties like Board1CpuShutdownOk).
      *
-     * By initializing all interfaces at once, "mapper wait /xyz/openbmc_project/state/host0"
-     * will only return when ALL interfaces are ready.
+     * By initializing all interfaces at once, "mapper wait
+     * /xyz/openbmc_project/state/host0" will only return when ALL interfaces
+     * are ready.
      */
     void initializeHostStateInterface();
 

@@ -130,9 +130,8 @@ void C2PowerControl::validateTimerConfigs()
     {
         if (TimerMap.find(timerName) == TimerMap.end())
         {
-            lg2::error(
-                "Required C2 timer config '{TIMER}' not found in config",
-                "TIMER", timerName);
+            lg2::error("Required C2 timer config '{TIMER}' not found in config",
+                       "TIMER", timerName);
             throw std::runtime_error(
                 "C2PowerControl: Required timer config missing: " + timerName);
         }
@@ -191,8 +190,7 @@ void C2PowerControl::setDefaultValues()
     // C2 PDB 12V HPM Enable
     // - ON: Asserted (12V HPM rail should be powered)
     // - OFF: DeAsserted (12V HPM rail should be unpowered)
-    c2Pdb12vHpmEnable->second->defaultStateHostStateOn =
-        DefaultState::Asserted;
+    c2Pdb12vHpmEnable->second->defaultStateHostStateOn = DefaultState::Asserted;
     c2Pdb12vHpmEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 

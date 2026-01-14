@@ -60,11 +60,11 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Add Board 1 GPIO state properties
      *
-     * Adds Board 1 GPIO state properties to the GPIO state interface. 
+     * Adds Board 1 GPIO state properties to the GPIO state interface.
      * Board 1 SHDN OK is only present if Board 1 is present.
      *
      * @return void
-    */
+     */
     void addBoard1GpioStateProperties();
 
     // NVL144 uses the default VR implementations (which are NVL144 behavior)
@@ -135,17 +135,18 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Handle host-initiated shutdown from PowerState::on
      *
-     * Validates CPU Boot Done state to ensure this is a legitimate host shutdown
-     * request (not hardware strapping). If valid, asserts Pre System Reset lines
-     * for both boards and transitions to waitForCPUResetAssert to leverage the
-     * common shutdown FSM.
+     * Validates CPU Boot Done state to ensure this is a legitimate host
+     * shutdown request (not hardware strapping). If valid, asserts Pre System
+     * Reset lines for both boards and transitions to waitForCPUResetAssert to
+     * leverage the common shutdown FSM.
      */
     void handleHostInitiatedShutdown();
 
     /**
      * @brief Check if system power is already off
      *
-     * @return true if both Board0RunPowerPG and NVL144PDBMainPowerOk are de-asserted
+     * @return true if both Board0RunPowerPG and NVL144PDBMainPowerOk are
+     * de-asserted
      */
     bool isSystemPowerOff();
 
@@ -160,8 +161,7 @@ class NVL144PowerControl : public VRPowerControl
      * and transitions to waitForCPUShutdownOk state.
      */
     void initiateCPUShutdown(const char* shutdownSignalName,
-                             int shutdownOkTimeout,
-                             const char* shutdownAction);
+                             int shutdownOkTimeout, const char* shutdownAction);
 
     /**
      * @brief Handle power on request from PowerState::off
@@ -174,7 +174,8 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Handle power cycle request when in off state
      *
-     * @param event The power cycle event (powerCycleRequest or gracefulPowerCycleRequest)
+     * @param event The power cycle event (powerCycleRequest or
+     * gracefulPowerCycleRequest)
      *
      * Verifies power is actually off by checking Board0RunPowerPG, then
      * initiates power on sequence. If power is not fully off, initiates
@@ -261,11 +262,14 @@ class NVL144PowerControl : public VRPowerControl
     void transitionToPDBMainPowerOffState();
 
     /**
-     * @brief Transition to PDB Main Power Off state with PDB Main Power OK check
+     * @brief Transition to PDB Main Power Off state with PDB Main Power OK
+     * check
      *
      * Checks current state of NVL144PDBMainPowerOk before transitioning:
-     * - If asserted: transitions to waitForPDBMainPowerOff and waits for de-assertion
-     * - If de-asserted: bypasses wait state and calls completeShutdownAndTransitionToOff directly
+     * - If asserted: transitions to waitForPDBMainPowerOff and waits for
+     * de-assertion
+     * - If de-asserted: bypasses wait state and calls
+     * completeShutdownAndTransitionToOff directly
      */
     void transitionToPDBMainPowerOffStateWithCheck();
 
