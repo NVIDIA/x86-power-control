@@ -5,6 +5,11 @@
 #include <sdbusplus/bus.hpp>
 #include <xyz/openbmc_project/Logging/Entry/server.hpp>
 
+#include <chrono>
+#include <map>
+#include <string>
+#include <variant>
+
 namespace phosphor
 {
 namespace state
