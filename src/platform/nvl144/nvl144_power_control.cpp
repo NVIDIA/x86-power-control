@@ -390,7 +390,7 @@ void NVL144PowerControl::handlePowerOnRequest()
     }
 
     auto nvl144pdbMainPowerEnable = getSignal("NVL144PDBMainPowerEnable");
-    if (!nvl144pdbMainPowerEnable)
+    if (!nvl144pdbMainPowerEnable || !nvl144pdbMainPowerEnable->gpioLine)
     {
         lg2::error("CRITICAL: NVL144PDBMainPowerEnable not available - cannot power on");
         return;
@@ -903,7 +903,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
         // Fallback: assume worst case and transition to waitForPDBMainPowerOff
         lg2::info(
             "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
-    setPowerState(PowerState::waitForPDBMainPowerOff);
+        setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
         startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
                    pdbMainPowerOkWatchdogTimer,
