@@ -71,3 +71,9 @@ option(
     value: 'disabled',
     description: 'Enable BMC PowerOff transition (requires custom phosphor-dbus-interfaces with PowerOff enum)',
 )
+option(
+    'install-powerctrl',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Install the D-Bus based powerctrl.sh script from this repo',
+)

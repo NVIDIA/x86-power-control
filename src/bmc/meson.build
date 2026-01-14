@@ -26,3 +26,13 @@ if systemd.found()
         install_dir: systemd.get_variable('systemdsystemunitdir'),
     )
 endif
+
+# Install D-Bus based powerctrl script if enabled
+# When disabled, platform-specific scripts can be installed via bbappend
+if get_option('install-powerctrl').enabled()
+    install_data(
+        'powerctrl.sh',
+        install_dir: get_option('bindir'),
+        install_mode: 'rwxr-xr-x',
+    )
+endif
