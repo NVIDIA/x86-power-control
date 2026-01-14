@@ -275,16 +275,6 @@ class PowerControl
     static void logEvent(std::string_view stateHandler, Event event);
 
     /**
-     * @brief Get the CPU Boot Done state
-     *
-     * @return int CPU Boot Done state:
-     *         -1 = Uninitialized (not set by GPIO monitor yet)
-     *          0 = De-asserted (CPU boot not complete)
-     *          1 = Asserted (CPU boot complete)
-     */
-    int getCPUBootDoneState() const { return cpuBootDone; }
-
-    /**
      * @brief Request all D-Bus bus names for this service
      *
      * This should be called after all initialization is complete,
@@ -753,6 +743,16 @@ class PowerControl
 #endif
 
   protected:
+    /**
+     * @brief Get the CPU Boot Done state
+     *
+     * @return int CPU Boot Done state:
+     *         -1 = Uninitialized (not set by GPIO monitor yet)
+     *          0 = De-asserted (CPU boot not complete)
+     *          1 = Asserted (CPU boot complete)
+     */
+    int getCPUBootDoneState() const { return cpuBootDone; }
+
     /**
      * @brief Power signal map - maps signal names to ConfigData
      *
