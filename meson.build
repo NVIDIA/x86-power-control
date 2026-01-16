@@ -38,6 +38,9 @@ endif
 if get_option('enable-bmc-poweroff').allowed()
     cpp_args += '-DENABLE_BMC_POWEROFF'
 endif
+if get_option('cpu-reset-early-assert-war').allowed()
+    cpp_args += '-DCPU_RESET_EARLY_ASSERT_WAR'
+endif
 
 # Configure IOX paths
 conf_data = configuration_data()

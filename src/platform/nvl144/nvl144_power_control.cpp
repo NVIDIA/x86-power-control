@@ -7,6 +7,9 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <chrono>
+#include <thread>
+
 namespace power_control
 {
 // Type aliases for convenience
@@ -817,6 +820,43 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
 void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 {
     logEvent(__FUNCTION__, event);
+    
+#ifdef CPU_RESET_EARLY_ASSERT_WAR
+    // Hardware bug workaround: CPU_RESET may assert before we enter this state
+    // Check if CPU reset is already asserted when we get here
+    auto cpuResetIndicator = getSignal("CpuResetIndicator");
+    if (cpuResetIndicator && cpuResetIndicator->gpioLine)
+    {
+        bool cpuResetAsserted = 
+            cpuResetIndicator->gpioLine.get_value() == cpuResetIndicator->polarity;
+        
+        if (cpuResetAsserted)
+        {
+            lg2::info("WAR: CPU Reset Indicator already asserted on entry to waitForCPUResetAssert state");
+            cpuResetWatchdogTimer.cancel();
+            lg2::info("CPU Reset Indicator asserted - CPUs entered reset");
+            
+            // Check if this is a warm reboot flow
+            if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                // Warm reboot: start delay timer before de-asserting Pre System
+                // Reset
+                lg2::info("Starting force warm reboot delay of {DELAY}ms",
+                          "DELAY", TimerMap["ForceWarmRebootDelayMs"]);
+                startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
+                           Event::warmRebootDelayTimerExpired);
+                setPowerState(PowerState::waitForRebootDelay);
+            }
+            else
+            {
+                // Shutdown flow: transition to HPM power good de-assert
+                transitionToHPMPowerGoodDeAssertState();
+            }
+            return;
+        }
+    }
+#endif // CPU_RESET_EARLY_ASSERT_WAR
+    
     switch (event)
     {
         case Event::cpuResetIndicatorAssert:

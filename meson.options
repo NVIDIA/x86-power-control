@@ -77,3 +77,9 @@ option(
     value: 'disabled',
     description: 'Install the D-Bus based powerctrl.sh script from this repo',
 )
+option(
+    'cpu-reset-early-assert-war',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable workaround for hardware bug where CPU_RESET asserts before entering waitForCPUResetAssert state (old/broken hardware only)',
+)
