@@ -1,0 +1,13 @@
+[Unit]
+Description=BMC State Manager
+
+
+[Service]
+ExecStart=/usr/bin/bmc-state-manager
+Restart=always
+RestartSec=5s
+Type=dbus
+BusName=xyz.openbmc_project.State.BMC
+
+[Install]
+WantedBy=multi-user.target

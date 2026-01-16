@@ -1,89 +1,122 @@
 {
     "gpio_configs": [
         {
-            "Name": "IdButton",
-            "LineName": "ID_BUTTON",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "NMIButton",
-            "LineName": "NMI_BUTTON",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "NMIOut",
-            "LineName": "NMI_OUT",
+            "Name": "NVL144PDBMainPowerEnable",
+            "LineName": "MAIN_PWR_EN-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
-            "Name": "PostComplete",
-            "LineName": "POST_COMPLETE",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "PowerButton",
-            "LineName": "POWER_BUTTON",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "PowerOk",
-            "LineName": "PS_PWROK",
+            "Name": "NVL144PDBMainPowerOk",
+            "LineName": "MAIN_PWR_OK-I",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
-            "Name": "PowerOut",
-            "LineName": "POWER_OUT",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "ResetButton",
-            "LineName": "RESET_BUTTON",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "ResetOut",
-            "LineName": "RESET_OUT",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "SioOnControl",
-            "LineName": "SIO_ONCONTROL",
-            "Type": "GPIO",
-            "Polarity": "ActiveLow"
-        },
-        {
-            "Name": "SioPowerGood",
-            "LineName": "SIO_POWER_GOOD",
+            "Name": "E1SPowerEnable",
+            "LineName": "E1S_PWR_EN",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
-            "Name": "SIOS5",
-            "LineName": "SIO_S5",
+            "Name": "BMCSSDReset",
+            "LineName": "BMC_SSD0_RST_L",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "USBPowerEnable",
+            "LineName": "USB_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "SSDPowerDisable",
+            "LineName": "SSD0_PWRDIS",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0RunPowerPG",
+            "LineName": "B0_M0_RUN_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerEnable",
+            "LineName": "B0_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board1RunPowerEnable",
+            "LineName": "B1_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0PreSystemReset",
+            "LineName": "B0_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1PreSystemReset",
+            "LineName": "B1_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "CpuResetIndicator",
+            "LineName": "CPU_RST_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownForce",
+            "LineName": "B0_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownForce",
+            "LineName": "B1_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownRequest",
+            "LineName": "B0_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownRequest",
+            "LineName": "B1_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownOk",
+            "LineName": "B0_M0_CPU_SHDN_OK_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownOk",
+            "LineName": "B1_M0_CPU_SHDN_OK_L-I",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         }
     ],
     "timing_configs": {
-        "PowerPulseMs": 200,
-        "ForceOffPulseMs": 15000,
-        "ResetPulseMs": 500,
-        "PowerCycleMs": 5000,
-        "SioPowerGoodWatchdogMs": 1000,
-        "PowerOKWatchdogMs": 8000,
-        "GracefulPowerOffS": 300,
-        "WarmResetCheckMs": 500,
-        "PowerOffSaveMs": 7000,
-        "DbusGetPropertyRetry": 1000
+        "ForcefulCpuShutdownOkWatchdogMs": 100,
+        "GracefulCpuShutdownOkWatchdogMs": 120000,
+        "CpuResetWatchdogMs": 2000,
+        "HPMPowerGoodWatchdogMs": 10000,
+        "NVL144PdbMainPowerOkWatchdogMs": 1000,
+        "PowerCycleDelayMs": 5000,
+        "ForceWarmRebootDelayMs": 1000
     },
     "event_configs": {
         "NMIWhenPoweredOff": true
