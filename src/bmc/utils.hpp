@@ -68,7 +68,7 @@ void setProperty(sdbusplus::bus_t& bus, const std::string& path,
  *
  * @param[in] gpioName          - The name of the GPIO to read
  *
- *  * @return The value of the gpio (0 or 1) or -1 on error
+ * @return The value of the gpio (0 or 1) or -1 on error
  */
 int getGpioValue(const std::string& gpioName);
 
@@ -77,7 +77,7 @@ int getGpioValue(const std::string& gpioName);
  * @param[in] bus           - The Dbus bus object
  * @param[in] errorMsg      - The error message
  * @param[in] errLevel      - The error level
- * parampin] additionalData - Optional extra data to add to the log
+ * @param[in] additionalData - Optional extra data to add to the log
  */
 void createError(
     sdbusplus::bus_t& bus, const std::string& errorMsg,
@@ -95,7 +95,7 @@ void createBmcDump(sdbusplus::bus_t& bus);
  *
  * @param[in] chassisId  - the chassis instance
  */
-bool checkACLoss(size_t& chassisId);
+bool checkACLoss(size_t chassisId);
 
 /** @brief Get the value of property
  *

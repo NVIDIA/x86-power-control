@@ -214,7 +214,7 @@ void createError(
     catch (const std::exception& e)
     {
         error("D-bus call exception: {ERROR}", "ERROR", e);
-        throw e;
+        throw;
     }
 }
 
@@ -245,7 +245,7 @@ void createBmcDump(sdbusplus::bus_t& bus [[maybe_unused]])
 #endif
 }
 
-bool checkACLoss(size_t& chassisId)
+bool checkACLoss(size_t chassisId)
 {
     std::string chassisLostPowerFileFmt =
         std::format(CHASSIS_LOST_POWER_FILE, chassisId);
