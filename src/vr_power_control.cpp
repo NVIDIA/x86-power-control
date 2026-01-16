@@ -194,7 +194,8 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
 
     // Update D-Bus property
     setBoard0RunPowerPGState(state);
-    lg2::info("Board0RunPowerPG GPIO event: value={VALUE}", "VALUE", state);
+    lg2::info("Board0RunPowerPG GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
 
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0RunPowerPGAssert
@@ -239,7 +240,8 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 
     // Update D-Bus property
     setBoard0CpuShutdownOkState(state);
-    lg2::info("Board0CpuShutdownOk GPIO event: value={VALUE}", "VALUE", state);
+    lg2::info("Board0CpuShutdownOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
 
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board0CpuShutdownOkAssert
@@ -260,7 +262,8 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 
     // Update D-Bus property
     setBoard1CpuShutdownOkState(state);
-    lg2::info("Board1CpuShutdownOk GPIO event: value={VALUE}", "VALUE", state);
+    lg2::info("Board1CpuShutdownOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
 
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::board1CpuShutdownOkAssert
@@ -281,7 +284,8 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
 
     // Update D-Bus property
     setCpuResetIndicatorState(state);
-    lg2::info("CpuResetIndicator GPIO event: value={VALUE}", "VALUE", state);
+    lg2::info("CpuResetIndicator GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
 
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::cpuResetIndicatorAssert

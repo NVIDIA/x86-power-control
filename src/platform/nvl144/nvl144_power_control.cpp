@@ -74,7 +74,8 @@ NVL144PowerControl::NVL144PowerControl(
 // NVL144-specific GPIO handler implementations
 void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
 {
-    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}", "VALUE", state);
+    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
 
     auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
     if (it == powerSignalMap.end())
