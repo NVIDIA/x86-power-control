@@ -30,11 +30,12 @@ NVL144PowerControl::NVL144PowerControl(
     // Add NVL144 PDB-specific required signals (Board 0)
     addRequiredSignal("NVL144PDBMainPowerOk", 0, GPIODirection::IN,
                       [this](bool state) {
-                          this->nvl144pdbMainPowerOkHandler(state);
-                      });
+        this->nvl144pdbMainPowerOkHandler(state);
+    });
     addRequiredSignal("NVL144PDBMainPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("E1SPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("BMCSSDReset", 0, GPIODirection::OUT);
+    addRequiredSignal("SSDPowerDisable", 0, GPIODirection::OUT);
 
     if (boardPresence.board1Present)
     {
@@ -60,7 +61,7 @@ NVL144PowerControl::NVL144PowerControl(
     // will return and ALL interfaces (Host, Boot.Progress, OS, Gpio) will be
     // ready
     initializeHostStateInterface();
-
+    
     // Initialize power state from actual hardware before power restore runs
     // For NVL144: Host is ON only if BOTH Board0RunPowerPG AND
     // NVL144PDBMainPowerOk are asserted
@@ -119,7 +120,7 @@ void NVL144PowerControl::addBoard1GpioStateProperties()
         "Board1CpuShutdownOk", int{-1},
         sdbusplus::vtable::property_::emits_change,
         [this](const auto&) { return board1CpuShutdownOkState; });
-
+    
     // Add Board1 GPIO property setter for D-Bus
     gpioPropertySetters["Board1CpuShutdownOk"] = [](PowerControl* pc, int val) {
         pc->setBoard1CpuShutdownOkState(val);
@@ -179,20 +180,20 @@ bool NVL144PowerControl::isSystemPowerOff()
 
     return (
         board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity &&
-        nvl144pdbMainPowerOk->gpioLine.get_value() ==
-            !nvl144pdbMainPowerOk->polarity);
+            nvl144pdbMainPowerOk->gpioLine.get_value() ==
+                !nvl144pdbMainPowerOk->polarity);
 }
 
 // Helper function: Initiate CPU shutdown sequence
 void NVL144PowerControl::initiateCPUShutdown(const char* shutdownSignalName,
-                                             int shutdownOkTimeout,
-                                             const char* shutdownAction)
+                                               int shutdownOkTimeout,
+                                               const char* shutdownAction)
 {
     auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
     if (shutdownSignal == powerSignalMap.end())
     {
         throw std::runtime_error(std::string(shutdownSignalName) +
-                                 " signal not found in powerSignalMap");
+            " signal not found in powerSignalMap");
     }
 
     lg2::info(
@@ -248,7 +249,7 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         isForceful ? "Shutdown Force" : "Shutdown Request";
     int shutdownOkTimeout =
         isForceful ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"]
-                   : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
+                                : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
 
     // Validate CPU Boot Done state for graceful operations
     if (!isForceful)
@@ -309,8 +310,8 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         else
         {
             // Normal shutdown when already off - just transition to off state
-            lg2::info(
-                "PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
+        lg2::info(
+            "PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF and transitioning to PowerState::Off");
             transitionToOffState();
         }
     }
@@ -362,7 +363,7 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             // Initiate force warm reboot using common VR helper
             initiateForceWarmReboot();
             break;
-
+            
         case Event::powerButtonPressed:
             break;
         default:
@@ -540,6 +541,13 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
             "BMCSSDReset signal not found in powerSignalMap");
     }
 
+    auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
+    if (ssdPowerDisable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "SSDPowerDisable signal not found in powerSignalMap");
+    }
+
     // Assert Pre System Reset for Board 0 and Board 1 (if present)
     setGPIOOutput(board0PreSystemReset->second,
                   board0PreSystemReset->second->polarity);
@@ -560,6 +568,7 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     setGPIOOutput(usbPowerEnable->second, usbPowerEnable->second->polarity);
     setGPIOOutput(bmcSSDReset->second,
                   !bmcSSDReset->second->polarity); // de-assert BMC SSD Reset
+    setGPIOOutput(ssdPowerDisable->second, !ssdPowerDisable->second->polarity);
 
     // Assert Run Power Enable for Board 0 and Board 1 (if present)
     setGPIOOutput(board0RunPowerEnable->second,
@@ -756,6 +765,13 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
             "BMCSSDReset signal not found in powerSignalMap");
     }
 
+    auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
+    if (ssdPowerDisable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "SSDPowerDisable signal not found in powerSignalMap");
+    }
+
     // De-assert Board 0 Run Power Enable
     setGPIOOutput(board0RunPowerEnable->second,
                   !board0RunPowerEnable->second->polarity);
@@ -773,10 +789,11 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
                       !board1RunPowerEnable->second->polarity);
     }
 
-    // De-assert peripheral power and assert BMC SSD Reset
+    // De-assert peripheral power and assert BMC SSD Reset and SSD Powe
     setGPIOOutput(e1sPowerEnable->second, !e1sPowerEnable->second->polarity);
     setGPIOOutput(usbPowerEnable->second, !usbPowerEnable->second->polarity);
     setGPIOOutput(bmcSSDReset->second, bmcSSDReset->second->polarity);
+    setGPIOOutput(ssdPowerDisable->second, ssdPowerDisable->second->polarity);
 }
 
 // Helper function: Transition to HPM Power Good de-assert wait state
@@ -805,7 +822,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
         case Event::cpuResetIndicatorAssert:
             cpuResetWatchdogTimer.cancel();
             lg2::info("CPU Reset Indicator asserted - CPUs entered reset");
-
+            
             // Check if this is a warm reboot flow
             if (action == PowerAction::FORCE_WARM_REBOOT)
             {
@@ -814,7 +831,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
                 lg2::info("Starting force warm reboot delay of {DELAY}ms",
                           "DELAY", TimerMap["ForceWarmRebootDelayMs"]);
                 startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
-                           Event::warmRebootDelayTimerExpired);
+                          Event::warmRebootDelayTimerExpired);
                 setPowerState(PowerState::waitForRebootDelay);
             }
             else
@@ -835,7 +852,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
                 lg2::error(
                     "CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence failed {recommend checking CPLD status}");
             }
-
+            
             lg2::error(
                 "Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
             action = PowerAction::NONE;
@@ -844,7 +861,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 
         default:
             lg2::info("No action taken for event: {EVENT}", "EVENT",
-                      getEventName(event));
+                     getEventName(event));
             break;
     }
 }
@@ -931,14 +948,14 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
     }
 
     bool pdbMainPowerOkAsserted = nvl144pdbMainPowerOk->gpioLine.get_value() ==
-                                  nvl144pdbMainPowerOk->polarity;
+        nvl144pdbMainPowerOk->polarity;
 
     if (pdbMainPowerOkAsserted)
     {
         // PDB Main Power OK is still asserted, wait for it to de-assert
         lg2::info(
             "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is currently asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
-
+        
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
         startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
@@ -951,10 +968,10 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
         // proceed directly
         lg2::info(
             "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is already de-asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Bypassing PowerState::waitForPDBMainPowerOff...");
-
+        
         // Still need to de-assert the GPIOs
         deassertPreSystemResetsAndPDBMainPower();
-
+        
         // Call the same completion logic as if we received the de-assert event
         // This ensures we handle FORCE_OFF, GRACE_OFF, POWER_CYCLE, etc.
         // correctly
@@ -1042,6 +1059,13 @@ void NVL144PowerControl::setDefaultValues()
             "BMCSSDReset signal not found in powerSignalMap");
     }
 
+    auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
+    if (ssdPowerDisable == powerSignalMap.end())
+    {
+        throw std::runtime_error(
+            "SSDPowerDisable signal not found in powerSignalMap");
+    }
+
     // All NVL144 signals validated, now set the default states
 
     // NVL144 PDB Main Power Enable
@@ -1063,6 +1087,12 @@ void NVL144PowerControl::setDefaultValues()
     // - OFF: Asserted (BMC SSD should be in reset)
     bmcSsdReset->second->defaultStateHostStateOn = DefaultState::DeAsserted;
     bmcSsdReset->second->defaultStateHostStateOff = DefaultState::Asserted;
+
+    // SSD Power Disable
+    // - ON: DeAsserted (SSD power should be enabled)
+    // - OFF: Asserted (SSD power should be disabled)
+    ssdPowerDisable->second->defaultStateHostStateOn = DefaultState::DeAsserted;
+    ssdPowerDisable->second->defaultStateHostStateOff = DefaultState::Asserted;
 
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();
