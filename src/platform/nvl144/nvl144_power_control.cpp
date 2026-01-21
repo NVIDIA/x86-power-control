@@ -568,11 +568,14 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     }
 
     // Assert peripheral power and de-assert BMC SSD Reset
-    setGPIOOutput(e1sPowerEnable->second, e1sPowerEnable->second->polarity);
-    setGPIOOutput(usbPowerEnable->second, usbPowerEnable->second->polarity);
-    setGPIOOutput(bmcSSDReset->second,
-                  !bmcSSDReset->second->polarity); // de-assert BMC SSD Reset
     setGPIOOutput(ssdPowerDisable->second, !ssdPowerDisable->second->polarity);
+    setGPIOOutput(bmcSSDReset->second, !bmcSSDReset->second->polarity); // de-assert BMC SSD Reset
+
+    // sleep for 1 ms
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    
+    setGPIOOutput(usbPowerEnable->second, usbPowerEnable->second->polarity);
+    setGPIOOutput(e1sPowerEnable->second, e1sPowerEnable->second->polarity);
 
     // Assert Run Power Enable for Board 0 and Board 1 (if present)
     setGPIOOutput(board0RunPowerEnable->second,
@@ -748,13 +751,6 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
             "Board0RunPowerEnable signal not found in powerSignalMap");
     }
 
-    auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
-    if (e1sPowerEnable == powerSignalMap.end())
-    {
-        throw std::runtime_error(
-            "E1SPowerEnable signal not found in powerSignalMap");
-    }
-
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
     if (usbPowerEnable == powerSignalMap.end())
     {
@@ -762,18 +758,11 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
             "USBPowerEnable signal not found in powerSignalMap");
     }
 
-    auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
-    if (bmcSSDReset == powerSignalMap.end())
+    auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
+    if (e1sPowerEnable == powerSignalMap.end())
     {
         throw std::runtime_error(
-            "BMCSSDReset signal not found in powerSignalMap");
-    }
-
-    auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
-    if (ssdPowerDisable == powerSignalMap.end())
-    {
-        throw std::runtime_error(
-            "SSDPowerDisable signal not found in powerSignalMap");
+            "E1SPowerEnable signal not found in powerSignalMap");
     }
 
     // De-assert Board 0 Run Power Enable
@@ -794,10 +783,8 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
     }
 
     // De-assert peripheral power and assert BMC SSD Reset and SSD Powe
-    setGPIOOutput(e1sPowerEnable->second, !e1sPowerEnable->second->polarity);
     setGPIOOutput(usbPowerEnable->second, !usbPowerEnable->second->polarity);
-    setGPIOOutput(bmcSSDReset->second, bmcSSDReset->second->polarity);
-    setGPIOOutput(ssdPowerDisable->second, ssdPowerDisable->second->polarity);
+    setGPIOOutput(e1sPowerEnable->second, !e1sPowerEnable->second->polarity);
 }
 
 // Helper function: Transition to HPM Power Good de-assert wait state
@@ -1125,15 +1112,15 @@ void NVL144PowerControl::setDefaultValues()
 
     // BMC SSD Reset
     // - ON: DeAsserted (BMC SSD should be out of reset)
-    // - OFF: Asserted (BMC SSD should be in reset)
+    // - OFF: DeAsserted (BMC SSD should be out of reset) (should not be toggled when Host is OFF)
     bmcSsdReset->second->defaultStateHostStateOn = DefaultState::DeAsserted;
-    bmcSsdReset->second->defaultStateHostStateOff = DefaultState::Asserted;
+    bmcSsdReset->second->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // SSD Power Disable
     // - ON: DeAsserted (SSD power should be enabled)
-    // - OFF: Asserted (SSD power should be disabled)
+    // - OFF: DeAsserted (SSD power should be enabled) (should not be toggled when Host is OFF)
     ssdPowerDisable->second->defaultStateHostStateOn = DefaultState::DeAsserted;
-    ssdPowerDisable->second->defaultStateHostStateOff = DefaultState::Asserted;
+    ssdPowerDisable->second->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();

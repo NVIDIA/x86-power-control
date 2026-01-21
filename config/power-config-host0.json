@@ -34,7 +34,7 @@
             "Name": "SSDPowerDisable",
             "LineName": "SSD0_PWRDIS",
             "Type": "GPIO",
-            "Polarity": "ActiveLow"
+            "Polarity": "ActiveHigh"
         },
         {
             "Name": "Board0RunPowerPG",
