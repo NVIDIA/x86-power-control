@@ -383,8 +383,7 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
 // Helper function: Handle power on request
 void NVL144PowerControl::handlePowerOnRequest()
 {
-    lg2::info(
-        "Power On Request received. Commencing Host Main Power On sequence.");
+    lg2::info("Power On Request received. Setting GPIOs to default state for host state Off and Commencing Host Main Power On sequence.");
 
     auto board0RunPowerPG = getSignal("Board0RunPowerPG");
     if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
@@ -423,6 +422,7 @@ void NVL144PowerControl::handlePowerOnRequest()
     }
     else
     {
+        setGPIOsForHostStateOff();
         lg2::info(
             "Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
         action = PowerAction::POWER_ON;

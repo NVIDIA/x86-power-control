@@ -503,7 +503,6 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
                 lg2::info(
                     "CPU Reset Indicator de-asserted. CPUs are out of reset. Setting Host Power State to On/Running");
             }
-            setGPIOsForHostStateOn();
             action = PowerAction::NONE;
             setPowerState(PowerState::on);
             break;
