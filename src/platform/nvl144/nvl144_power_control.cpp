@@ -131,36 +131,6 @@ void NVL144PowerControl::addBoard1GpioStateProperties()
     };
 }
 
-// Helper function: Handle host-initiated shutdown
-void NVL144PowerControl::handleHostInitiatedShutdown()
-{
-    // Check CPU Boot Done state to validate this is a legitimate host shutdown
-    int bootDoneState = getCPUBootDoneState();
-
-    if (bootDoneState == -1 || bootDoneState == 0)
-    {
-        lg2::warning(
-            "Host-initiated shutdown (CPU Shutdown OK assertion) received, but CPU Boot Done is not asserted (state={STATE}). Host-initiated shutdown cannot be performed.",
-            "STATE", bootDoneState);
-        return; // No-op, stay in current power state
-    }
-
-    // CPU Boot Done is asserted (bootDoneState == 1), proceed with
-    // host-initiated shutdown
-    lg2::info(
-        "Valid host-initiated shutdown request received from host. CPU Boot Done is asserted. Asserting Pre System Reset lines. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
-
-    action = PowerAction::HOST_INITIATED_SHUTDOWN;
-
-    // Assert Pre System Reset for both boards
-    assertBoardPreSystemResets();
-
-    // Start CPU reset watchdog and transition to wait for CPU reset assertion
-    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                  Event::cpuResetWatchdogTimerExpired);
-    setPowerState(PowerState::waitForCPUResetAssert);
-}
-
 // ============================================================================
 // HELPER FUNCTIONS for handlePowerStateOn
 // ============================================================================
@@ -341,6 +311,10 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
         case Event::board0CpuShutdownOkAssert:
         case Event::board1CpuShutdownOkAssert:
             // Host-initiated shutdown: CPU has asserted SHDN_OK
+            // here check for CPU_BOOT_DONE being de-asserted. If not transition to the waitForCPUBootDoneDeAssert state
+                // waitForCPUBootDoneDeAssert should wait for CPU Boot Done to be de-asserted. Poll it for timeout specified in the TimerMap["WaitForCPUBootDoneDeAssertMs"]
+                // If it hasn't de-asserted by the timeout, then it is a valid host initiated shutdown request.
+                // if does de-assert, then this was a hardware lag and we should do nothing.
             handleHostInitiatedShutdown();
             break;
 

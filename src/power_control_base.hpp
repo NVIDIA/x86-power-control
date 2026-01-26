@@ -44,6 +44,7 @@ enum class PowerState
     waitForCPUResetAssert,
     waitForCPUResetDeAssert,
     waitForCPUShutdownOk,
+    waitForCPUBootDoneDeAssert,
     waitForPowerCycleDelay,
     waitForRebootDelay,
 };
@@ -222,6 +223,7 @@ class PowerControl
         hpmPowerGoodWatchdogTimerExpired,
         cpuResetWatchdogTimerExpired,
         cpuShutdownOkWatchdogTimerExpired,
+        cpuBootDoneDeAssertWatchdogTimerExpired,
         sioPowerGoodWatchdogTimerExpired,
         gracefulPowerOffTimerExpired,
         powerOnRequest,
@@ -249,6 +251,8 @@ class PowerControl
         board0CpuShutdownOkDeAssert,
         board1CpuShutdownOkAssert,
         board1CpuShutdownOkDeAssert,
+        cpuBootDoneAssert,
+        cpuBootDoneDeAssert,
     };
 
     /**

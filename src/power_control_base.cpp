@@ -63,6 +63,8 @@ std::string PowerControl::getEventName(Event event)
             return "CPU reset watchdog timer expired";
         case Event::cpuShutdownOkWatchdogTimerExpired:
             return "CPU shutdown OK watchdog timer expired";
+        case Event::cpuBootDoneDeAssertWatchdogTimerExpired:
+            return "CPU Boot Done de-assert watchdog timer expired";
         case Event::sioPowerGoodWatchdogTimerExpired:
             return "SIO power good watchdog timer expired";
         case Event::gracefulPowerOffTimerExpired:
@@ -117,6 +119,10 @@ std::string PowerControl::getEventName(Event event)
             return "Board 1 CPU shutdown OK assert";
         case Event::board1CpuShutdownOkDeAssert:
             return "Board 1 CPU shutdown OK de-assert";
+        case Event::cpuBootDoneAssert:
+            return "CPU Boot Done assert";
+        case Event::cpuBootDoneDeAssert:
+            return "CPU Boot Done de-assert";
         default:
             return "unknown event: " + std::to_string(static_cast<int>(event));
     }
@@ -1604,6 +1610,11 @@ void PowerControl::registerGpioStateInterface()
 
         // Update property value
         gpioStateIface->set_property("CpuBootDone", state);
+
+        // Send power control event based on state
+        Event cpuBootDoneEvent = (state == 1) ? Event::cpuBootDoneAssert
+                                               : Event::cpuBootDoneDeAssert;
+        sendPowerControlEvent(cpuBootDoneEvent);
     });
 
     // Register property: CpuBootDone (read-only, int type, initialized to -1)

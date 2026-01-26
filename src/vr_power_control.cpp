@@ -24,8 +24,9 @@ VRPowerControl::VRPowerControl(
     PersistentState& appState) :
     PowerControl(ioContext, conn, node, appState, configFilePath),
     hpmPowerGoodWatchdogTimer(ioContext), cpuResetWatchdogTimer(ioContext),
-    cpuShutdownOkWatchdogTimer(ioContext), powerCycleDelayTimer(ioContext),
-    warmRebootDelayTimer(ioContext)
+    cpuShutdownOkWatchdogTimer(ioContext),
+    cpuBootDoneDeAssertWatchdogTimer(ioContext),
+    powerCycleDelayTimer(ioContext), warmRebootDelayTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
@@ -320,6 +321,10 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 
         case PowerState::waitForCPUShutdownOk:
             return [this](Event e) { this->handleWaitForCPUShutdownOk(e); };
+
+        case PowerState::waitForCPUBootDoneDeAssert:
+            return
+                [this](Event e) { this->handleWaitForCPUBootDoneDeAssert(e); };
 
         case PowerState::waitForPowerCycleDelay:
             return [this](Event e) { this->handleWaitForPowerCycleDelay(e); };
@@ -971,6 +976,11 @@ std::string_view VRPowerControl::getHostState() const
         case PowerState::waitForCPUShutdownOk:
             return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
             break;
+        case PowerState::waitForCPUBootDoneDeAssert:
+            // During observation period, system is still ON
+            // We haven't started shutdown yet - just determining if it's reboot or shutdown
+            return "xyz.openbmc_project.State.Host.HostState.Running";
+            break;
         case PowerState::waitForPowerCycleDelay:
         case PowerState::waitForRebootDelay:
             // During power cycle delay or warm reboot delay, host is Off
@@ -1014,6 +1024,11 @@ std::string_view VRPowerControl::getChassisState() const
         case PowerState::waitForHPMPowerGoodDeAssert:
         case PowerState::waitForCPUShutdownOk:
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForCPUBootDoneDeAssert:
+            // During observation period, chassis is still ON
+            // We haven't started shutdown yet - just determining if it's reboot or shutdown
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         case PowerState::waitForCPUResetAssert:
             // For warm reboot, chassis stays On (no power cycle)
@@ -1082,6 +1097,9 @@ std::string VRPowerControl::getPowerStateName()
             break;
         case PowerState::waitForCPUShutdownOk:
             return "Wait for CPU Shutdown OK";
+            break;
+        case PowerState::waitForCPUBootDoneDeAssert:
+            return "Wait for CPU Boot Done De-Assert";
             break;
         case PowerState::waitForPowerCycleDelay:
             return "Wait for Power Cycle Delay";
