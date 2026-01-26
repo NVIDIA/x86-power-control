@@ -125,8 +125,8 @@ void VRPowerControl::transitionToOffStateWithRunPowerCheck()
             "Board0RunPowerPG is currently asserted. Transitioning to waitForHPMPowerGoodDeAssert to wait for de-assertion.");
         setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
         setGPIOsForHostStateOff();
-        startTimerPre("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
-                      Event::hpmPowerGoodWatchdogTimerExpired);
+        startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+                   Event::hpmPowerGoodWatchdogTimerExpired);
     }
     else
     {
@@ -389,8 +389,8 @@ void VRPowerControl::initiateForceWarmReboot()
     }
 
     // Start CPU Reset Assert watchdog and wait for CPU_RESET_L to assert
-    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                  Event::cpuResetWatchdogTimerExpired);
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -429,14 +429,14 @@ void VRPowerControl::deassertPreSystemResets()
 // Helper function: Transition to CPU Reset Assert wait state
 void VRPowerControl::transitionToCPUResetDeAssertState()
 {
-    hpmPowerGoodWatchdogTimer.cancel();
+    cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
     lg2::info(
         "HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetDeAssert.");
 
     deassertPreSystemResets();
-    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                  Event::cpuResetWatchdogTimerExpired);
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetDeAssert);
 }
 
@@ -487,7 +487,7 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
     switch (event)
     {
         case Event::cpuResetIndicatorDeAssert:
-            cpuResetWatchdogTimer.cancel();
+            cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
 
             // Check if this is warm reboot or normal power-on
             if (action == PowerAction::FORCE_WARM_REBOOT)
@@ -603,6 +603,32 @@ int VRPowerControl::getShutdownOkAssertedCount()
     return count;
 }
 
+// Helper function: Handle host-initiated shutdown
+void VRPowerControl::handleHostInitiatedShutdown()
+{
+    // Check CPU Boot Done state to validate this is a legitimate host shutdown
+    int bootDoneState = getCPUBootDoneState();
+
+    if (bootDoneState == -1 || bootDoneState == 0)
+    {
+        lg2::warning(
+            "Host-initiated shutdown (CPU Shutdown OK assertion) received, but CPU Boot Done is not asserted (state={STATE}). Host-initiated shutdown cannot be performed.",
+            "STATE", bootDoneState);
+        return; // No-op, stay in current power state
+    }
+
+    // CPU Boot Done is asserted - start observation period to distinguish
+    // between reboot and shutdown
+    lg2::info(
+        "SHDN_OK asserted with CPU Boot Done asserted. Starting CPU Boot Done observation period to distinguish host initiated reboot from host initiated shutdown. Transitioning to PowerState::waitForCPUBootDoneDeAssert.");
+
+    // Start observation timer - if CPU_BOOT_DONE de-asserts, it's a reboot
+    // If timer expires, it's a valid shutdown
+    startTimer("CpuBootDoneDeAssertDelayMs", cpuBootDoneDeAssertWatchdogTimer,
+               Event::cpuBootDoneDeAssertWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUBootDoneDeAssert);
+}
+
 // Helper function: Assert Pre System Reset lines for all present boards
 void VRPowerControl::assertBoardPreSystemResets()
 {
@@ -633,7 +659,7 @@ void VRPowerControl::assertBoardPreSystemResets()
 // Helper function: Transition to CPU reset assert wait state (success path)
 void VRPowerControl::transitionToCPUResetAssertState()
 {
-    cpuShutdownOkWatchdogTimer.cancel();
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
 
     // Log appropriate message based on board configuration
     if (boardPresence.board1Present)
@@ -648,8 +674,8 @@ void VRPowerControl::transitionToCPUResetAssertState()
     }
 
     assertBoardPreSystemResets();
-    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                  Event::cpuResetWatchdogTimerExpired);
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -673,8 +699,8 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
     lg2::info(
         "CPU Shutdown OK watchdog expired during FORCE_OFF. Proceeding with forced power down.");
     assertBoardPreSystemResets();
-    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                  Event::cpuResetWatchdogTimerExpired);
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -741,8 +767,8 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             }
 
             assertBoardPreSystemResets();
-            startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                          Event::cpuResetWatchdogTimerExpired);
+            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                       Event::cpuResetWatchdogTimerExpired);
             setPowerState(PowerState::waitForCPUResetAssert);
         }
         else
@@ -818,6 +844,46 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
     }
 }
 
+// ============================================================================
+// handleWaitForCPUBootDoneDeAssert state handler
+// ============================================================================
+
+void VRPowerControl::handleWaitForCPUBootDoneDeAssert(Event event)
+{
+    switch (event)
+    {
+        case Event::cpuBootDoneDeAssert:
+            // CPU_BOOT_DONE de-asserted after SHDN_OK - this is a reboot!
+            cancelTimer("CPU Boot Done De-Assert Watchdog Timer",
+                       cpuBootDoneDeAssertWatchdogTimer);
+            
+            lg2::info(
+                "CPU Boot Done de-asserted after SHDN_OK assertion. Host Initiated Reboot operation detected. Ignoring SHDN_OK and returning to PowerState::on.");
+            
+            action = PowerAction::NONE;
+            setPowerState(PowerState::on);
+            break;
+
+        case Event::cpuBootDoneDeAssertWatchdogTimerExpired:
+            // Timer expired, CPU_BOOT_DONE stayed asserted - valid shutdown!
+            lg2::info(
+                "CPU Boot Done remained asserted during observation period. Valid host-initiated shutdown confirmed. Asserting Pre System Reset lines. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
+
+            // Now proceed with actual shutdown
+            action = PowerAction::HOST_INITIATED_SHUTDOWN;
+            assertBoardPreSystemResets();
+            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                       Event::cpuResetWatchdogTimerExpired);
+            setPowerState(PowerState::waitForCPUResetAssert);
+            break;
+
+        default:
+            lg2::info("No action taken for event: {EVENT}", "EVENT",
+                      getEventName(event));
+            break;
+    }
+}
+
 void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
 {
     switch (event)
@@ -825,7 +891,7 @@ void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
         case Event::powerCycleDelayTimerExpired:
             lg2::info(
                 "Power cycle delay complete. Initiating power on sequence");
-            powerCycleDelayTimer.cancel();
+            cancelTimer("Power Cycle Delay Timer", powerCycleDelayTimer);
             setPowerState(PowerState::off);
             // Keep action = POWER_CYCLE - will be cleared when we reach On
             // state Delegate to base/platform handlePowerStateOff to trigger
@@ -850,15 +916,15 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
         case Event::warmRebootDelayTimerExpired:
             lg2::info(
                 "Warm reboot delay complete - de-asserting Pre System Reset signals");
-            warmRebootDelayTimer.cancel();
+            cancelTimer("Warm Reboot Delay Timer", warmRebootDelayTimer);
 
             // De-assert Pre System Reset signals (Board 0 and Board 1 if
             // present)
             deassertPreSystemResets();
 
             // Start CPU Reset De-Assert watchdog
-            startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                          Event::cpuResetWatchdogTimerExpired);
+            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                       Event::cpuResetWatchdogTimerExpired);
 
             setPowerState(PowerState::waitForCPUResetDeAssert);
             break;

@@ -565,11 +565,13 @@ void PowerControl::handlePowerStateOn(Event event)
             }
 #endif
             addRestartCause(RestartCause::softReset);
-            warmResetCheckTimerStart();
+            startTimer("WarmResetCheckMs", warmResetCheckTimer,
+                       Event::warmResetDetected);
             break;
         case Event::powerButtonPressed:
             setPowerState(PowerState::gracefulTransitionToOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             break;
         case Event::powerOffRequest:
             setPowerState(PowerState::transitionToOff);
@@ -577,7 +579,8 @@ void PowerControl::handlePowerStateOn(Event event)
             break;
         case Event::gracefulPowerOffRequest:
             setPowerState(PowerState::gracefulTransitionToOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             gracefulPowerOff();
             break;
         case Event::powerCycleRequest:
@@ -586,12 +589,14 @@ void PowerControl::handlePowerStateOn(Event event)
             break;
         case Event::gracefulPowerCycleRequest:
             setPowerState(PowerState::gracefulTransitionToCycleOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             gracefulPowerOff();
             break;
         case Event::resetButtonPressed:
             setPowerState(PowerState::checkForWarmReset);
-            warmResetCheckTimerStart();
+            startTimer("WarmResetCheckMs", warmResetCheckTimer,
+                       Event::warmResetDetected);
             break;
         case Event::resetRequest:
             reset();
@@ -1889,9 +1894,9 @@ int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config,
     return setGPIOOutputForMs(config, config->polarity, durationMs);
 }
 
-void PowerControl::startTimerPre(const std::string& timerName,
-                                 boost::asio::steady_timer& timer,
-                                 Event eventOnExpiry)
+void PowerControl::startTimer(const std::string& timerName,
+                              boost::asio::steady_timer& timer,
+                              Event eventOnExpiry)
 {
     lg2::info("Starting timer {TIMER_NAME}", "TIMER_NAME", timerName);
 
@@ -1900,41 +1905,46 @@ void PowerControl::startTimerPre(const std::string& timerName,
     if (it == TimerMap.end())
     {
         lg2::error("Timer '{TIMER}' not found in TimerMap", "TIMER", timerName);
-        throw std::runtime_error("Timer not found in TimerMap: " + timerName);
+        return;
     }
 
     int timeoutMs = it->second;
 
-    lg2::info("Starting timer {TIMER_NAME}", "TIMER_NAME", timerName);
-    // Use the version with direct timeout
-    startTimer(timeoutMs, timer, eventOnExpiry);
-}
-
-void PowerControl::startTimer(int timeoutMs, boost::asio::steady_timer& timer,
-                              Event eventOnExpiry)
-{
-    lg2::info("Timer started with {TIMEOUT_MS}ms timeout", "TIMEOUT_MS",
-              timeoutMs);
+    lg2::info("{TIMER_NAME} timer started with {TIMEOUT_MS}ms timeout", "TIMER_NAME",
+              timerName, "TIMEOUT_MS", timeoutMs);
 
     timer.expires_after(std::chrono::milliseconds(timeoutMs));
     timer.async_wait(
-        [this, eventOnExpiry](const boost::system::error_code& ec) {
+        [this, eventOnExpiry, timerName](const boost::system::error_code& ec) {
             if (ec)
             {
                 // operation_aborted is expected if timer is canceled before
                 // completion
                 if (ec != boost::asio::error::operation_aborted)
                 {
-                    lg2::error("Timer async_wait failed: {ERROR_MSG}",
-                               "ERROR_MSG", ec.message());
+                    lg2::error("{TIMER_NAME} timer async_wait failed: {ERROR_MSG}",
+                               "TIMER_NAME", timerName, "ERROR_MSG",
+                               ec.message());
                 }
-                lg2::info("Timer canceled");
+                else
+                {
+                    lg2::info("{TIMER_NAME} timer canceled", "TIMER_NAME", timerName);
+                }
                 return;
             }
 
-            lg2::info("Timer expired");
+            lg2::info("{TIMER_NAME} timer expired", "TIMER_NAME", timerName);
             sendPowerControlEvent(eventOnExpiry);
         });
+}
+
+void PowerControl::cancelTimer(const std::string& timerName,
+                               boost::asio::steady_timer& timer)
+{
+    lg2::info("Canceling {TIMER_NAME} timer", "TIMER_NAME", timerName);
+    timer.cancel();
+    // The timer name will also be logged when the async_wait callback fires
+    // with operation_aborted: "{TIMER_NAME} canceled"
 }
 
 void PowerControl::addRequiredSignal(const std::string& signalName,
@@ -2775,7 +2785,7 @@ void PowerControl::currentHostStateMonitor()
     }
     else
     {
-        pohCounterTimer.cancel();
+        cancelTimer("POH Counter Timer", pohCounterTimer);
         // Set the restart cause set for this restart
         setRestartCause();
     }
@@ -2831,7 +2841,7 @@ void PowerControl::currentHostStateMonitor()
             }
             else
             {
-                pohCounterTimer.cancel();
+                cancelTimer("POH Counter Timer", pohCounterTimer);
                 // POST_COMPLETE GPIO event is not working in some platforms
                 // when power state is changed to OFF. This resulted in
                 // 'OperatingSystemState' to stay at 'Standby', even though

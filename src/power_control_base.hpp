@@ -570,23 +570,21 @@ class PowerControl
      * @param timer Reference to the timer to start
      * @param eventOnExpiry Event to send when timer expires successfully
      */
-    void startTimerPre(const std::string& timerName,
-                       boost::asio::steady_timer& timer,
-                       Event eventOnExpiry);
+    void startTimer(const std::string& timerName,
+                    boost::asio::steady_timer& timer, Event eventOnExpiry);
 
     /**
-     * @brief Start a timer with direct timeout value
+     * @brief Cancel a timer with logging
      *
-     * Starts the timer with the provided timeout value.
-     * Handles all standard error checking and logging.
-     * Calls sendPowerControlEvent with the specified event when timer expires.
+     * Cancels the specified timer and logs the cancellation.
+     * Logs twice: once when cancel is initiated, and once when the
+     * async_wait callback fires with operation_aborted.
      *
-     * @param timeoutMs Timeout in milliseconds
-     * @param timer Reference to the timer to start
-     * @param eventOnExpiry Event to send when timer expires successfully
+     * @param timerName Human-readable name of the timer for logging
+     * @param timer Reference to the timer to cancel
      */
-    void startTimer(int timeoutMs, boost::asio::steady_timer& timer,
-                    Event eventOnExpiry);
+    void cancelTimer(const std::string& timerName,
+                     boost::asio::steady_timer& timer);
 
     /**
      * @brief Validate that all required signals are present in config
