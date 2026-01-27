@@ -125,9 +125,8 @@ void VRPowerControl::transitionToOffStateWithRunPowerCheck()
             "Board0RunPowerPG is currently asserted. Transitioning to waitForHPMPowerGoodDeAssert to wait for de-assertion.");
         setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
         setGPIOsForHostStateOff();
-        startTimer(TimerMap["HPMPowerGoodWatchdogMs"],
-                   hpmPowerGoodWatchdogTimer,
-                   Event::hpmPowerGoodWatchdogTimerExpired);
+        startTimerPre("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+                      Event::hpmPowerGoodWatchdogTimerExpired);
     }
     else
     {
@@ -390,8 +389,8 @@ void VRPowerControl::initiateForceWarmReboot()
     }
 
     // Start CPU Reset Assert watchdog and wait for CPU_RESET_L to assert
-    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-               Event::cpuResetWatchdogTimerExpired);
+    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                  Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -436,8 +435,8 @@ void VRPowerControl::transitionToCPUResetDeAssertState()
         "HPM Board 0 Run Power Good Asserted. De-asserting Pre System Resets. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetDeAssert.");
 
     deassertPreSystemResets();
-    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
-               Event::cpuResetWatchdogTimerExpired);
+    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                  Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetDeAssert);
 }
 
@@ -650,8 +649,8 @@ void VRPowerControl::transitionToCPUResetAssertState()
     }
 
     assertBoardPreSystemResets();
-    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
-               Event::cpuResetWatchdogTimerExpired);
+    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                  Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -675,8 +674,8 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
     lg2::info(
         "CPU Shutdown OK watchdog expired during FORCE_OFF. Proceeding with forced power down.");
     assertBoardPreSystemResets();
-    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
-               Event::cpuResetWatchdogTimerExpired);
+    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                  Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -743,8 +742,8 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             }
 
             assertBoardPreSystemResets();
-            startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
-                       Event::cpuResetWatchdogTimerExpired);
+            startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                          Event::cpuResetWatchdogTimerExpired);
             setPowerState(PowerState::waitForCPUResetAssert);
         }
         else
@@ -859,8 +858,8 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
             deassertPreSystemResets();
 
             // Start CPU Reset De-Assert watchdog
-            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                       Event::cpuResetWatchdogTimerExpired);
+            startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                          Event::cpuResetWatchdogTimerExpired);
 
             setPowerState(PowerState::waitForCPUResetDeAssert);
             break;

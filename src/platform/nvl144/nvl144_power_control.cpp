@@ -156,8 +156,8 @@ void NVL144PowerControl::handleHostInitiatedShutdown()
     assertBoardPreSystemResets();
 
     // Start CPU reset watchdog and transition to wait for CPU reset assertion
-    startTimer(TimerMap["CpuResetWatchdogMs"], cpuResetWatchdogTimer,
-               Event::cpuResetWatchdogTimerExpired);
+    startTimerPre("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+                  Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
 }
 
@@ -251,9 +251,19 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     const char* shutdownType = isForceful ? "Forceful" : "Graceful";
     const char* shutdownAction =
         isForceful ? "Shutdown Force" : "Shutdown Request";
-    int shutdownOkTimeout =
-        isForceful ? TimerMap["ForcefulCpuShutdownOkWatchdogMs"]
-                                : TimerMap["GracefulCpuShutdownOkWatchdogMs"];
+    
+    // Safely get shutdown timeout from TimerMap with find()
+    const std::string timeoutKey = isForceful
+                                        ? "ForcefulCpuShutdownOkWatchdogMs"
+                                        : "GracefulCpuShutdownOkWatchdogMs";
+    auto timeoutIt = TimerMap.find(timeoutKey);
+    if (timeoutIt == TimerMap.end())
+    {
+        lg2::error("Timer config '{TIMER}' not found in TimerMap", "TIMER",
+                   timeoutKey);
+        throw std::runtime_error("Timer config missing: " + timeoutKey);
+    }
+    int shutdownOkTimeout = timeoutIt->second;
 
     // Validate CPU Boot Done state for graceful operations
     if (!isForceful)
@@ -428,9 +438,9 @@ void NVL144PowerControl::handlePowerOnRequest()
         action = PowerAction::POWER_ON;
         setGPIOOutput(nvl144pdbMainPowerEnable,
                       nvl144pdbMainPowerEnable->polarity);
-        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
-                   pdbMainPowerOkWatchdogTimer,
-                   Event::pdbMainPowerOkWatchdogTimerExpired);
+        startTimerPre("NVL144PdbMainPowerOkWatchdogMs",
+                      pdbMainPowerOkWatchdogTimer,
+                      Event::pdbMainPowerOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForPDBMainPowerOk);
     }
 }
@@ -602,8 +612,8 @@ void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
         "NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
 
     assertHPMBoardPowerSequence();
-    startTimer(TimerMap["HPMPowerGoodWatchdogMs"], hpmPowerGoodWatchdogTimer,
-               Event::hpmPowerGoodWatchdogTimerExpired);
+    startTimerPre("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+                  Event::hpmPowerGoodWatchdogTimerExpired);
     setPowerState(PowerState::waitForHPMPowerGoodAssert);
 }
 
@@ -650,8 +660,8 @@ void NVL144PowerControl::transitionToPowerCycleDelay()
 {
     // Keep action (POWER_CYCLE or GRACEFUL_POWER_CYCLE) - don't clear it
     setGPIOsForHostStateOff();
-    startTimer(TimerMap["PowerCycleDelayMs"], powerCycleDelayTimer,
-               Event::powerCycleDelayTimerExpired);
+    startTimerPre("PowerCycleDelayMs", powerCycleDelayTimer,
+                  Event::powerCycleDelayTimerExpired);
     setPowerState(PowerState::waitForPowerCycleDelay);
 }
 
@@ -796,8 +806,8 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
         "CPU Reset Indicator Asserted. CPUs are in reset. De-asserting Run Power Enable, E1S Power Enable, USB Power Enable, and asserting BMC SSD Reset lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodDeAssert.");
 
     deassertHPMPowerAndPeripherals();
-    startTimer(TimerMap["HPMPowerGoodWatchdogMs"], hpmPowerGoodWatchdogTimer,
-               Event::hpmPowerGoodWatchdogTimerExpired);
+    startTimerPre("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+                  Event::hpmPowerGoodWatchdogTimerExpired);
     setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
 }
 
@@ -829,10 +839,12 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             {
                 // Warm reboot: start delay timer before de-asserting Pre System
                 // Reset
+                auto it = TimerMap.find("ForceWarmRebootDelayMs");
+                int delayMs = (it != TimerMap.end()) ? it->second : 0;
                 lg2::info("Starting force warm reboot delay of {DELAY}ms",
-                          "DELAY", TimerMap["ForceWarmRebootDelayMs"]);
-                startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
-                           Event::warmRebootDelayTimerExpired);
+                          "DELAY", delayMs);
+                startTimerPre("ForceWarmRebootDelayMs", warmRebootDelayTimer,
+                              Event::warmRebootDelayTimerExpired);
                 setPowerState(PowerState::waitForRebootDelay);
             }
             else
@@ -856,10 +868,12 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             {
                 // Warm reboot: start delay timer before de-asserting Pre System
                 // Reset
+                auto it = TimerMap.find("ForceWarmRebootDelayMs");
+                int delayMs = (it != TimerMap.end()) ? it->second : 0;
                 lg2::info("Starting force warm reboot delay of {DELAY}ms",
-                          "DELAY", TimerMap["ForceWarmRebootDelayMs"]);
-                startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
-                          Event::warmRebootDelayTimerExpired);
+                          "DELAY", delayMs);
+                startTimerPre("ForceWarmRebootDelayMs", warmRebootDelayTimer,
+                              Event::warmRebootDelayTimerExpired);
                 setPowerState(PowerState::waitForRebootDelay);
             }
             else
@@ -948,9 +962,8 @@ void NVL144PowerControl::transitionToPDBMainPowerOffState()
 
     setPowerState(PowerState::waitForPDBMainPowerOff);
     deassertPreSystemResetsAndPDBMainPower();
-    startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
-               pdbMainPowerOkWatchdogTimer,
-               Event::pdbMainPowerOkWatchdogTimerExpired);
+    startTimerPre("NVL144PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+                  Event::pdbMainPowerOkWatchdogTimerExpired);
 }
 
 // Helper function: Transition to PDB Main Power Off state with PDB Main Power
@@ -969,9 +982,9 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
             "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
-                   pdbMainPowerOkWatchdogTimer,
-                   Event::pdbMainPowerOkWatchdogTimerExpired);
+        startTimerPre("NVL144PdbMainPowerOkWatchdogMs",
+                      pdbMainPowerOkWatchdogTimer,
+                      Event::pdbMainPowerOkWatchdogTimerExpired);
         return;
     }
 
@@ -986,9 +999,9 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
         
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer(TimerMap["NVL144PdbMainPowerOkWatchdogMs"],
-                   pdbMainPowerOkWatchdogTimer,
-                   Event::pdbMainPowerOkWatchdogTimerExpired);
+        startTimerPre("NVL144PdbMainPowerOkWatchdogMs",
+                      pdbMainPowerOkWatchdogTimer,
+                      Event::pdbMainPowerOkWatchdogTimerExpired);
     }
     else
     {

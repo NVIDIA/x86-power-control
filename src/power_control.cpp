@@ -148,8 +148,13 @@ static void slotPowerCycle()
 {
     lg2::info("Slot Power Cycle started\n");
     slotPowerOff();
-    slotPowerCycleTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["SlotPowerCycleMs"]));
+    auto it = TimerMap.find("SlotPowerCycleMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'SlotPowerCycleMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: SlotPowerCycleMs");
+    }
+    slotPowerCycleTimer.expires_after(std::chrono::milliseconds(it->second));
     slotPowerCycleTimer.async_wait([](const boost::system::error_code ec) {
         if (ec)
         {

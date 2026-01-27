@@ -570,8 +570,9 @@ class PowerControl
      * @param timer Reference to the timer to start
      * @param eventOnExpiry Event to send when timer expires successfully
      */
-    void startTimer(const std::string& timerName,
-                    boost::asio::steady_timer& timer, Event eventOnExpiry);
+    void startTimerPre(const std::string& timerName,
+                       boost::asio::steady_timer& timer,
+                       Event eventOnExpiry);
 
     /**
      * @brief Start a timer with direct timeout value
