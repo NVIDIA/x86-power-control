@@ -14,13 +14,13 @@
         },
         {
             "Name": "E1SPowerEnable",
-            "LineName": "E1S_PWR_EN",
+            "LineName": "E1S_PWR_EN-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
             "Name": "BMCSSDReset",
-            "LineName": "BMC_SSD0_RST_L",
+            "LineName": "BMC_SSD0_RST_L-O",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
         },
@@ -32,7 +32,7 @@
         },
         {
             "Name": "SSDPowerDisable",
-            "LineName": "SSD0_PWRDIS",
+            "LineName": "SSD0_PWRDIS-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
