@@ -80,8 +80,8 @@ void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
     auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        lg2::error("NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -167,8 +167,9 @@ void NVL144PowerControl::initiateCPUShutdown(
     auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
     if (shutdownSignal == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            shutdownSignalName + " signal not found in powerSignalMap");
+        lg2::error("{SIGNAL} signal not found in powerSignalMap", "SIGNAL",
+                   shutdownSignalName);
+        return;
     }
 
     lg2::info(
@@ -195,8 +196,9 @@ void NVL144PowerControl::initiateCPUShutdown(
         auto board1ShutdownSignal = powerSignalMap.find(board1SignalName);
         if (board1ShutdownSignal == powerSignalMap.end())
         {
-            throw std::runtime_error(
-                board1SignalName + " signal not found in powerSignalMap");
+            lg2::error("{SIGNAL} signal not found in powerSignalMap", "SIGNAL",
+                       board1SignalName);
+            return;
         }
 
         lg2::info("De-asserting Board 1 CPU {SHUTDOWN_ACTION}",
@@ -489,43 +491,43 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
     if (board0RunPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerEnable signal not found in powerSignalMap");
+        lg2::error("Board0RunPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
 
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
     if (usbPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "USBPowerEnable signal not found in powerSignalMap");
+        lg2::error("USBPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
     if (e1sPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "E1SPowerEnable signal not found in powerSignalMap");
+        lg2::error("E1SPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto bmcSSDReset = powerSignalMap.find("BMCSSDReset");
     if (bmcSSDReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "BMCSSDReset signal not found in powerSignalMap");
+        lg2::error("BMCSSDReset signal not found in powerSignalMap");
+        return;
     }
 
     auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
     if (ssdPowerDisable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "SSDPowerDisable signal not found in powerSignalMap");
+        lg2::error("SSDPowerDisable signal not found in powerSignalMap");
+        return;
     }
 
     // Assert Pre System Reset for Board 0 and Board 1 (if present)
@@ -536,8 +538,9 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
         setGPIOOutput(board1PreSystemReset->second,
                       board1PreSystemReset->second->polarity);
@@ -562,8 +565,9 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
         if (board1RunPowerEnable == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1RunPowerEnable signal not found in powerSignalMap");
+            return;
         }
         setGPIOOutput(board1RunPowerEnable->second,
                       board1RunPowerEnable->second->polarity);
@@ -724,22 +728,22 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
     if (board0RunPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerEnable signal not found in powerSignalMap");
+        lg2::error("Board0RunPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
     if (usbPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "USBPowerEnable signal not found in powerSignalMap");
+        lg2::error("USBPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
     if (e1sPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "E1SPowerEnable signal not found in powerSignalMap");
+        lg2::error("E1SPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     // De-assert Board 0 Run Power Enable
@@ -752,8 +756,9 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
         if (board1RunPowerEnable == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1RunPowerEnable signal not found in powerSignalMap");
+            return;
         }
         setGPIOOutput(board1RunPowerEnable->second,
                       !board1RunPowerEnable->second->polarity);
@@ -847,16 +852,17 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
 
     auto nvl144pdbMainPowerEnable =
         powerSignalMap.find("NVL144PDBMainPowerEnable");
     if (nvl144pdbMainPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     // De-assert Board 0 Pre System Reset
@@ -869,8 +875,9 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
         setGPIOOutput(board1PreSystemReset->second,
                       !board1PreSystemReset->second->polarity);
@@ -1011,29 +1018,33 @@ void NVL144PowerControl::setDefaultValues()
         powerSignalMap.find("NVL144PDBMainPowerEnable");
     if (nvl144PdbMainPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
     if (e1sPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "E1SPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto bmcSsdReset = powerSignalMap.find("BMCSSDReset");
     if (bmcSsdReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "BMCSSDReset signal not found in powerSignalMap");
+        return;
     }
 
     auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
     if (ssdPowerDisable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(   
             "SSDPowerDisable signal not found in powerSignalMap");
+        return;
     }
 
     // All NVL144 signals validated, now set the default states

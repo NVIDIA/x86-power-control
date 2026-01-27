@@ -186,8 +186,8 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     auto it = powerSignalMap.find("Board0RunPowerPG");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0RunPowerPG signal not found in powerSignalMap");
+        lg2::error("Board0RunPowerPG signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -216,8 +216,8 @@ void VRPowerControl::board1RunPowerPGHandler(bool state)
     auto it = powerSignalMap.find("Board1RunPowerPG");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board1RunPowerPG signal not found in powerSignalMap");
+        lg2::error("Board1RunPowerPG signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -232,8 +232,8 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
     auto it = powerSignalMap.find("Board0CpuShutdownOk");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0CpuShutdownOk signal not found in powerSignalMap");
+        lg2::error("Board0CpuShutdownOk signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -254,8 +254,8 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
     auto it = powerSignalMap.find("Board1CpuShutdownOk");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board1CpuShutdownOk signal not found in powerSignalMap");
+        lg2::error("Board1CpuShutdownOk signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -276,8 +276,8 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     auto it = powerSignalMap.find("CpuResetIndicator");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "CpuResetIndicator signal not found in powerSignalMap");
+        lg2::error("CpuResetIndicator signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -374,8 +374,8 @@ void VRPowerControl::initiateForceWarmReboot()
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
     setGPIOOutput(board0PreSystemReset->second,
                   board0PreSystemReset->second->polarity);
@@ -386,8 +386,9 @@ void VRPowerControl::initiateForceWarmReboot()
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
         setGPIOOutput(board1PreSystemReset->second,
                       board1PreSystemReset->second->polarity);
@@ -408,8 +409,8 @@ void VRPowerControl::deassertPreSystemResets()
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
 
     // De-assert Board 0 Pre System Reset
@@ -422,8 +423,9 @@ void VRPowerControl::deassertPreSystemResets()
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
 
         setGPIOOutput(board1PreSystemReset->second,
@@ -640,8 +642,8 @@ void VRPowerControl::assertBoardPreSystemResets()
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
 
     setGPIOOutput(board0PreSystemReset->second,
@@ -652,8 +654,9 @@ void VRPowerControl::assertBoardPreSystemResets()
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
 
         setGPIOOutput(board1PreSystemReset->second,
@@ -1145,37 +1148,42 @@ void VRPowerControl::setDefaultValues()
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
     if (board0RunPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "Board0RunPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "Board0PreSystemReset signal not found in powerSignalMap");
+        return;
     }
 
     auto board0CpuShutdownForce = powerSignalMap.find("Board0CpuShutdownForce");
     if (board0CpuShutdownForce == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "Board0CpuShutdownForce signal not found in powerSignalMap");
+        return;
     }
 
     auto board0CpuShutdownRequest =
         powerSignalMap.find("Board0CpuShutdownRequest");
     if (board0CpuShutdownRequest == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "Board0CpuShutdownRequest signal not found in powerSignalMap");
+        return;
     }
 
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
     if (usbPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "USBPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     // Board 1 signals (if present)
@@ -1189,15 +1197,17 @@ void VRPowerControl::setDefaultValues()
         board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
         if (board1RunPowerEnable == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1RunPowerEnable signal not found in powerSignalMap");
+            return;
         }
 
         board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
         if (board1PreSystemReset == powerSignalMap.end())
         {
-            throw std::runtime_error(
+            lg2::error(
                 "Board1PreSystemReset signal not found in powerSignalMap");
+            return;
         }
     }
 

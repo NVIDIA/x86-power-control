@@ -649,38 +649,6 @@ class PowerControl
     virtual void beep(const uint8_t& beepPriority);
 
     /**
-     * @brief Start the warm reset check timer
-     *
-     * Starts a timer to check for warm reset conditions. When the timer
-     * expires, sends Event::warmResetDetected.
-     */
-    virtual void warmResetCheckTimerStart();
-
-    /**
-     * @brief Start the graceful power-off timer
-     *
-     * Starts a timer for graceful power-off timeout. When the timer expires,
-     * sends Event::gracefulPowerOffTimerExpired.
-     */
-    virtual void gracefulPowerOffTimerStart();
-
-    /**
-     * @brief Start the power cycle timer
-     *
-     * Starts a timer for power cycle delay. When the timer expires, sends
-     * Event::powerCycleTimerExpired.
-     */
-    virtual void powerCycleTimerStart();
-
-    /**
-     * @brief Start the power OK watchdog timer
-     *
-     * Starts a watchdog timer for power OK assertion on power-on. When the
-     * timer expires, sends Event::powerOKWatchdogTimerExpired.
-     */
-    virtual void powerOKWatchdogTimerStart();
-
-    /**
      * @brief List of required base/upstream timer configurations
      */
     const std::vector<std::string> baseRequiredTimers = {

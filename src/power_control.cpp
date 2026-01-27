@@ -152,7 +152,7 @@ static void slotPowerCycle()
     if (it == TimerMap.end())
     {
         lg2::error("Timer config 'SlotPowerCycleMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: SlotPowerCycleMs");
+        return;
     }
     slotPowerCycleTimer.expires_after(std::chrono::milliseconds(it->second));
     slotPowerCycleTimer.async_wait([](const boost::system::error_code ec) {
