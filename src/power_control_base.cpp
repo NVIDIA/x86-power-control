@@ -1905,6 +1905,7 @@ void PowerControl::startTimerPre(const std::string& timerName,
 
     int timeoutMs = it->second;
 
+    lg2::info("Starting timer {TIMER_NAME}", "TIMER_NAME", timerName);
     // Use the version with direct timeout
     startTimer(timeoutMs, timer, eventOnExpiry);
 }
