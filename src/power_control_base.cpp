@@ -901,8 +901,13 @@ void PowerControl::setPowerState(const PowerState state)
 
 void PowerControl::savePowerState(const PowerState state)
 {
-    powerStateSaveTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["PowerOffSaveMs"]));
+    auto it = TimerMap.find("PowerOffSaveMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'PowerOffSaveMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: PowerOffSaveMs");
+    }
+    powerStateSaveTimer.expires_after(std::chrono::milliseconds(it->second));
     powerStateSaveTimer.async_wait([this,
                                     state](const boost::system::error_code ec) {
         if (ec)
@@ -1884,10 +1889,12 @@ int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config,
     return setGPIOOutputForMs(config, config->polarity, durationMs);
 }
 
-void PowerControl::startTimer(const std::string& timerName,
-                              boost::asio::steady_timer& timer,
-                              Event eventOnExpiry)
+void PowerControl::startTimerPre(const std::string& timerName,
+                                 boost::asio::steady_timer& timer,
+                                 Event eventOnExpiry)
 {
+    lg2::info("Starting timer {TIMER_NAME}", "TIMER_NAME", timerName);
+
     // Look up timeout from TimerMap
     auto it = TimerMap.find(timerName);
     if (it == TimerMap.end())
@@ -1898,7 +1905,7 @@ void PowerControl::startTimer(const std::string& timerName,
 
     int timeoutMs = it->second;
 
-    // Use the overloaded version with direct timeout
+    // Use the version with direct timeout
     startTimer(timeoutMs, timer, eventOnExpiry);
 }
 
@@ -2398,20 +2405,24 @@ void PowerControl::resetButtonPressLog()
 
 void PowerControl::systemPowerGoodFailedLog()
 {
+    auto it = TimerMap.find("SioPowerGoodWatchdogMs");
+    int timeoutValue = (it != TimerMap.end()) ? it->second : -1;
     sd_journal_send(
         "MESSAGE=PowerControl: system power good failed to assert (VR failure)",
         "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
         "OpenBMC.0.1.SystemPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
-        TimerMap["SioPowerGoodWatchdogMs"], NULL);
+        timeoutValue, NULL);
 }
 
 void PowerControl::psPowerOKFailedLog()
 {
+    auto it = TimerMap.find("PsPowerOKWatchdogMs");
+    int timeoutValue = (it != TimerMap.end()) ? it->second : -1;
     sd_journal_send(
         "MESSAGE=PowerControl: power supply power good failed to assert",
         "PRIORITY=%i", LOG_INFO, "REDFISH_MESSAGE_ID=%s",
         "OpenBMC.0.1.PowerSupplyPowerGoodFailed", "REDFISH_MESSAGE_ARGS=%d",
-        TimerMap["PsPowerOKWatchdogMs"], NULL);
+        timeoutValue, NULL);
 }
 
 void PowerControl::nmiButtonPressLog()
@@ -2643,8 +2654,13 @@ void PowerControl::beep(const uint8_t& beepPriority)
 void PowerControl::warmResetCheckTimerStart()
 {
     lg2::info("Warm reset check timer started");
-    warmResetCheckTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["WarmResetCheckMs"]));
+    auto it = TimerMap.find("WarmResetCheckMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'WarmResetCheckMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: WarmResetCheckMs");
+    }
+    warmResetCheckTimer.expires_after(std::chrono::milliseconds(it->second));
     warmResetCheckTimer.async_wait([this](const boost::system::error_code ec) {
         if (ec)
         {
@@ -2666,8 +2682,13 @@ void PowerControl::warmResetCheckTimerStart()
 void PowerControl::gracefulPowerOffTimerStart()
 {
     lg2::info("Graceful power-off timer started");
-    gracefulPowerOffTimer.expires_after(
-        std::chrono::seconds(TimerMap["GracefulPowerOffS"]));
+    auto it = TimerMap.find("GracefulPowerOffS");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'GracefulPowerOffS' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: GracefulPowerOffS");
+    }
+    gracefulPowerOffTimer.expires_after(std::chrono::seconds(it->second));
     gracefulPowerOffTimer.async_wait([this](
                                          const boost::system::error_code ec) {
         if (ec)
@@ -2690,8 +2711,13 @@ void PowerControl::gracefulPowerOffTimerStart()
 void PowerControl::powerCycleTimerStart()
 {
     lg2::info("Power-cycle timer started");
-    powerCycleTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["PowerCycleMs"]));
+    auto it = TimerMap.find("PowerCycleMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'PowerCycleMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: PowerCycleMs");
+    }
+    powerCycleTimer.expires_after(std::chrono::milliseconds(it->second));
     powerCycleTimer.async_wait([this](const boost::system::error_code ec) {
         if (ec)
         {
@@ -2713,8 +2739,13 @@ void PowerControl::powerCycleTimerStart()
 void PowerControl::powerOKWatchdogTimerStart()
 {
     lg2::info("power OK watchdog timer started");
-    powerOKWatchdogTimer.expires_after(
-        std::chrono::milliseconds(TimerMap["PowerOKWatchdogMs"]));
+    auto it = TimerMap.find("PowerOKWatchdogMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'PowerOKWatchdogMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: PowerOKWatchdogMs");
+    }
+    powerOKWatchdogTimer.expires_after(std::chrono::milliseconds(it->second));
     powerOKWatchdogTimer.async_wait([this](const boost::system::error_code ec) {
         if (ec)
         {
@@ -3072,7 +3103,13 @@ void PowerControl::powerOn()
     auto powerOutIt = powerSignalMap.find("PowerOut");
     if (powerOutIt != powerSignalMap.end())
     {
-        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+        auto it = TimerMap.find("PowerPulseMs");
+        if (it == TimerMap.end())
+        {
+            lg2::error("Timer config 'PowerPulseMs' not found in TimerMap");
+            throw std::runtime_error("Timer config missing: PowerPulseMs");
+        }
+        assertGPIOForMs(powerOutIt->second, it->second);
     }
     else
     {
@@ -3085,7 +3122,13 @@ void PowerControl::gracefulPowerOff()
     auto powerOutIt = powerSignalMap.find("PowerOut");
     if (powerOutIt != powerSignalMap.end())
     {
-        assertGPIOForMs(powerOutIt->second, TimerMap["PowerPulseMs"]);
+        auto it = TimerMap.find("PowerPulseMs");
+        if (it == TimerMap.end())
+        {
+            lg2::error("Timer config 'PowerPulseMs' not found in TimerMap");
+            throw std::runtime_error("Timer config missing: PowerPulseMs");
+        }
+        assertGPIOForMs(powerOutIt->second, it->second);
     }
     else
     {
@@ -3102,7 +3145,13 @@ void PowerControl::forcePowerOff()
         return;
     }
 
-    if (assertGPIOForMs(powerOutIt->second, TimerMap["ForceOffPulseMs"]) < 0)
+    auto it = TimerMap.find("ForceOffPulseMs");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'ForceOffPulseMs' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: ForceOffPulseMs");
+    }
+    if (assertGPIOForMs(powerOutIt->second, it->second) < 0)
     {
         return;
     }
@@ -3130,7 +3179,13 @@ void PowerControl::reset()
     auto resetOutIt = powerSignalMap.find("ResetOut");
     if (resetOutIt != powerSignalMap.end())
     {
-        assertGPIOForMs(resetOutIt->second, TimerMap["ResetPulseMs"]);
+        auto it = TimerMap.find("ResetPulseMs");
+        if (it == TimerMap.end())
+        {
+            lg2::error("Timer config 'ResetPulseMs' not found in TimerMap");
+            throw std::runtime_error("Timer config missing: ResetPulseMs");
+        }
+        assertGPIOForMs(resetOutIt->second, it->second);
     }
     else
     {
@@ -3242,8 +3297,13 @@ void PowerControl::reschedulePropertyRead(
     }
 
     auto& timer = item->second;
-    timer.expires_after(
-        std::chrono::milliseconds(TimerMap["DbusGetPropertyRetry"]));
+    auto it = TimerMap.find("DbusGetPropertyRetry");
+    if (it == TimerMap.end())
+    {
+        lg2::error("Timer config 'DbusGetPropertyRetry' not found in TimerMap");
+        throw std::runtime_error("Timer config missing: DbusGetPropertyRetry");
+    }
+    timer.expires_after(std::chrono::milliseconds(it->second));
     timer.async_wait([this, configData](const boost::system::error_code ec) {
         if (ec)
         {
