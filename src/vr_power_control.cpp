@@ -677,6 +677,24 @@ void VRPowerControl::transitionToCPUResetAssertState()
     startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
                Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
+
+#ifdef CPU_RESET_EARLY_ASSERT_WAR
+    // Hardware bug workaround: CPU_RESET_L may assert before we enter this state
+    // Check if CPU reset is already asserted immediately after state transition
+    auto cpuResetIndicator = getSignal("CpuResetIndicator");
+    if (cpuResetIndicator && cpuResetIndicator->gpioLine)
+    {
+        bool cpuResetAsserted = 
+            cpuResetIndicator->gpioLine.get_value() == cpuResetIndicator->polarity;
+        
+        if (cpuResetAsserted)
+        {
+            lg2::info("WAR: CPU Reset Indicator already asserted upon entering waitForCPUResetAssert state. Manually triggering Event::cpuResetIndicatorAssert.");
+            // Manually send the event to trigger normal handler flow
+            sendPowerControlEvent(Event::cpuResetIndicatorAssert);
+        }
+    }
+#endif // CPU_RESET_EARLY_ASSERT_WAR
 }
 
 // Helper function: Abort graceful shutdown and return to powered-on state
