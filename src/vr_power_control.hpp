@@ -237,6 +237,15 @@ class VRPowerControl : public PowerControl
     void transitionToCPUResetDeAssertState();
 
     /**
+     * @brief Handle host-initiated shutdown
+     *
+     * Called when SHDN_OK is asserted while CPU_BOOT_DONE is asserted.
+     * Starts observation period to distinguish between reboot (CPU_BOOT_DONE
+     * de-asserts shortly after) and shutdown (CPU_BOOT_DONE stays asserted).
+     */
+    virtual void handleHostInitiatedShutdown();
+
+    /**
      * @brief Board presence information
      *
      * TODO: Replace with actual implementation from coworker
@@ -254,6 +263,8 @@ class VRPowerControl : public PowerControl
         "HPMPowerGoodWatchdogMs",
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
+        "CpuBootDoneDeAssertDelayMs",
+        "PowerOffSaveMs"
     };
 
   protected:
@@ -275,6 +286,14 @@ class VRPowerControl : public PowerControl
      * @brief Timer for CPU shutdown OK assertion
      */
     boost::asio::steady_timer cpuShutdownOkWatchdogTimer;
+
+    /**
+     * @brief Timer for CPU Boot Done de-assertion during host-initiated shutdown
+     *
+     * Used to distinguish between reboot (CPU_BOOT_DONE de-asserts) and
+     * shutdown (CPU_BOOT_DONE stays asserted) when SHDN_OK is asserted.
+     */
+    boost::asio::steady_timer cpuBootDoneDeAssertWatchdogTimer;
 
     /**
      * @brief Timer for power cycle delay between shutdown and power on
@@ -503,6 +522,20 @@ class VRPowerControl : public PowerControl
      * case Event::cpuShutdownOkWatchdogTimerExpired:
      */
     virtual void handleWaitForCPUShutdownOk(Event event);
+
+    /**
+     * @brief Handler for PowerState::waitForCPUBootDoneDeAssert
+     *
+     * Waits for CPU_BOOT_DONE to de-assert (reboot) or timer to expire
+     * (shutdown). This state is used to distinguish between host-initiated
+     * reboot and shutdown when SHDN_OK is asserted.
+     *
+     * case Event::cpuBootDoneDeAssert: Reboot detected - return to On
+     * case Event::cpuBootDoneDeAssertWatchdogTimerExpired: Shutdown confirmed
+     *
+     * @param event The event to process
+     */
+    virtual void handleWaitForCPUBootDoneDeAssert(Event event);
 
     /**
      * @brief Handle events in waitForPowerCycleDelay state

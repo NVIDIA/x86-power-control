@@ -63,6 +63,8 @@ std::string PowerControl::getEventName(Event event)
             return "CPU reset watchdog timer expired";
         case Event::cpuShutdownOkWatchdogTimerExpired:
             return "CPU shutdown OK watchdog timer expired";
+        case Event::cpuBootDoneDeAssertWatchdogTimerExpired:
+            return "CPU Boot Done de-assert watchdog timer expired";
         case Event::sioPowerGoodWatchdogTimerExpired:
             return "SIO power good watchdog timer expired";
         case Event::gracefulPowerOffTimerExpired:
@@ -117,6 +119,10 @@ std::string PowerControl::getEventName(Event event)
             return "Board 1 CPU shutdown OK assert";
         case Event::board1CpuShutdownOkDeAssert:
             return "Board 1 CPU shutdown OK de-assert";
+        case Event::cpuBootDoneAssert:
+            return "CPU Boot Done assert";
+        case Event::cpuBootDoneDeAssert:
+            return "CPU Boot Done de-assert";
         default:
             return "unknown event: " + std::to_string(static_cast<int>(event));
     }
@@ -565,11 +571,13 @@ void PowerControl::handlePowerStateOn(Event event)
             }
 #endif
             addRestartCause(RestartCause::softReset);
-            warmResetCheckTimerStart();
+            startTimer("WarmResetCheckMs", warmResetCheckTimer,
+                       Event::warmResetDetected);
             break;
         case Event::powerButtonPressed:
             setPowerState(PowerState::gracefulTransitionToOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             break;
         case Event::powerOffRequest:
             setPowerState(PowerState::transitionToOff);
@@ -577,7 +585,8 @@ void PowerControl::handlePowerStateOn(Event event)
             break;
         case Event::gracefulPowerOffRequest:
             setPowerState(PowerState::gracefulTransitionToOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             gracefulPowerOff();
             break;
         case Event::powerCycleRequest:
@@ -586,12 +595,14 @@ void PowerControl::handlePowerStateOn(Event event)
             break;
         case Event::gracefulPowerCycleRequest:
             setPowerState(PowerState::gracefulTransitionToCycleOff);
-            gracefulPowerOffTimerStart();
+            startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+                       Event::gracefulPowerOffTimerExpired);
             gracefulPowerOff();
             break;
         case Event::resetButtonPressed:
             setPowerState(PowerState::checkForWarmReset);
-            warmResetCheckTimerStart();
+            startTimer("WarmResetCheckMs", warmResetCheckTimer,
+                       Event::warmResetDetected);
             break;
         case Event::resetRequest:
             reset();
@@ -905,7 +916,7 @@ void PowerControl::savePowerState(const PowerState state)
     if (it == TimerMap.end())
     {
         lg2::error("Timer config 'PowerOffSaveMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: PowerOffSaveMs");
+        return;
     }
     powerStateSaveTimer.expires_after(std::chrono::milliseconds(it->second));
     powerStateSaveTimer.async_wait([this,
@@ -1008,8 +1019,7 @@ void PowerControl::registerHostInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
@@ -1028,8 +1038,7 @@ void PowerControl::registerHostInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
@@ -1048,8 +1057,7 @@ void PowerControl::registerHostInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
@@ -1072,8 +1080,7 @@ void PowerControl::registerHostInterface()
                 }
                 else
                 {
-                    lg2::info("Reset Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Reset Button Masked.");
                     return 0;
                 }
             }
@@ -1093,15 +1100,13 @@ void PowerControl::registerHostInterface()
                 }
                 else
                 {
-                    lg2::info("Reset Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Reset Button Masked.");
                     return 0;
                 }
             }
             else
             {
                 lg2::error("Unrecognized host state transition request.");
-                throw std::invalid_argument("Unrecognized Transition Request");
                 return 0;
             }
             resp = requested;
@@ -1151,8 +1156,7 @@ void PowerControl::initializeChassisInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
@@ -1171,8 +1175,7 @@ void PowerControl::initializeChassisInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
@@ -1191,15 +1194,13 @@ void PowerControl::initializeChassisInterface()
                 }
                 else
                 {
-                    lg2::info("Power Button Masked.");
-                    throw std::invalid_argument("Transition Request Masked");
+                    lg2::warning("Power Button Masked.");
                     return 0;
                 }
             }
             else
             {
                 lg2::error("Unrecognized chassis state transition request.");
-                throw std::invalid_argument("Unrecognized Transition Request");
                 return 0;
             }
             resp = requested;
@@ -1239,7 +1240,6 @@ void PowerControl::initializeChassisSystemInterface()
             {
                 lg2::error(
                     "Unrecognized chassis system state transition request.");
-                throw std::invalid_argument("Unrecognized Transition Request");
                 return 0;
             }
             resp = requested;
@@ -1337,7 +1337,7 @@ void PowerControl::initializeButtonInterfaces()
                         if (!setGPIOOutput(powerOutConfig->second,
                                            !powerOutConfig->second->polarity))
                         {
-                            throw std::runtime_error("Failed to request GPIO");
+                            lg2::error("Failed to request GPIO");
                             return 0;
                         }
                         powerButtonMask = powerOutConfig->second->gpioLine;
@@ -1396,7 +1396,7 @@ void PowerControl::initializeButtonInterfaces()
                         if (!setGPIOOutput(resetOutConfig->second,
                                            !resetOutConfig->second->polarity))
                         {
-                            throw std::runtime_error("Failed to request GPIO");
+                            lg2::error("Failed to request GPIO");
                             return 0;
                         }
                         resetButtonMask = resetOutConfig->second->gpioLine;
@@ -1555,7 +1555,7 @@ void PowerControl::initializeRestartCauseInterface()
             }
             else
             {
-                throw std::invalid_argument(
+                lg2::error(
                     "Unrecognized RestartCause Request");
                 return 0;
             }
@@ -1586,8 +1586,7 @@ void PowerControl::registerGpioStateInterface()
             lg2::error("SetCpuBootDone rejected: Invalid state value {STATE}. "
                        "Only 0 (de-asserted) or 1 (asserted) are allowed.",
                        "STATE", state);
-            throw std::invalid_argument(
-                "Invalid state value. Only 0 or 1 allowed.");
+            return 0;
         }
 
         // Update member variable
@@ -1599,6 +1598,12 @@ void PowerControl::registerGpioStateInterface()
 
         // Update property value
         gpioStateIface->set_property("CpuBootDone", state);
+
+        // Send power control event based on state
+        Event cpuBootDoneEvent = (state == 1) ? Event::cpuBootDoneAssert
+                                               : Event::cpuBootDoneDeAssert;
+        sendPowerControlEvent(cpuBootDoneEvent);
+        return 1;
     });
 
     // Register property: CpuBootDone (read-only, int type, initialized to -1)
@@ -1889,9 +1894,9 @@ int PowerControl::assertGPIOForMs(std::shared_ptr<ConfigData> config,
     return setGPIOOutputForMs(config, config->polarity, durationMs);
 }
 
-void PowerControl::startTimerPre(const std::string& timerName,
-                                 boost::asio::steady_timer& timer,
-                                 Event eventOnExpiry)
+void PowerControl::startTimer(const std::string& timerName,
+                              boost::asio::steady_timer& timer,
+                              Event eventOnExpiry)
 {
     lg2::info("Starting timer {TIMER_NAME}", "TIMER_NAME", timerName);
 
@@ -1900,40 +1905,46 @@ void PowerControl::startTimerPre(const std::string& timerName,
     if (it == TimerMap.end())
     {
         lg2::error("Timer '{TIMER}' not found in TimerMap", "TIMER", timerName);
-        throw std::runtime_error("Timer not found in TimerMap: " + timerName);
+        return;
     }
 
     int timeoutMs = it->second;
 
-    // Use the version with direct timeout
-    startTimer(timeoutMs, timer, eventOnExpiry);
-}
-
-void PowerControl::startTimer(int timeoutMs, boost::asio::steady_timer& timer,
-                              Event eventOnExpiry)
-{
-    lg2::info("Timer started with {TIMEOUT_MS}ms timeout", "TIMEOUT_MS",
-              timeoutMs);
+    lg2::info("{TIMER_NAME} timer started with {TIMEOUT_MS}ms timeout", "TIMER_NAME",
+              timerName, "TIMEOUT_MS", timeoutMs);
 
     timer.expires_after(std::chrono::milliseconds(timeoutMs));
     timer.async_wait(
-        [this, eventOnExpiry](const boost::system::error_code& ec) {
+        [this, eventOnExpiry, timerName](const boost::system::error_code& ec) {
             if (ec)
             {
                 // operation_aborted is expected if timer is canceled before
                 // completion
                 if (ec != boost::asio::error::operation_aborted)
                 {
-                    lg2::error("Timer async_wait failed: {ERROR_MSG}",
-                               "ERROR_MSG", ec.message());
+                    lg2::error("{TIMER_NAME} timer async_wait failed: {ERROR_MSG}",
+                               "TIMER_NAME", timerName, "ERROR_MSG",
+                               ec.message());
                 }
-                lg2::info("Timer canceled");
+                else
+                {
+                    lg2::info("{TIMER_NAME} timer canceled", "TIMER_NAME", timerName);
+                }
                 return;
             }
 
-            lg2::info("Timer expired");
+            lg2::info("{TIMER_NAME} timer expired", "TIMER_NAME", timerName);
             sendPowerControlEvent(eventOnExpiry);
         });
+}
+
+void PowerControl::cancelTimer(const std::string& timerName,
+                               boost::asio::steady_timer& timer)
+{
+    lg2::info("Canceling {TIMER_NAME}", "TIMER_NAME", timerName);
+    timer.cancel();
+    // The timer name will also be logged when the async_wait callback fires
+    // with operation_aborted: "{TIMER_NAME} canceled"
 }
 
 void PowerControl::addRequiredSignal(const std::string& signalName,
@@ -2124,7 +2135,8 @@ void PowerControl::powerOKHandler(bool state)
     auto it = powerSignalMap.find("PowerOk");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error("PowerOk signal not found in powerSignalMap");
+        lg2::error("PowerOk signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -2139,8 +2151,8 @@ void PowerControl::sioPowerGoodHandler(bool state)
     auto it = powerSignalMap.find("SioPowerGood");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "SioPowerGood signal not found in powerSignalMap");
+        lg2::error("SioPowerGood signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -2155,7 +2167,8 @@ void PowerControl::sioS5Handler(bool state)
     auto it = powerSignalMap.find("SIOS5");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error("SIOS5 signal not found in powerSignalMap");
+        lg2::error("SIOS5 signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -2169,8 +2182,8 @@ void PowerControl::powerButtonHandler(bool state)
     auto it = powerSignalMap.find("PowerButton");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "PowerButton signal not found in powerSignalMap");
+        lg2::error("PowerButton signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -2204,8 +2217,8 @@ void PowerControl::resetButtonHandler(bool state)
 
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "ResetButton signal not found in powerSignalMap");
+        lg2::error("ResetButton signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -2651,119 +2664,6 @@ void PowerControl::beep(const uint8_t& beepPriority)
         "xyz.openbmc_project.BeepCode", "Beep", uint8_t(beepPriority));
 }
 
-void PowerControl::warmResetCheckTimerStart()
-{
-    lg2::info("Warm reset check timer started");
-    auto it = TimerMap.find("WarmResetCheckMs");
-    if (it == TimerMap.end())
-    {
-        lg2::error("Timer config 'WarmResetCheckMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: WarmResetCheckMs");
-    }
-    warmResetCheckTimer.expires_after(std::chrono::milliseconds(it->second));
-    warmResetCheckTimer.async_wait([this](const boost::system::error_code ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("Warm reset check async_wait failed: {ERROR_MSG}",
-                           "ERROR_MSG", ec.message());
-            }
-            lg2::info("Warm reset check timer canceled");
-            return;
-        }
-        lg2::info("Warm reset check timer completed");
-        sendPowerControlEvent(Event::warmResetDetected);
-    });
-}
-
-void PowerControl::gracefulPowerOffTimerStart()
-{
-    lg2::info("Graceful power-off timer started");
-    auto it = TimerMap.find("GracefulPowerOffS");
-    if (it == TimerMap.end())
-    {
-        lg2::error("Timer config 'GracefulPowerOffS' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: GracefulPowerOffS");
-    }
-    gracefulPowerOffTimer.expires_after(std::chrono::seconds(it->second));
-    gracefulPowerOffTimer.async_wait([this](
-                                         const boost::system::error_code ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("Graceful power-off async_wait failed: {ERROR_MSG}",
-                           "ERROR_MSG", ec.message());
-            }
-            lg2::info("Graceful power-off timer canceled");
-            return;
-        }
-        lg2::info("Graceful power-off timer completed");
-        sendPowerControlEvent(Event::gracefulPowerOffTimerExpired);
-    });
-}
-
-void PowerControl::powerCycleTimerStart()
-{
-    lg2::info("Power-cycle timer started");
-    auto it = TimerMap.find("PowerCycleMs");
-    if (it == TimerMap.end())
-    {
-        lg2::error("Timer config 'PowerCycleMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: PowerCycleMs");
-    }
-    powerCycleTimer.expires_after(std::chrono::milliseconds(it->second));
-    powerCycleTimer.async_wait([this](const boost::system::error_code ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("Power-cycle async_wait failed: {ERROR_MSG}",
-                           "ERROR_MSG", ec.message());
-            }
-            lg2::info("Power-cycle timer canceled");
-            return;
-        }
-        lg2::info("Power-cycle timer completed");
-        sendPowerControlEvent(Event::powerCycleTimerExpired);
-    });
-}
-
-void PowerControl::powerOKWatchdogTimerStart()
-{
-    lg2::info("power OK watchdog timer started");
-    auto it = TimerMap.find("PowerOKWatchdogMs");
-    if (it == TimerMap.end())
-    {
-        lg2::error("Timer config 'PowerOKWatchdogMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: PowerOKWatchdogMs");
-    }
-    powerOKWatchdogTimer.expires_after(std::chrono::milliseconds(it->second));
-    powerOKWatchdogTimer.async_wait([this](const boost::system::error_code ec) {
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("power OK watchdog async_wait failed: {ERROR_MSG}",
-                           "ERROR_MSG", ec.message());
-            }
-            lg2::info("power OK watchdog timer canceled");
-            return;
-        }
-        lg2::info("power OK watchdog timer expired");
-        sendPowerControlEvent(Event::powerOKWatchdogTimerExpired);
-    });
-}
-
 void PowerControl::currentHostStateMonitor()
 {
     if (getHostState() == "xyz.openbmc_project.State.Host.HostState.Running")
@@ -2774,7 +2674,7 @@ void PowerControl::currentHostStateMonitor()
     }
     else
     {
-        pohCounterTimer.cancel();
+        cancelTimer("POH Counter Timer", pohCounterTimer);
         // Set the restart cause set for this restart
         setRestartCause();
     }
@@ -2830,7 +2730,7 @@ void PowerControl::currentHostStateMonitor()
             }
             else
             {
-                pohCounterTimer.cancel();
+                cancelTimer("POH Counter Timer", pohCounterTimer);
                 // POST_COMPLETE GPIO event is not working in some platforms
                 // when power state is changed to OFF. This resulted in
                 // 'OperatingSystemState' to stay at 'Standby', even though
@@ -3107,7 +3007,7 @@ void PowerControl::powerOn()
         if (it == TimerMap.end())
         {
             lg2::error("Timer config 'PowerPulseMs' not found in TimerMap");
-            throw std::runtime_error("Timer config missing: PowerPulseMs");
+            return;
         }
         assertGPIOForMs(powerOutIt->second, it->second);
     }
@@ -3126,7 +3026,7 @@ void PowerControl::gracefulPowerOff()
         if (it == TimerMap.end())
         {
             lg2::error("Timer config 'PowerPulseMs' not found in TimerMap");
-            throw std::runtime_error("Timer config missing: PowerPulseMs");
+            return;
         }
         assertGPIOForMs(powerOutIt->second, it->second);
     }
@@ -3149,7 +3049,7 @@ void PowerControl::forcePowerOff()
     if (it == TimerMap.end())
     {
         lg2::error("Timer config 'ForceOffPulseMs' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: ForceOffPulseMs");
+        return;
     }
     if (assertGPIOForMs(powerOutIt->second, it->second) < 0)
     {
@@ -3183,7 +3083,7 @@ void PowerControl::reset()
         if (it == TimerMap.end())
         {
             lg2::error("Timer config 'ResetPulseMs' not found in TimerMap");
-            throw std::runtime_error("Timer config missing: ResetPulseMs");
+            return;
         }
         assertGPIOForMs(resetOutIt->second, it->second);
     }
@@ -3301,7 +3201,7 @@ void PowerControl::reschedulePropertyRead(
     if (it == TimerMap.end())
     {
         lg2::error("Timer config 'DbusGetPropertyRetry' not found in TimerMap");
-        throw std::runtime_error("Timer config missing: DbusGetPropertyRetry");
+        return;
     }
     timer.expires_after(std::chrono::milliseconds(it->second));
     timer.async_wait([this, configData](const boost::system::error_code ec) {

@@ -44,6 +44,7 @@ enum class PowerState
     waitForCPUResetAssert,
     waitForCPUResetDeAssert,
     waitForCPUShutdownOk,
+    waitForCPUBootDoneDeAssert,
     waitForPowerCycleDelay,
     waitForRebootDelay,
 };
@@ -222,6 +223,7 @@ class PowerControl
         hpmPowerGoodWatchdogTimerExpired,
         cpuResetWatchdogTimerExpired,
         cpuShutdownOkWatchdogTimerExpired,
+        cpuBootDoneDeAssertWatchdogTimerExpired,
         sioPowerGoodWatchdogTimerExpired,
         gracefulPowerOffTimerExpired,
         powerOnRequest,
@@ -249,6 +251,8 @@ class PowerControl
         board0CpuShutdownOkDeAssert,
         board1CpuShutdownOkAssert,
         board1CpuShutdownOkDeAssert,
+        cpuBootDoneAssert,
+        cpuBootDoneDeAssert,
     };
 
     /**
@@ -570,23 +574,21 @@ class PowerControl
      * @param timer Reference to the timer to start
      * @param eventOnExpiry Event to send when timer expires successfully
      */
-    void startTimerPre(const std::string& timerName,
-                       boost::asio::steady_timer& timer,
-                       Event eventOnExpiry);
+    void startTimer(const std::string& timerName,
+                    boost::asio::steady_timer& timer, Event eventOnExpiry);
 
     /**
-     * @brief Start a timer with direct timeout value
+     * @brief Cancel a timer with logging
      *
-     * Starts the timer with the provided timeout value.
-     * Handles all standard error checking and logging.
-     * Calls sendPowerControlEvent with the specified event when timer expires.
+     * Cancels the specified timer and logs the cancellation.
+     * Logs twice: once when cancel is initiated, and once when the
+     * async_wait callback fires with operation_aborted.
      *
-     * @param timeoutMs Timeout in milliseconds
-     * @param timer Reference to the timer to start
-     * @param eventOnExpiry Event to send when timer expires successfully
+     * @param timerName Human-readable name of the timer for logging
+     * @param timer Reference to the timer to cancel
      */
-    void startTimer(int timeoutMs, boost::asio::steady_timer& timer,
-                    Event eventOnExpiry);
+    void cancelTimer(const std::string& timerName,
+                     boost::asio::steady_timer& timer);
 
     /**
      * @brief Validate that all required signals are present in config
@@ -645,38 +647,6 @@ class PowerControl
      * @param beepPriority Priority level for the beep (0-255)
      */
     virtual void beep(const uint8_t& beepPriority);
-
-    /**
-     * @brief Start the warm reset check timer
-     *
-     * Starts a timer to check for warm reset conditions. When the timer
-     * expires, sends Event::warmResetDetected.
-     */
-    virtual void warmResetCheckTimerStart();
-
-    /**
-     * @brief Start the graceful power-off timer
-     *
-     * Starts a timer for graceful power-off timeout. When the timer expires,
-     * sends Event::gracefulPowerOffTimerExpired.
-     */
-    virtual void gracefulPowerOffTimerStart();
-
-    /**
-     * @brief Start the power cycle timer
-     *
-     * Starts a timer for power cycle delay. When the timer expires, sends
-     * Event::powerCycleTimerExpired.
-     */
-    virtual void powerCycleTimerStart();
-
-    /**
-     * @brief Start the power OK watchdog timer
-     *
-     * Starts a watchdog timer for power OK assertion on power-on. When the
-     * timer expires, sends Event::powerOKWatchdogTimerExpired.
-     */
-    virtual void powerOKWatchdogTimerStart();
 
     /**
      * @brief List of required base/upstream timer configurations

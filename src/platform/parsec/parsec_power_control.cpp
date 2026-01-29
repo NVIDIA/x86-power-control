@@ -62,8 +62,8 @@ void ParsecPowerControl::gb300pdbMainPowerOkHandler(bool state)
     auto it = powerSignalMap.find("GB300PDBMainPowerOk");
     if (it == powerSignalMap.end())
     {
-        throw std::runtime_error(
-            "GB300PDBMainPowerOk signal not found in powerSignalMap");
+        lg2::error("GB300PDBMainPowerOk signal not found in powerSignalMap");
+        return;
     }
 
     auto& config = *it->second;
@@ -192,8 +192,9 @@ void ParsecPowerControl::setDefaultValues()
         powerSignalMap.find("GB300PDBMainPowerEnable");
     if (gb300PdbMainPowerEnable == powerSignalMap.end())
     {
-        throw std::runtime_error(
+        lg2::error(
             "GB300PDBMainPowerEnable signal not found in powerSignalMap");
+        return;
     }
 
     // All Parsec signals validated, now set the default states
