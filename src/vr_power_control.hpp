@@ -264,6 +264,7 @@ class VRPowerControl : public PowerControl
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
         "CpuBootDoneDeAssertDelayMs",
+        "PowerOffSaveMs"
     };
 
   protected:
