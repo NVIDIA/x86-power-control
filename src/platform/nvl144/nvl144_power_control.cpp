@@ -562,7 +562,7 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     setGPIOOutput(board0RunPowerEnable->second,
                   board0RunPowerEnable->second->polarity);
 
-    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 1 ms after asserting Board 0 Run Power Enable");
+    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     
     if (boardPresence.board1Present)
