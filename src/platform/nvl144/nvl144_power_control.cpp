@@ -533,6 +533,7 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     // Assert Pre System Reset for Board 0 and Board 1 (if present)
     setGPIOOutput(board0PreSystemReset->second,
                   board0PreSystemReset->second->polarity);
+    
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
@@ -560,6 +561,10 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     // Assert Run Power Enable for Board 0 and Board 1 (if present)
     setGPIOOutput(board0RunPowerEnable->second,
                   board0RunPowerEnable->second->polarity);
+
+    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 1 ms after asserting Board 0 Run Power Enable");
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    
     if (boardPresence.board1Present)
     {
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
