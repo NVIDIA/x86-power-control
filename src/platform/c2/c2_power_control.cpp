@@ -152,32 +152,28 @@ void C2PowerControl::setDefaultValues()
     auto c2PdbPsuPowerEnable = powerSignalMap.find("C2PDBPSUPowerEnable");
     if (c2PdbPsuPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "C2PDBPSUPowerEnable signal not found in powerSignalMap");
+        lg2::error("C2PDBPSUPowerEnable signal not found in powerSignalMap");
         return;
     }
 
     auto c2Pdb12vHpmEnable = powerSignalMap.find("C2PDB12VHPMEnable");
     if (c2Pdb12vHpmEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "C2PDB12VHPMEnable signal not found in powerSignalMap");
+        lg2::error("C2PDB12VHPMEnable signal not found in powerSignalMap");
         return;
     }
 
     auto c2Pdb12vGpu1Enable = powerSignalMap.find("C2PDB12VGPU1Enable");
     if (c2Pdb12vGpu1Enable == powerSignalMap.end())
     {
-        lg2::error(
-            "C2PDB12VGPU1Enable signal not found in powerSignalMap");
+        lg2::error("C2PDB12VGPU1Enable signal not found in powerSignalMap");
         return;
     }
 
     auto c2Pdb12vGpu2Enable = powerSignalMap.find("C2PDB12VGPU2Enable");
     if (c2Pdb12vGpu2Enable == powerSignalMap.end())
     {
-        lg2::error(
-            "C2PDB12VGPU2Enable signal not found in powerSignalMap");
+        lg2::error("C2PDB12VGPU2Enable signal not found in powerSignalMap");
         return;
     }
 

@@ -1555,8 +1555,7 @@ void PowerControl::initializeRestartCauseInterface()
             }
             else
             {
-                lg2::error(
-                    "Unrecognized RestartCause Request");
+                lg2::error("Unrecognized RestartCause Request");
                 return 0;
             }
 
@@ -1601,7 +1600,7 @@ void PowerControl::registerGpioStateInterface()
 
         // Send power control event based on state
         Event cpuBootDoneEvent = (state == 1) ? Event::cpuBootDoneAssert
-                                               : Event::cpuBootDoneDeAssert;
+                                              : Event::cpuBootDoneDeAssert;
         sendPowerControlEvent(cpuBootDoneEvent);
         return 1;
     });
@@ -1910,32 +1909,32 @@ void PowerControl::startTimer(const std::string& timerName,
 
     int timeoutMs = it->second;
 
-    lg2::info("{TIMER_NAME} timer started with {TIMEOUT_MS}ms timeout", "TIMER_NAME",
-              timerName, "TIMEOUT_MS", timeoutMs);
+    lg2::info("{TIMER_NAME} timer started with {TIMEOUT_MS}ms timeout",
+              "TIMER_NAME", timerName, "TIMEOUT_MS", timeoutMs);
 
     timer.expires_after(std::chrono::milliseconds(timeoutMs));
-    timer.async_wait(
-        [this, eventOnExpiry, timerName](const boost::system::error_code& ec) {
-            if (ec)
+    timer.async_wait([this, eventOnExpiry,
+                      timerName](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            // operation_aborted is expected if timer is canceled before
+            // completion
+            if (ec != boost::asio::error::operation_aborted)
             {
-                // operation_aborted is expected if timer is canceled before
-                // completion
-                if (ec != boost::asio::error::operation_aborted)
-                {
-                    lg2::error("{TIMER_NAME} timer async_wait failed: {ERROR_MSG}",
-                               "TIMER_NAME", timerName, "ERROR_MSG",
-                               ec.message());
-                }
-                else
-                {
-                    lg2::info("{TIMER_NAME} timer canceled", "TIMER_NAME", timerName);
-                }
-                return;
+                lg2::error("{TIMER_NAME} timer async_wait failed: {ERROR_MSG}",
+                           "TIMER_NAME", timerName, "ERROR_MSG", ec.message());
             }
+            else
+            {
+                lg2::info("{TIMER_NAME} timer canceled", "TIMER_NAME",
+                          timerName);
+            }
+            return;
+        }
 
-            lg2::info("{TIMER_NAME} timer expired", "TIMER_NAME", timerName);
-            sendPowerControlEvent(eventOnExpiry);
-        });
+        lg2::info("{TIMER_NAME} timer expired", "TIMER_NAME", timerName);
+        sendPowerControlEvent(eventOnExpiry);
+    });
 }
 
 void PowerControl::cancelTimer(const std::string& timerName,

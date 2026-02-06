@@ -161,8 +161,7 @@ bool NVL144PowerControl::isSystemPowerOff()
 // Helper function: Initiate CPU shutdown sequence
 void NVL144PowerControl::initiateCPUShutdown(
     const std::string& shutdownSignalName,
-    const std::string& shutdownOkTimerName,
-    const std::string& shutdownAction)
+    const std::string& shutdownOkTimerName, const std::string& shutdownAction)
 {
     auto shutdownSignal = powerSignalMap.find(shutdownSignalName);
     if (shutdownSignal == powerSignalMap.end())
@@ -265,9 +264,8 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         action = isForceful ? PowerAction::FORCE_OFF : PowerAction::GRACE_OFF;
     }
 
-    lg2::info(
-        "{SHUTDOWN_TYPE} Power Off Request received. Commencing Host Main {SHUTDOWN_TYPE} Shutdown sequence.",
-        "SHUTDOWN_TYPE", shutdownType);
+    lg2::info("Commencing {SHUTDOWN_TYPE} sequence.", "SHUTDOWN_TYPE",
+              shutdownType);
 
     // Check if system is already powered off
     if (isSystemPowerOff())
@@ -313,10 +311,14 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
         case Event::board0CpuShutdownOkAssert:
         case Event::board1CpuShutdownOkAssert:
             // Host-initiated shutdown: CPU has asserted SHDN_OK
-            // here check for CPU_BOOT_DONE being de-asserted. If not transition to the waitForCPUBootDoneDeAssert state
-                // waitForCPUBootDoneDeAssert should wait for CPU Boot Done to be de-asserted. Poll it for timeout specified in the TimerMap["WaitForCPUBootDoneDeAssertMs"]
-                // If it hasn't de-asserted by the timeout, then it is a valid host initiated shutdown request.
-                // if does de-assert, then this was a hardware lag and we should do nothing.
+            // here check for CPU_BOOT_DONE being de-asserted. If not transition
+            // to the waitForCPUBootDoneDeAssert state
+            // waitForCPUBootDoneDeAssert should wait for CPU Boot Done to be
+            // de-asserted. Poll it for timeout specified in the
+            // TimerMap["WaitForCPUBootDoneDeAssertMs"] If it hasn't de-asserted
+            // by the timeout, then it is a valid host initiated shutdown
+            // request. if does de-assert, then this was a hardware lag and we
+            // should do nothing.
             handleHostInitiatedShutdown();
             break;
 
@@ -407,7 +409,8 @@ void NVL144PowerControl::handlePowerOnRequest()
         action = PowerAction::POWER_ON;
         setGPIOOutput(nvl144pdbMainPowerEnable,
                       nvl144pdbMainPowerEnable->polarity);
-        startTimer("NVL144PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+        startTimer("NVL144PdbMainPowerOkWatchdogMs",
+                   pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForPDBMainPowerOk);
     }
@@ -533,7 +536,7 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     // Assert Pre System Reset for Board 0 and Board 1 (if present)
     setGPIOOutput(board0PreSystemReset->second,
                   board0PreSystemReset->second->polarity);
-    
+
     if (boardPresence.board1Present)
     {
         auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
@@ -562,9 +565,9 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     setGPIOOutput(board0RunPowerEnable->second,
                   board0RunPowerEnable->second->polarity);
 
-    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 1 ms after asserting Board 0 Run Power Enable");
+    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    
+
     if (boardPresence.board1Present)
     {
         auto board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
@@ -582,7 +585,8 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
 // Helper function: Transition to HPM Power Good assert wait state
 void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
 {
-    cancelTimer("PDB Main Power OK Watchdog Timer", pdbMainPowerOkWatchdogTimer);
+    cancelTimer("PDB Main Power OK Watchdog Timer",
+                pdbMainPowerOkWatchdogTimer);
 
     lg2::info(
         "NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
@@ -644,7 +648,8 @@ void NVL144PowerControl::transitionToPowerCycleDelay()
 // Helper function: Complete shutdown and transition to off state
 void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
 {
-    cancelTimer("PDB Main Power OK Watchdog Timer", pdbMainPowerOkWatchdogTimer);
+    cancelTimer("PDB Main Power OK Watchdog Timer",
+                pdbMainPowerOkWatchdogTimer);
 
     if (!success)
     {
@@ -795,7 +800,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
 void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 {
     logEvent(__FUNCTION__, event);
-    
+
     switch (event)
     {
         case Event::cpuResetIndicatorAssert:
@@ -1031,24 +1036,21 @@ void NVL144PowerControl::setDefaultValues()
     auto e1sPowerEnable = powerSignalMap.find("E1SPowerEnable");
     if (e1sPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "E1SPowerEnable signal not found in powerSignalMap");
+        lg2::error("E1SPowerEnable signal not found in powerSignalMap");
         return;
     }
 
     auto bmcSsdReset = powerSignalMap.find("BMCSSDReset");
     if (bmcSsdReset == powerSignalMap.end())
     {
-        lg2::error(
-            "BMCSSDReset signal not found in powerSignalMap");
+        lg2::error("BMCSSDReset signal not found in powerSignalMap");
         return;
     }
 
     auto ssdPowerDisable = powerSignalMap.find("SSDPowerDisable");
     if (ssdPowerDisable == powerSignalMap.end())
     {
-        lg2::error(   
-            "SSDPowerDisable signal not found in powerSignalMap");
+        lg2::error("SSDPowerDisable signal not found in powerSignalMap");
         return;
     }
 

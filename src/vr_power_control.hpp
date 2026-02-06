@@ -264,8 +264,7 @@ class VRPowerControl : public PowerControl
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
         "CpuBootDoneDeAssertDelayMs",
-        "PowerOffSaveMs"
-    };
+        "PowerOffSaveMs"};
 
   protected:
     // VR-SPECIFIC TIMERS
@@ -288,7 +287,8 @@ class VRPowerControl : public PowerControl
     boost::asio::steady_timer cpuShutdownOkWatchdogTimer;
 
     /**
-     * @brief Timer for CPU Boot Done de-assertion during host-initiated shutdown
+     * @brief Timer for CPU Boot Done de-assertion during host-initiated
+     * shutdown
      *
      * Used to distinguish between reboot (CPU_BOOT_DONE de-asserts) and
      * shutdown (CPU_BOOT_DONE stays asserted) when SHDN_OK is asserted.
