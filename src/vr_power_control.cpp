@@ -687,17 +687,19 @@ void VRPowerControl::transitionToCPUResetAssertState()
     setPowerState(PowerState::waitForCPUResetAssert);
 
 #ifdef CPU_RESET_EARLY_ASSERT_WAR
-    // Hardware bug workaround: CPU_RESET_L may assert before we enter this state
-    // Check if CPU reset is already asserted immediately after state transition
+    // Hardware bug workaround: CPU_RESET_L may assert before we enter this
+    // state Check if CPU reset is already asserted immediately after state
+    // transition
     auto cpuResetIndicator = getSignal("CpuResetIndicator");
     if (cpuResetIndicator && cpuResetIndicator->gpioLine)
     {
-        bool cpuResetAsserted = 
-            cpuResetIndicator->gpioLine.get_value() == cpuResetIndicator->polarity;
-        
+        bool cpuResetAsserted = cpuResetIndicator->gpioLine.get_value() ==
+                                cpuResetIndicator->polarity;
+
         if (cpuResetAsserted)
         {
-            lg2::info("WAR: CPU Reset Indicator already asserted upon entering waitForCPUResetAssert state. Manually triggering Event::cpuResetIndicatorAssert.");
+            lg2::info(
+                "WAR: CPU Reset Indicator already asserted upon entering waitForCPUResetAssert state. Manually triggering Event::cpuResetIndicatorAssert.");
             // Manually send the event to trigger normal handler flow
             sendPowerControlEvent(Event::cpuResetIndicatorAssert);
         }
@@ -881,11 +883,11 @@ void VRPowerControl::handleWaitForCPUBootDoneDeAssert(Event event)
         case Event::cpuBootDoneDeAssert:
             // CPU_BOOT_DONE de-asserted after SHDN_OK - this is a reboot!
             cancelTimer("CPU Boot Done De-Assert Watchdog Timer",
-                       cpuBootDoneDeAssertWatchdogTimer);
-            
+                        cpuBootDoneDeAssertWatchdogTimer);
+
             lg2::info(
                 "CPU Boot Done de-asserted after SHDN_OK assertion. Host Initiated Reboot operation detected. Ignoring SHDN_OK and returning to PowerState::on.");
-            
+
             action = PowerAction::NONE;
             setPowerState(PowerState::on);
             break;
@@ -981,7 +983,8 @@ std::string_view VRPowerControl::getHostState() const
             break;
         case PowerState::waitForCPUBootDoneDeAssert:
             // During observation period, system is still ON
-            // We haven't started shutdown yet - just determining if it's reboot or shutdown
+            // We haven't started shutdown yet - just determining if it's reboot
+            // or shutdown
             return "xyz.openbmc_project.State.Host.HostState.Running";
             break;
         case PowerState::waitForPowerCycleDelay:
@@ -1030,7 +1033,8 @@ std::string_view VRPowerControl::getChassisState() const
             break;
         case PowerState::waitForCPUBootDoneDeAssert:
             // During observation period, chassis is still ON
-            // We haven't started shutdown yet - just determining if it's reboot or shutdown
+            // We haven't started shutdown yet - just determining if it's reboot
+            // or shutdown
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
             break;
         case PowerState::waitForCPUResetAssert:
@@ -1148,24 +1152,21 @@ void VRPowerControl::setDefaultValues()
     auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
     if (board0RunPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "Board0RunPowerEnable signal not found in powerSignalMap");
+        lg2::error("Board0RunPowerEnable signal not found in powerSignalMap");
         return;
     }
 
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
     if (board0PreSystemReset == powerSignalMap.end())
     {
-        lg2::error(
-            "Board0PreSystemReset signal not found in powerSignalMap");
+        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
         return;
     }
 
     auto board0CpuShutdownForce = powerSignalMap.find("Board0CpuShutdownForce");
     if (board0CpuShutdownForce == powerSignalMap.end())
     {
-        lg2::error(
-            "Board0CpuShutdownForce signal not found in powerSignalMap");
+        lg2::error("Board0CpuShutdownForce signal not found in powerSignalMap");
         return;
     }
 
@@ -1181,8 +1182,7 @@ void VRPowerControl::setDefaultValues()
     auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
     if (usbPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "USBPowerEnable signal not found in powerSignalMap");
+        lg2::error("USBPowerEnable signal not found in powerSignalMap");
         return;
     }
 
