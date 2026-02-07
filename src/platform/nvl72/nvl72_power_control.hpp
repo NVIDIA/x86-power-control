@@ -149,6 +149,9 @@ class NVL72PowerControl : public VRPowerControl
     /** Keep host state transitional until HPM and PDB shutdown completes. */
     std::string_view getHostState() const override;
 
+    /** Recover a missed PDB assert edge by checking its level on timeout. */
+    void handleWaitForPDBMainPowerOk(Event event) override;
+
     /** Do not declare Off when PDB power-off confirmation times out. */
     void completeShutdownAndTransitionToOff(bool success) override;
 
