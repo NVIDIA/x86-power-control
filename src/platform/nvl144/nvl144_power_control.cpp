@@ -565,7 +565,8 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
     setGPIOOutput(board0RunPowerEnable->second,
                   board0RunPowerEnable->second->polarity);
 
-    lg2::info("GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
+    lg2::info(
+        "GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     if (boardPresence.board1Present)
@@ -610,12 +611,32 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
             break;
 
         case Event::pdbMainPowerOkWatchdogTimerExpired:
+        {
+            // WAR: https://nvbugspro.nvidia.com/bug/5877093
+            // Read the pin status before proceeding
+            auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
+            if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
+            {
+                lg2::error("CRITICAL: NVL144PDBMainPowerOk not available");
+                return;
+            }
+            bool pdbMainPowerOkAsserted =
+                nvl144pdbMainPowerOk->gpioLine.get_value() ==
+                nvl144pdbMainPowerOk->polarity;
+            if (pdbMainPowerOkAsserted)
+            {
+                lg2::info(
+                    "NVL144PDBMainPowerOk is asserted, we didn't catch the interrupt: BUG 5877093");
+                transitionToHPMPowerGoodAssertState();
+                break;
+            }
             lg2::error(
                 "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
             transitionToOffStateWithRunPowerCheck();
             break;
+        }
 
         default:
             lg2::info("No action taken.");
