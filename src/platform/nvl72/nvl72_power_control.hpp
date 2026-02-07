@@ -47,6 +47,9 @@ class NVL72PowerControl : public VRPowerControl
      */
     bool isSystemPowerOff() override;
 
+    /** Recover a missed PDB assert edge by checking its level on timeout. */
+    void handleWaitForPDBMainPowerOk(Event event) override;
+
     /**
      * @brief Handle power on request from PowerState::off (NVL72 override)
      *
