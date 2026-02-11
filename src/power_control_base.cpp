@@ -963,11 +963,22 @@ void PowerControl::requestBusNames()
     lg2::info("Claiming D-Bus service names...");
 
     // Claim primary names
-    conn->request_name(hostDbusName.c_str());
-    conn->request_name(chassisDbusName.c_str());
-    conn->request_name(osDbusName.c_str());
-    conn->request_name(nmiDbusName.c_str());
-    conn->request_name(rstCauseDbusName.c_str());
+    if (nodeId == "0")
+    {
+        // For backwards compatibility, claim the primary names
+        conn->request_name(hostDbusName.c_str());
+        conn->request_name(chassisDbusName.c_str());
+        conn->request_name(osDbusName.c_str());
+        conn->request_name(nmiDbusName.c_str());
+        conn->request_name(rstCauseDbusName.c_str());
+    }
+
+    // Append the node ID to the dbus names & Request all the dbus names
+    conn->request_name((hostDbusName + nodeId).c_str());
+    conn->request_name((chassisDbusName + nodeId).c_str());
+    conn->request_name((osDbusName + nodeId).c_str());
+    conn->request_name((nmiDbusName + nodeId).c_str());
+    conn->request_name((rstCauseDbusName + nodeId).c_str());
 
     // Only claim buttons name if we created button interfaces
     // (avoid conflict with separate buttons daemon)
