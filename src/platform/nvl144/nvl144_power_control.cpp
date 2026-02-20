@@ -1042,7 +1042,8 @@ void NVL144PowerControl::validateTimerConfigs()
 void NVL144PowerControl::setDefaultValues()
 {
     // Set NVL144 PDB-specific default values for output signals
-    lg2::info("Setting NVL144 default values for output signals");
+    lg2::info(
+        "Defining NVL144 GPIOs asserted and de-asserted states based on host state ON and OFF");
 
     // Find and validate all NVL144 PDB-specific signals first
     auto nvl144PdbMainPowerEnable =
@@ -1109,7 +1110,8 @@ void NVL144PowerControl::setDefaultValues()
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();
 
-    lg2::info("NVL144 default values set successfully");
+    lg2::info(
+        "NVL144 GPIOs asserted and de-asserted states defined successfully");
 }
 
 } // namespace power_control

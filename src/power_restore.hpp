@@ -189,8 +189,9 @@ class PersistentState
     {
         switch (parameter)
         {
+            // For now we only store PowerState
             case Params::PowerState:
-                return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+                return "";
         }
         return "";
     }
@@ -525,9 +526,15 @@ class PowerRestoreController
             powerRestorePolicy ==
             "xyz.openbmc_project.Control.Power.RestorePolicy.Policy.Restore")
         {
-            if (wasPowerDropped())
+            int powerDropped = wasPowerDropped();
+            if (powerDropped < 0)
             {
-                lg2::info("Power was dropped, restoring Host On state");
+                lg2::error(
+                    "Failed to read power state from persistent storage, do nothing");
+            }
+            else if (powerDropped > 0)
+            {
+                lg2::info("Restoring Host On state");
                 powerControl.sendPowerControlEvent(
                     PowerControl::Event::powerOnRequest);
                 powerControl.setRestartCauseProperty(
@@ -535,7 +542,7 @@ class PowerRestoreController
             }
             else
             {
-                lg2::info("No power drop, restoring Host Off state");
+                lg2::info("Restoring Host Off state");
                 powerControl.sendPowerControlEvent(
                     PowerControl::Event::powerOffRequest);
                 powerControl.setRestartCauseProperty(
@@ -563,9 +570,15 @@ class PowerRestoreController
      * Read last saved power state to determine if host power was enabled before
      * last BMC reboot.
      */
-    bool wasPowerDropped()
+    int wasPowerDropped()
     {
         std::string state = appState.get(PersistentState::Params::PowerState);
+        lg2::info("Power state from persistent storage: {STATE}", "STATE",
+                  state);
+        if (state.empty())
+        {
+            return -1;
+        }
         return state == "xyz.openbmc_project.State.Chassis.PowerState.On";
     }
 };
