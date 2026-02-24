@@ -1,13 +1,27 @@
 [Unit]
-Description=Intel Power Control for the Host %i
+Description=VR Power Control for the Host %i
 ConditionPathExists=/usr/share/x86-power-control/power-config-host%i.json
+
+Conflicts=xyz.openbmc_project.State.Chassis@%i.service
+Conflicts=xyz.openbmc_project.State.Host@%i.service
+
+# Wait for BMC boot complete to ensure GPIO expanders are initialized
+After=bmc-boot-complete.service
+Requires=bmc-boot-complete.service
+
+# Ensure ObjectMapper is running before we start so it can receive InterfacesAdded signals
+After=mapper-wait@-xyz-openbmc_project-object_mapper.service
+Wants=mapper-wait@-xyz-openbmc_project-object_mapper.service
 
 [Service]
 Restart=always
 RestartSec=3
-ExecStart=/usr/bin/power-control %i
+ExecStart=/usr/bin/x86-power-control %i
 Type=dbus
-BusName=xyz.openbmc_project.State.Host%i
+BusName=xyz.openbmc_project.State.Host
 
 [Install]
 WantedBy=sysinit.target
+# Provides functionality of old PSM services - creates symlinks when enabled
+Alias=xyz.openbmc_project.State.Chassis@%i.service
+Alias=xyz.openbmc_project.State.Host@%i.service

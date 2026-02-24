@@ -1,5 +1,5 @@
 project(
-    'power-control',
+    'x86-power-control',
     'cpp',
     default_options: ['warning_level=3', 'cpp_std=c++23'],
     license: 'Apache-2.0',
@@ -35,19 +35,75 @@ endif
 if get_option('button-passthrough').allowed()
     cpp_args += '-DUSE_BUTTON_PASSTHROUGH'
 endif
+if get_option('enable-bmc-poweroff').allowed()
+    cpp_args += '-DENABLE_BMC_POWEROFF'
+endif
+if get_option('cpu-reset-early-assert-war').allowed()
+    cpp_args += '-DCPU_RESET_EARLY_ASSERT_WAR'
+endif
 
+# Configure IOX paths
+conf_data = configuration_data()
+conf_data.set_quoted(
+    'GB300_PDB_IOX_PATH',
+    get_option('gb300-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'C2_PDB_IOX_PATH',
+    get_option('c2-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'NVL144_PDB_IOX_PATH',
+    get_option('nvl144-pdb-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD0_IOX_PATH',
+    get_option('board0-iox-path'),
+)
+conf_data.set_quoted(
+    'BOARD1_IOX_PATH',
+    get_option('board1-iox-path'),
+)
+
+conf_data.set_quoted(
+    'OBMC_STANDBY_TARGET',
+    get_option('obmc-standby-target'),
+)
+conf_data.set_quoted('CHASSIS_LOST_POWER_FILE', '/run/openbmc/chassis@{}-lost-power')
+
+
+configure_file(
+    output: 'config.h',
+    configuration: conf_data,
+)
+
+# Include directory for generated config.h (available to subdirectories)
+root_build_inc = include_directories('.')
+
+libgpiod = dependency('libgpiod', default_options: ['bindings=cxx'])
+libgpiodcxx = dependency('libgpiodcxx')
+libsystemd = dependency('libsystemd')
+nlohmann_json_dep = dependency('nlohmann_json', include_type: 'system')
+phosphordbusinterfaces = dependency('phosphor-dbus-interfaces')
+phosphorlogging = dependency('phosphor-logging')
+sdbusplus = dependency('sdbusplus')
+sdeventplus = dependency('sdeventplus')
+boost = dependency('boost')
 deps = [
-    dependency('libgpiodcxx', default_options: ['bindings=cxx']),
-    dependency('libsystemd'),
-    dependency('sdbusplus'),
-    dependency('phosphor-logging'),
-    dependency('nlohmann_json', include_type: 'system'),
-    dependency('boost'),
+   libgpiodcxx,
+    libsystemd,
+    sdbusplus,
+    phosphorlogging,
+    nlohmann_json_dep,
+    boost,
 ]
 
 executable(
-    'power-control',
+    'x86-power-control',
     'src/power_control.cpp',
+    'src/power_control_base.cpp',
+    'src/vr_power_control.cpp',
+    'src/platform/nvl144/nvl144_power_control.cpp',
     include_directories: include_directories('src'),
     cpp_args: cpp_args,
     dependencies: deps,
@@ -61,7 +117,7 @@ if systemd.found()
         'service_files/chassis-system-reset.service',
         'service_files/chassis-system-reset.target',
         'service_files/xyz.openbmc_project.Chassis.Control.Power@.service',
-        install_dir: systemd.get_variable('systemd_system_unit_dir'),
+        install_dir: systemd.get_variable('systemdsystemunitdir'),
     )
 endif
 
@@ -69,3 +125,5 @@ install_data(
     'config/power-config-host0.json',
     install_dir: '/usr/share/x86-power-control/',
 )
+
+subdir('src/bmc')
