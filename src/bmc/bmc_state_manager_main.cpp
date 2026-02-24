@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
+
 #include "config.h"
 
 #include "bmc_state_manager.hpp"
