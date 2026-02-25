@@ -1,7 +1,5 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- * Copyright (C) 2021-2022 YADRO.
- */
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
 
 #include "config.h"
 
