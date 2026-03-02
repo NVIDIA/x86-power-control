@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
@@ -269,6 +270,29 @@ class PowerControl
      * @return Human-readable event name
      */
     static std::string getEventName(Event event);
+
+    /**
+     * @brief Log a resource event to the Redfish event log
+     *
+     * Logs a ResourceEvent with the given event name and message args (e.g.
+     * logResourceEvent("ResourcePoweredOn", {"Host0"}) or
+     * logResourceEvent("ResourceErrorsDetected", {"Host0", "CPU Reset Watchdog expired"}).
+     * RequestedHostTransition / RequestedPowerTransition writes also log
+     * ResourcePowerTransitionRequested.
+     *
+     * @param eventName Message key (e.g. "ResourcePoweredOn",
+     *                  "ResourceErrorsDetected")
+     * @param messageArgs Arguments for the message (joined as comma-separated
+     *                    REDFISH_MESSAGE_ARGS)
+     * @param severity D-Bus severity (default Informational; use
+     *                 xyz.openbmc_project.Logging.Entry.Level.Warning for
+     *                 ResourceErrorsDetected)
+     */
+    void logResourceEvent(
+        const std::string& eventName,
+        std::initializer_list<std::string> messageArgs,
+        std::string_view severity =
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
 
     /**
      * @brief Log an event received by a state handler

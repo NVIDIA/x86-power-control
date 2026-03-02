@@ -21,7 +21,9 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <vector>
 
 namespace power_control
 {
@@ -132,6 +134,39 @@ std::string PowerControl::getEventName(Event event)
         default:
             return "unknown event: " + std::to_string(static_cast<int>(event));
     }
+}
+
+void PowerControl::logResourceEvent(
+    const std::string& eventName,
+    std::initializer_list<std::string> messageArgs,
+    std::string_view severity)
+{
+    if (messageArgs.size() == 0)
+    {
+        lg2::error("logResourceEvent: messageArgs is empty");
+        return;
+    }
+
+    auto method = conn->new_method_call(
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+        "xyz.openbmc_project.Logging.Create", "Create");
+
+    std::map<std::string, std::string> additionalData;
+    additionalData["REDFISH_MESSAGE_ID"] =
+        std::format("ResourceEvent.1.0.{}", eventName);
+
+    std::string argsStr;
+    auto it = messageArgs.begin();
+    argsStr += *it;
+    for (++it; it != messageArgs.end(); ++it)
+    {
+        argsStr += ',';
+        argsStr += *it;
+    }
+    additionalData["REDFISH_MESSAGE_ARGS"] = argsStr;
+
+    method.append(eventName, severity, additionalData);
+    conn->call(method);
 }
 
 void PowerControl::logEvent(std::string_view stateHandler, Event event)
@@ -934,6 +969,13 @@ void PowerControl::setPowerState(const PowerState state)
     {
         setBootProgress(
             "xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
+        logResourceEvent("ResourcePoweredOff", {"Host0"},
+                        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+    }
+    else if (state == PowerState::on)
+    {
+        logResourceEvent("ResourcePoweredOn", {"Host0"},
+                        "xyz.openbmc_project.Logging.Entry.Level.Informational");
     }
 
     // Save the power state for the restore policy
