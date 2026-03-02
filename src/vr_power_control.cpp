@@ -153,6 +153,9 @@ bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
 
             // Transition to off, checking if we need to wait for de-assertion
             action = PowerAction::NONE;
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.", "STATE", getPowerStateName()},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
 
             return true;
@@ -476,6 +479,9 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
                 "HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "HPM Power Good Watchdog expired (power on)"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
             break;
 
@@ -537,6 +543,9 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
 
             action = PowerAction::NONE;
             transitionToOffStateWithRunPowerCheck();
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "CPU Reset Watchdog expired"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             break;
 
         default:
@@ -762,6 +771,9 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Board 0 did not assert SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Board 0 CPU failed to assert SHDN_OK.");
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "CPU Shutdown OK watchdog expired (Board 0 did not assert SHDN_OK)"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else
@@ -781,6 +793,9 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Neither board asserted SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during GRACE_OFF. Neither CPU asserted SHDN_OK.");
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "CPU Shutdown OK watchdog expired (neither CPU asserted SHDN_OK)"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else if (assertedCount == 1)
@@ -803,11 +818,17 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 0 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Shutdown OK watchdog expired (only Board 0 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             else
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 1 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Shutdown OK watchdog expired (only Board 1 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
 
             assertBoardPreSystemResets();
@@ -908,6 +929,9 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
                 // Unknown action - log and do nothing
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired with unexpected power action. No action taken.");
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Shutdown OK watchdog expired (unexpected power action). No action taken."},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             break;
 

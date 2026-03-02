@@ -723,6 +723,9 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
                 "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "PDB Main Power OK watchdog expired (power on)"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
             break;
         }
@@ -767,6 +770,9 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         lg2::error(
             "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
         action = PowerAction::NONE;
+        logResourceEvent("ResourceErrorsDetected",
+                         {"Host0", "PDB Main Power OK watchdog expired (power off)"},
+                         "xyz.openbmc_project.Logging.Entry.Level.Error");
         setPowerState(PowerState::off);
         setGPIOsForHostStateOff();
         return;
@@ -810,6 +816,9 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
             lg2::warning(
                 "PDB Powered Down. Setting GPIO states to match Host State OFF. Transitioning to PowerState::off.");
             action = PowerAction::NONE;
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "PDB powered down with unknown action"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Warning");
             setPowerState(PowerState::off);
             setGPIOsForHostStateOff();
             break;
@@ -942,11 +951,17 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             {
                 lg2::error(
                     "CPU Reset Assert Watchdog expired during warm reboot. CPUs did not enter reset. Aborting warm reboot");
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Reset Watchdog expired (warm reboot)"},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
             }
             else
             {
                 lg2::error(
                     "CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence failed {recommend checking CPLD status}");
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Reset Watchdog expired"},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
             }
 
             lg2::error(
@@ -1068,6 +1083,9 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
                 "HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: Setting GPIO states to match Host State ON. Setting Host Power State to On.");
 
             action = PowerAction::NONE;
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "HPM Power Good Watchdog expired (shutdown sequence)"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             setGPIOsForHostStateOn(); // TODO: fill function implementation
             setPowerState(PowerState::on);
             break;
