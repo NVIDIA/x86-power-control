@@ -332,12 +332,7 @@ class VRPowerControl : public PowerControl
      */
     bool checkIOXPresence(const std::string& ioxPath);
 
-    /**
-     * @brief Handler for Board 1 Run Power Good GPIO events
-     *
-     * @param state The GPIO state (true = asserted, false = de-asserted)
-     */
-    void board1RunPowerPGHandler(bool state);
+
 
     /**
      * @brief Handler for Board 0 CPU Shutdown OK GPIO events
@@ -429,7 +424,7 @@ class VRPowerControl : public PowerControl
      * Waits for PDB Main Power OK to de-assert after:
      * - De-asserting PDB Main Power Enable during power off sequence
      *
-     * case Event::nvl144pdbMainPowerOkDeAssert:
+     * case Event::pdbMainPowerOkDeAssert:
      * case Event::pdbMainPowerOkWatchdogTimerExpired:
      *
      * NOTE: C2 overrides to handle C2 PDB PSU Power OK De-Assert

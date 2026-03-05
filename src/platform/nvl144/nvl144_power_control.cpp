@@ -28,12 +28,12 @@ NVL144PowerControl::NVL144PowerControl(
     // gpioHandlerMap by VRPowerControl constructor Now add NVL144-specific
     // handlers to the map
 
-    // Add NVL144 PDB-specific required signals (Board 0)
-    addRequiredSignal("NVL144PDBMainPowerOk", 0, GPIODirection::IN,
+    // Add PDB-specific required signals (Board 0)
+    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
                       [this](bool state) {
-                          this->nvl144pdbMainPowerOkHandler(state);
+                          this->pdbMainPowerOkHandler(state);
                       });
-    addRequiredSignal("NVL144PDBMainPowerEnable", 0, GPIODirection::OUT);
+    addRequiredSignal("PDBMainPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("E1SPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("BMCSSDReset", 0, GPIODirection::OUT);
     addRequiredSignal("SSDPowerDisable", 0, GPIODirection::OUT);
@@ -63,29 +63,28 @@ NVL144PowerControl::NVL144PowerControl(
     // ready
     initializeHostStateInterface();
 
-    // Initialize power state from actual hardware before power restore runs
-    // For NVL144: Host is ON only if BOTH Board0RunPowerPG AND
-    // NVL144PDBMainPowerOk are asserted
+    // Initialize power state from actual hardware before power restore runs.
+    // Host is ON only if BOTH Board0RunPowerPG AND PDBMainPowerOk are asserted.
     initializePowerStateFromHardware(powerIndicators, true);
 }
 
-// NVL144-specific GPIO handler implementations
-void NVL144PowerControl::nvl144pdbMainPowerOkHandler(bool state)
+// PDB-specific GPIO handler implementations
+void NVL144PowerControl::pdbMainPowerOkHandler(bool state)
 {
-    lg2::info("NVL144PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
               static_cast<int>(state));
 
-    auto it = powerSignalMap.find("NVL144PDBMainPowerOk");
+    auto it = powerSignalMap.find("PDBMainPowerOk");
     if (it == powerSignalMap.end())
     {
-        lg2::error("NVL144PDBMainPowerOk signal not found in powerSignalMap");
+        lg2::error("PDBMainPowerOk signal not found in powerSignalMap");
         return;
     }
 
     auto& config = *it->second;
     Event powerControlEvent = (state == config.polarity)
-                                  ? Event::nvl144pdbMainPowerOkAssert
-                                  : Event::nvl144pdbMainPowerOkDeAssert;
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
     this->sendPowerControlEvent(powerControlEvent);
 }
 
@@ -143,17 +142,16 @@ bool NVL144PowerControl::isSystemPowerOff()
         return false;
     }
 
-    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
-    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
     {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk not available");
+        lg2::error("CRITICAL: PDBMainPowerOk not available");
         return false;
     }
 
     return (
         board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity &&
-        nvl144pdbMainPowerOk->gpioLine.get_value() ==
-            !nvl144pdbMainPowerOk->polarity);
+        pdbMainPowerOk->gpioLine.get_value() == !pdbMainPowerOk->polarity);
 }
 
 // Helper function: Initiate CPU shutdown sequence
@@ -372,26 +370,25 @@ void NVL144PowerControl::handlePowerOnRequest()
         return;
     }
 
-    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
-    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
     {
         lg2::error(
-            "CRITICAL: NVL144PDBMainPowerOk not available - cannot power on");
+            "CRITICAL: PDBMainPowerOk not available - cannot power on");
         return;
     }
 
-    auto nvl144pdbMainPowerEnable = getSignal("NVL144PDBMainPowerEnable");
-    if (!nvl144pdbMainPowerEnable || !nvl144pdbMainPowerEnable->gpioLine)
+    auto pdbMainPowerEnable = getSignal("PDBMainPowerEnable");
+    if (!pdbMainPowerEnable || !pdbMainPowerEnable->gpioLine)
     {
         lg2::error(
-            "CRITICAL: NVL144PDBMainPowerEnable not available - cannot power on");
+            "CRITICAL: PDBMainPowerEnable not available - cannot power on");
         return;
     }
 
     // Check if power is already on
     if (board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity &&
-        nvl144pdbMainPowerOk->gpioLine.get_value() ==
-            nvl144pdbMainPowerOk->polarity)
+        pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity)
     {
         lg2::info(
             "PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
@@ -403,11 +400,10 @@ void NVL144PowerControl::handlePowerOnRequest()
     {
         setGPIOsForHostStateOff();
         lg2::info(
-            "Asserting NVL144 PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
+            "Asserting PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
         action = PowerAction::POWER_ON;
-        setGPIOOutput(nvl144pdbMainPowerEnable,
-                      nvl144pdbMainPowerEnable->polarity);
-        startTimer("NVL144PdbMainPowerOkWatchdogMs",
+        setGPIOOutput(pdbMainPowerEnable, pdbMainPowerEnable->polarity);
+        startTimer("PdbMainPowerOkWatchdogMs",
                    pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForPDBMainPowerOk);
@@ -588,7 +584,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
                 pdbMainPowerOkWatchdogTimer);
 
     lg2::info(
-        "NVL144 PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
+        "PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. Asserting HPM Board Pre System Reset, E1S Power Enable, de-asserting BMC SDD Reset, and asserting Run Power Enable Lines. Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
 
     assertHPMBoardPowerSequence();
     startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
@@ -604,7 +600,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     switch (event)
     {
-        case Event::nvl144pdbMainPowerOkAssert:
+        case Event::pdbMainPowerOkAssert:
             transitionToHPMPowerGoodAssertState();
             break;
 
@@ -686,38 +682,38 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
     {
         case PowerAction::FORCE_OFF:
             lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+                "PDB Main Power OK De-Asserted. Host Forceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
         case PowerAction::GRACE_OFF:
             lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+                "PDB Main Power OK De-Asserted. Host Graceful Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
         case PowerAction::HOST_INITIATED_SHUTDOWN:
             lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Host-Initiated Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
+                "PDB Main Power OK De-Asserted. Host-Initiated Shutdown Sequence Completed Successfully. Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
         case PowerAction::POWER_CYCLE:
             lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Forceful Power Cycle Host Forceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+                "PDB Main Power OK De-Asserted. Forceful Power Cycle Host Forceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
             transitionToPowerCycleDelay();
             break;
 
         case PowerAction::GRACEFUL_POWER_CYCLE:
             lg2::info(
-                "NVL144 PDB Main Power OK De-Asserted. Graceful Power Cycle Host Graceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+                "PDB Main Power OK De-Asserted. Graceful Power Cycle Host Graceful Shutdown complete. Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
             transitionToPowerCycleDelay();
             break;
 
         default:
             // Unknown action - default to off
             lg2::warning(
-                "NVL144 PDB Powered Down. Setting GPIO states to match Host State OFF. Transitioning to PowerState::off.");
+                "PDB Powered Down. Setting GPIO states to match Host State OFF. Transitioning to PowerState::off.");
             action = PowerAction::NONE;
             setPowerState(PowerState::off);
             setGPIOsForHostStateOff();
@@ -733,7 +729,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
 {
     switch (event)
     {
-        case Event::nvl144pdbMainPowerOkDeAssert:
+        case Event::pdbMainPowerOkDeAssert:
             completeShutdownAndTransitionToOff(true);
             break;
 
@@ -885,12 +881,10 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
         return;
     }
 
-    auto nvl144pdbMainPowerEnable =
-        powerSignalMap.find("NVL144PDBMainPowerEnable");
-    if (nvl144pdbMainPowerEnable == powerSignalMap.end())
+    auto pdbMainPowerEnable = powerSignalMap.find("PDBMainPowerEnable");
+    if (pdbMainPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+        lg2::error("PDBMainPowerEnable signal not found in powerSignalMap");
         return;
     }
 
@@ -912,9 +906,9 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
                       !board1PreSystemReset->second->polarity);
     }
 
-    // De-assert NVL144 PDB Main Power Enable
-    setGPIOOutput(nvl144pdbMainPowerEnable->second,
-                  !nvl144pdbMainPowerEnable->second->polarity);
+    // De-assert PDB Main Power Enable
+    setGPIOOutput(pdbMainPowerEnable->second,
+                  !pdbMainPowerEnable->second->polarity);
 }
 
 // Helper function: Transition to PDB Main Power Off wait state
@@ -923,11 +917,11 @@ void NVL144PowerControl::transitionToPDBMainPowerOffState()
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
     lg2::info(
-        "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
+        "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
 
     setPowerState(PowerState::waitForPDBMainPowerOff);
     deassertPreSystemResetsAndPDBMainPower();
-    startTimer("NVL144PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+    startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
                Event::pdbMainPowerOkWatchdogTimerExpired);
 }
 
@@ -938,33 +932,33 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
     // Check current state of PDB Main Power OK
-    auto nvl144pdbMainPowerOk = getSignal("NVL144PDBMainPowerOk");
-    if (!nvl144pdbMainPowerOk || !nvl144pdbMainPowerOk->gpioLine)
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
     {
-        lg2::error("CRITICAL: NVL144PDBMainPowerOk not available");
+        lg2::error("CRITICAL: PDBMainPowerOk not available");
         // Fallback: assume worst case and transition to waitForPDBMainPowerOff
         lg2::info(
-            "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting NVL144 PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
+            "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer("NVL144PdbMainPowerOkWatchdogMs",
+        startTimer("PdbMainPowerOkWatchdogMs",
                    pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         return;
     }
 
-    bool pdbMainPowerOkAsserted = nvl144pdbMainPowerOk->gpioLine.get_value() ==
-                                  nvl144pdbMainPowerOk->polarity;
+    bool pdbMainPowerOkAsserted =
+        pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity;
 
     if (pdbMainPowerOkAsserted)
     {
         // PDB Main Power OK is still asserted, wait for it to de-assert
         lg2::info(
-            "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is currently asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
+            "HPM Board 0 Run Power Good de-asserted. PDBMainPowerOk is currently asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
 
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer("NVL144PdbMainPowerOkWatchdogMs",
+        startTimer("PdbMainPowerOkWatchdogMs",
                    pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
     }
@@ -973,7 +967,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
         // PDB Main Power OK is already de-asserted, bypass wait state and
         // proceed directly
         lg2::info(
-            "HPM Board 0 Run Power Good de-asserted. NVL144PDBMainPowerOk is already de-asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Bypassing PowerState::waitForPDBMainPowerOff...");
+            "HPM Board 0 Run Power Good de-asserted. PDBMainPowerOk is already de-asserted. De-asserting Pre System Reset lines and PDB Main Power Enable. Bypassing PowerState::waitForPDBMainPowerOff...");
 
         // Still need to de-assert the GPIOs
         deassertPreSystemResetsAndPDBMainPower();
@@ -1039,17 +1033,15 @@ void NVL144PowerControl::validateTimerConfigs()
 
 void NVL144PowerControl::setDefaultValues()
 {
-    // Set NVL144 PDB-specific default values for output signals
+    // Set platform PDB-specific default values for output signals
     lg2::info(
-        "Defining NVL144 GPIOs asserted and de-asserted states based on host state ON and OFF");
+        "Defining platform GPIOs asserted and de-asserted states based on host state ON and OFF");
 
-    // Find and validate all NVL144 PDB-specific signals first
-    auto nvl144PdbMainPowerEnable =
-        powerSignalMap.find("NVL144PDBMainPowerEnable");
-    if (nvl144PdbMainPowerEnable == powerSignalMap.end())
+    // Find and validate PDB signals first
+    auto pdbMainPowerEnable = powerSignalMap.find("PDBMainPowerEnable");
+    if (pdbMainPowerEnable == powerSignalMap.end())
     {
-        lg2::error(
-            "NVL144PDBMainPowerEnable signal not found in powerSignalMap");
+        lg2::error("PDBMainPowerEnable signal not found in powerSignalMap");
         return;
     }
 
@@ -1074,14 +1066,14 @@ void NVL144PowerControl::setDefaultValues()
         return;
     }
 
-    // All NVL144 signals validated, now set the default states
+    // All signals validated, now set the default states
 
-    // NVL144 PDB Main Power Enable
+    // PDB Main Power Enable
     // - ON: Asserted (PDB should be powered)
     // - OFF: DeAsserted (PDB should be unpowered)
-    nvl144PdbMainPowerEnable->second->defaultStateHostStateOn =
+    pdbMainPowerEnable->second->defaultStateHostStateOn =
         DefaultState::Asserted;
-    nvl144PdbMainPowerEnable->second->defaultStateHostStateOff =
+    pdbMainPowerEnable->second->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
     // E1S Power Enable
