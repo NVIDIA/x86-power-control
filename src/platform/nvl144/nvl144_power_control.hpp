@@ -17,7 +17,7 @@ namespace power_control
  * NVL144-specific deviations from the VR defaults.
  *
  * Platform characteristics:
- * - Has NVL144 PDB (Power Distribution Board)
+ * - Has PDB (Power Distribution Board)
  * - Uses E1S Power Enable
  * - Uses BMC SSD Reset
  * - Supports Board 0 and optionally Board 1
@@ -116,7 +116,7 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Set default values for NVL144 output signals (NVL144 override)
      *
-     * Sets NVL144 PDB-specific default values for output signals, then calls
+     * Sets NVL144 specific default values for output signals, then calls
      * VRPowerControl::setDefaultValues() to set common VR defaults.
      */
     void setDefaultValues() override;
@@ -133,7 +133,7 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Check if system power is already off
      *
-     * @return true if both Board0RunPowerPG and NVL144PDBMainPowerOk are
+     * @return true if both Board0RunPowerPG and PDBMainPowerOk are
      * de-asserted
      */
     bool isSystemPowerOff();
@@ -156,7 +156,7 @@ class NVL144PowerControl : public VRPowerControl
      * @brief Handle power on request from PowerState::off
      *
      * Checks if power is already on, and initiates power-on sequence by
-     * asserting NVL144 PDB Main Power Enable if necessary.
+     * asserting PDB Main Power Enable if necessary.
      */
     void handlePowerOnRequest();
 
@@ -236,7 +236,7 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief De-assert Pre System Resets and PDB Main Power during shutdown
      *
-     * De-asserts Board 0/1 Pre System Reset and NVL144 PDB Main Power Enable
+     * De-asserts Board 0/1 Pre System Reset and PDB Main Power Enable
      * when HPM power good de-asserts during shutdown sequence.
      */
     void deassertPreSystemResetsAndPDBMainPower();
@@ -254,7 +254,7 @@ class NVL144PowerControl : public VRPowerControl
      * @brief Transition to PDB Main Power Off state with PDB Main Power OK
      * check
      *
-     * Checks current state of NVL144PDBMainPowerOk before transitioning:
+     * Checks current state of PDBMainPowerOk before transitioning:
      * - If asserted: transitions to waitForPDBMainPowerOff and waits for
      * de-assertion
      * - If de-asserted: bypasses wait state and calls
@@ -264,43 +264,40 @@ class NVL144PowerControl : public VRPowerControl
 
   private:
     /**
-     * @brief Required NVL144 PDB signals (always required for NVL144 platform)
-     */
-    /**
-     * @brief List of required NVL144 platform-specific timer configurations
+     * @brief List of required platform-specific timer configurations
      */
     const std::vector<std::string> platformRequiredTimeoutValues = {
-        "NVL144PdbMainPowerOkWatchdogMs",
+        "PdbMainPowerOkWatchdogMs",
     };
 
     /**
      * @brief Power indicator signals used to determine initial hardware power
      * state
      *
-     * For NVL144, the host is considered ON only if BOTH Board0RunPowerPG AND
-     * NVL144PDBMainPowerOk are asserted. If either is de-asserted, the host is
-     * in an OFF or bad state.
+     * The host is considered ON only if BOTH Board0RunPowerPG AND PDBMainPowerOk
+     * are asserted. If either is de-asserted, the host is in an OFF or bad
+     * state.
      */
     const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
-                                                      "NVL144PDBMainPowerOk"};
+                                                      "PDBMainPowerOk"};
 
     /**
-     * @brief Timer for NVL144 PDB main power OK assertion/de-assertion in PDB
+     * @brief Timer for PDB main power OK assertion/de-assertion in PDB
      * power sequencing
      */
     boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
 
-    // NVL144-SPECIFIC GPIO HANDLERS (Member functions)
+    // PLATFORM GPIO HANDLERS (Member functions)
 
     /**
-     * @brief Handler for NVL144 PDB Main Power OK GPIO events
+     * @brief Handler for PDB Main Power OK GPIO events
      *
-     * - If state == true: Send Event::nvl144pdbMainPowerOkAssert
-     * - If state == false: Send Event::nvl144pdbMainPowerOkDeAssert
+     * - If state == true: Send Event::pdbMainPowerOkAssert
+     * - If state == false: Send Event::pdbMainPowerOkDeAssert
      *
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
-    void nvl144pdbMainPowerOkHandler(bool state);
+    void pdbMainPowerOkHandler(bool state);
 };
 
 } // namespace power_control

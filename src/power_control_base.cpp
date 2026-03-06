@@ -90,10 +90,10 @@ std::string PowerControl::getEventName(Event event)
             return "power cycle delay timer expired";
         case Event::warmRebootDelayTimerExpired:
             return "warm reboot delay timer expired";
-        case Event::nvl144pdbMainPowerOkAssert:
-            return "NVL144 PDB main power OK assert";
-        case Event::nvl144pdbMainPowerOkDeAssert:
-            return "NVL144 PDB main power OK de-assert";
+        case Event::pdbMainPowerOkAssert:
+            return "PDB main power OK assert";
+        case Event::pdbMainPowerOkDeAssert:
+            return "PDB main power OK de-assert";
         case Event::gb300pdbMainPowerOkAssert:
             return "GB300 PDB main power OK assert";
         case Event::gb300pdbMainPowerOkDeAssert:

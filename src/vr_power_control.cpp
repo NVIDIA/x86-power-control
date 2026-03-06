@@ -209,22 +209,6 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent);
 }
 
-void VRPowerControl::board1RunPowerPGHandler(bool state)
-{
-    auto it = powerSignalMap.find("Board1RunPowerPG");
-    if (it == powerSignalMap.end())
-    {
-        lg2::error("Board1RunPowerPG signal not found in powerSignalMap");
-        return;
-    }
-
-    auto& config = *it->second;
-    Event powerControlEvent = (state == config.polarity)
-                                  ? Event::board1RunPowerPGAssert
-                                  : Event::board1RunPowerPGDeAssert;
-    this->sendPowerControlEvent(powerControlEvent);
-}
-
 void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 {
     auto it = powerSignalMap.find("Board0CpuShutdownOk");
@@ -249,6 +233,12 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 
 void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 {
+    if (!boardPresence.board1Present)
+    {
+        // Defensive guard: ignore Board 1 events on 1P systems.
+        return;
+    }
+
     auto it = powerSignalMap.find("Board1CpuShutdownOk");
     if (it == powerSignalMap.end())
     {
