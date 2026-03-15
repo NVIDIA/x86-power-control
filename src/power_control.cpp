@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include "platform/c2/c2_power_control.hpp"
+#include "platform/gnr/gnr_power_control.hpp"
 #include "platform/nvl72/nvl72_power_control.hpp"
 #include "platform/vc256/vc256_power_control.hpp"
 #include "platform/vr_nvl8/vr_nvl8_power_control.hpp"
@@ -79,13 +80,6 @@ static void setSlotPowerState(const SlotPowerState state)
     chassisSlotIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 }
 #endif
-#ifdef USE_ACBOOT
-static constexpr const char* powerACBootObject =
-    "/xyz/openbmc_project/control/host0/ac_boot";
-static constexpr const char* powerACBootIface =
-    "xyz.openbmc_project.Common.ACBoot";
-#endif // USE_ACBOOT
-
 namespace match_rules = sdbusplus::bus::match::rules;
 
 #ifdef CHASSIS_SYSTEM_RESET
@@ -233,6 +227,11 @@ static std::unique_ptr<PowerControl> createPowerControl(
     {
         return std::make_unique<VC256PowerControl>(io, conn, configPath, node,
                                                    appState);
+    }
+    else if (platformType == "gnr")
+    {
+        return std::make_unique<GNRPowerControl>(io, conn, configPath, node,
+                                                 appState);
     }
 
     lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl72",

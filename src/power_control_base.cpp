@@ -1656,8 +1656,7 @@ void PowerControl::registerHostInterface()
             "com.nvidia.PreSystemReset");
 
         preSysResetIface->register_method(
-            "SetPreSystemReset",
-            [this, preSysResetSignal](bool assertReset) {
+            "SetPreSystemReset", [this, preSysResetSignal](bool assertReset) {
                 // Allow release (false) from waitForCpuRecovery — that is the
                 // normal exit path. Only reject new assert (true) requests
                 // from transitional states to prevent racing a power sequence.
@@ -1678,9 +1677,10 @@ void PowerControl::registerHostInterface()
                         Unavailable();
                 }
                 // assert: polarity value; de-assert: !polarity
-                int gpioValue = assertReset
-                                    ? static_cast<int>(preSysResetSignal->polarity)
-                                    : static_cast<int>(!preSysResetSignal->polarity);
+                int gpioValue =
+                    assertReset
+                        ? static_cast<int>(preSysResetSignal->polarity)
+                        : static_cast<int>(!preSysResetSignal->polarity);
                 if (!setGPIOOutput(preSysResetSignal, gpioValue))
                 {
                     lg2::error("SetPreSystemReset({A}) failed", "A",
@@ -1701,7 +1701,8 @@ void PowerControl::registerHostInterface()
                     setPowerState(preSysResetReturnState);
                     preSysResetSavedValue = 1;
                     lg2::info("CPU reset released; FSM back to {STATE}",
-                              "STATE", static_cast<int>(preSysResetReturnState));
+                              "STATE",
+                              static_cast<int>(preSysResetReturnState));
                 }
             });
         preSysResetIface->initialize();

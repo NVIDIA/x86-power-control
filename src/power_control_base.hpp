@@ -868,6 +868,16 @@ class PowerControl
     void nmiSourcePropertyMonitor();
 
     /**
+     * @brief Handler for Host.Misc D-Bus property changes (e.g.
+     * ESpiPlatformReset)
+     *
+     * Public so it can be invoked from the PLT_RST match callback in main().
+     *
+     * @param msg The D-Bus message containing the property changes
+     */
+    void hostMiscHandler(sdbusplus::message_t& msg);
+
+    /**
      * @brief Start the POH (Power On Hours) counter timer
      *
      * Starts a 1-hour timer that increments the POH counter when the host is
@@ -1485,16 +1495,6 @@ class PowerControl
      * @param state The current state of the GPIO line
      */
     virtual void sioOnControlHandler(bool state);
-
-    /**
-     * @brief Handler for Host Misc D-Bus property changes
-     *
-     * Handles ESpiPlatformReset property changes from the Host.Misc interface.
-     * Calls pltRstHandler when the ESpiPlatformReset property changes.
-     *
-     * @param msg The D-Bus message containing the property changes
-     */
-    void hostMiscHandler(sdbusplus::message_t& msg);
 
     /**
      * @brief Extract a property value from a D-Bus PropertiesChanged message

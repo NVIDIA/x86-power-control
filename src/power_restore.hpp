@@ -22,6 +22,15 @@
 
 namespace match_rules = sdbusplus::bus::match::rules;
 
+#ifdef USE_ACBOOT
+// Defined in header so all TUs (including power_control_base.cpp) see them;
+// inline avoids multiple-definition errors and works with LTO.
+inline constexpr const char* powerACBootObject =
+    "/xyz/openbmc_project/control/host0/ac_boot";
+inline constexpr const char* powerACBootIface =
+    "xyz.openbmc_project.Common.ACBoot";
+#endif
+
 namespace power_control
 {
 
