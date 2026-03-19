@@ -1091,7 +1091,7 @@ void PowerControl::registerHostInterface()
                     addRestartCause(RestartCause::command);
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        sendPowerControlEvent(Event::gracefulPowerCycleRequest);
+                        sendPowerControlEvent(Event::powerCycleRequest);
                     });
                 }
                 else
