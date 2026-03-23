@@ -122,6 +122,14 @@ class NVL144PowerControl : public VRPowerControl
     void setDefaultValues() override;
 
     /**
+     * @brief Upgrade graceful CPU Shutdown OK wait to forceful shutdown
+     *
+     * Reuses handleShutdownRequest(Event::powerOffRequest) so correct GPIOs and
+     * watchdog are used for forceful shutdown behavior.
+     */
+    void handleForceOffDuringGracefulCpuShutdownOkWait() override;
+
+    /**
      * @brief Handle shutdown request (forceful or graceful) from PowerState::on
      *
      * Determines whether to assert CPU Shutdown Force or CPU Shutdown Request
