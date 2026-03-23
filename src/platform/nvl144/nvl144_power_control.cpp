@@ -227,6 +227,17 @@ void NVL144PowerControl::initiateCPUShutdown(
         return;
     }
 
+    // When asserting force, de-assert graceful request lines so both are not active
+    // (e.g. upgrade from graceful SHDN_OK wait to forceful shutdown).
+    if (shutdownSignalName == "Board0CpuShutdownForce")
+    {
+        auto board0Req = powerSignalMap.find("Board0CpuShutdownRequest");
+        if (board0Req != powerSignalMap.end())
+        {
+            setGPIOOutput(board0Req->second, !board0Req->second->polarity);
+        }
+    }
+
     lg2::info(
         "Asserting Board 0 CPU {SHUTDOWN_ACTION}. Starting CPU Shutdown OK Watchdog Timer. Transitioning to PowerState::waitForCPUShutdownOk",
         "SHUTDOWN_ACTION", shutdownAction);
@@ -362,6 +373,20 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         initiateCPUShutdown(shutdownSignalName, shutdownOkTimerName,
                             shutdownAction);
     }
+}
+
+void NVL144PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
+{
+    lg2::info(
+        "Forceful shutdown during Graceful shutdown Shutdown OK wait; upgrading to forceful shutdown sequence");
+
+    if (action == PowerAction::GRACEFUL_POWER_CYCLE)
+    {
+        action = PowerAction::POWER_CYCLE;
+    }
+    // GRACE_OFF: handleShutdownRequest assigns PowerAction::FORCE_OFF
+
+    handleShutdownRequest(Event::powerOffRequest);
 }
 
 // ============================================================================

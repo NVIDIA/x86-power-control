@@ -525,6 +525,18 @@ class VRPowerControl : public PowerControl
     virtual void handleWaitForCPUShutdownOk(Event event);
 
     /**
+     * @brief Handle force power-off while waiting for CPU Shutdown OK during a
+     * graceful shutdown (GRACE_OFF or GRACEFUL_POWER_CYCLE).
+     *
+     * Invoked when Event::powerOffRequest is received in
+     * waitForCPUShutdownOk so the sequence can be upgraded to forceful
+     * shutdown without waiting for the graceful watchdog. Platform
+     * implementations typically call the same path as handlePowerStateOn for
+     * force-off (e.g. NVL144 handleShutdownRequest).
+     */
+    virtual void handleForceOffDuringGracefulCpuShutdownOkWait();
+
+    /**
      * @brief Handler for PowerState::waitForCPUBootDoneDeAssert
      *
      * Waits for CPU_BOOT_DONE to de-assert (reboot) or timer to expire

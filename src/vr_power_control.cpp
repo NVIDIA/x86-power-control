@@ -830,10 +830,29 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
 // handleWaitForCPUShutdownOk state handler
 // ============================================================================
 
+void VRPowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
+{
+    lg2::warning(
+        "Force power-off during graceful CPU Shutdown OK wait is not handled on this platform");
+}
+
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 {
     switch (event)
     {
+        case Event::powerOffRequest:
+            if (action == PowerAction::GRACE_OFF ||
+                action == PowerAction::GRACEFUL_POWER_CYCLE)
+            {
+                handleForceOffDuringGracefulCpuShutdownOkWait();
+            }
+            else
+            {
+                lg2::info("No action taken for event: {EVENT}", "EVENT",
+                          getEventName(event));
+            }
+            break;
+
         case Event::board0CpuShutdownOkAssert:
         case Event::board1CpuShutdownOkAssert:
             // Check if all required boards have now asserted SHDN_OK
