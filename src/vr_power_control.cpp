@@ -1266,7 +1266,7 @@ void VRPowerControl::setDefaultValues()
     board0PreSystemReset->second->defaultStateHostStateOn =
         DefaultState::DeAsserted;
     board0PreSystemReset->second->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
+        DefaultState::Asserted;
 
     board0CpuShutdownForce->second->defaultStateHostStateOn =
         DefaultState::DeAsserted;
@@ -1291,7 +1291,7 @@ void VRPowerControl::setDefaultValues()
         board1PreSystemReset->second->defaultStateHostStateOn =
             DefaultState::DeAsserted;
         board1PreSystemReset->second->defaultStateHostStateOff =
-            DefaultState::DeAsserted;
+            DefaultState::Asserted;
     }
 
     lg2::info("VR default values set successfully");

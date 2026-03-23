@@ -948,36 +948,11 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 // Helper function: De-assert Pre System Resets and PDB Main Power
 void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
 {
-    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-    if (board0PreSystemReset == powerSignalMap.end())
-    {
-        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
-        return;
-    }
-
     auto pdbMainPowerEnable = powerSignalMap.find("PDBMainPowerEnable");
     if (pdbMainPowerEnable == powerSignalMap.end())
     {
         lg2::error("PDBMainPowerEnable signal not found in powerSignalMap");
         return;
-    }
-
-    // De-assert Board 0 Pre System Reset
-    setGPIOOutput(board0PreSystemReset->second,
-                  !board0PreSystemReset->second->polarity);
-
-    // De-assert Board 1 Pre System Reset if present
-    if (boardPresence.board1Present)
-    {
-        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-        if (board1PreSystemReset == powerSignalMap.end())
-        {
-            lg2::error(
-                "Board1PreSystemReset signal not found in powerSignalMap");
-            return;
-        }
-        setGPIOOutput(board1PreSystemReset->second,
-                      !board1PreSystemReset->second->polarity);
     }
 
     // De-assert PDB Main Power Enable
