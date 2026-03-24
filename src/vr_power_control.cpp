@@ -446,6 +446,27 @@ void VRPowerControl::deassertPreSystemResets()
     }
 }
 
+void VRPowerControl::abortWarmRebootCpuResetWatchdogFault(
+    std::string_view faultDetail)
+{
+    cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
+
+    lg2::error(
+        "CRITICAL WARM REBOOT FAULT: {DETAIL}. De-asserting Pre System Reset only; "
+        "HPM run power is NOT removed. Returning host/chassis to On.",
+        "DETAIL", faultDetail);
+
+    deassertPreSystemResets();
+
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {std::string("Host0"), std::string(faultDetail)},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    action = PowerAction::NONE;
+    setPowerState(PowerState::on);
+}
+
 // Helper function: Transition to CPU Reset Assert wait state
 void VRPowerControl::transitionToCPUResetDeAssertState()
 {
@@ -513,11 +534,13 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
 
             // Check if this is warm reboot or normal power-on
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
-                // Warm reboot complete - GPIOs already in correct state
+                // Warm reboot complete
                 lg2::info(
-                    "CPU Reset Indicator de-asserted. CPUs are out of reset. Warm reboot complete! Setting Host State to On/Running.");
+                    "CPU Reset Indicator de-asserted. CPUs are out of reset. Warm reboot complete! Setting Host State to On/Running. Setting GPIOs to default state for host state ON.");
+                setGPIOsForHostStateOn();
             }
             else
             {
@@ -530,22 +553,27 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             break;
 
         case Event::cpuResetWatchdogTimerExpired:
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 lg2::error(
-                    "CPU Reset Watchdog expired during warm reboot. CPUs did not come out of reset. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+                    "Warm reboot fault: CPU_RESET_L did not de-assert within the timeout period. CPUs may still be in reset. Host Power State is stil On. Conducting cleanup: Setting GPIO states to match Host State On.");
+                abortWarmRebootCpuResetWatchdogFault(
+                    "Warm reboot fault: CPU_RESET_L did not de-assert within "
+                    "CpuResetWatchdogMs (CPUs may still be in reset). "
+                    "PRE_SYS_RST de-asserted; run power domain unchanged.");
+                setGPIOsForHostStateOff();
             }
             else
             {
                 lg2::error(
                     "CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+                action = PowerAction::NONE;
+                transitionToOffStateWithRunPowerCheck();
+                logResourceEvent("ResourceErrorsDetected",
+                                 {"Host0", "CPU Reset Watchdog expired"},
+                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
             }
-
-            action = PowerAction::NONE;
-            transitionToOffStateWithRunPowerCheck();
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "CPU Reset Watchdog expired"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             break;
 
         default:
@@ -738,6 +766,19 @@ void VRPowerControl::abortGracefulShutdown()
     setGPIOsForHostStateOn();
 }
 
+void VRPowerControl::abortGracefulWarmReboot()
+{
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+    lg2::error(
+        "Graceful warm reboot aborted - CPU(s) failed to assert SHDN_OK within timeout. No warm reset performed. Returning to powered-on state.");
+    logResourceEvent("ResourceErrorsDetected",
+                     {"Host0", "Graceful warm reboot aborted (SHDN_OK timeout)"},
+                     "xyz.openbmc_project.Logging.Entry.Level.Warning");
+    action = PowerAction::NONE;
+    setGPIOsForHostStateOn();
+    setPowerState(PowerState::on);
+}
+
 // Helper function: Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
 void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
 {
@@ -857,15 +898,34 @@ void VRPowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
         "Force power-off during graceful CPU Shutdown OK wait is not handled on this platform");
 }
 
+void VRPowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
+{
+    lg2::warning(
+        "Force warm reboot during graceful warm reboot SHDN_OK wait is not handled on this platform");
+}
+
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 {
     switch (event)
     {
         case Event::powerOffRequest:
             if (action == PowerAction::GRACE_OFF ||
-                action == PowerAction::GRACEFUL_POWER_CYCLE)
+                action == PowerAction::GRACEFUL_POWER_CYCLE ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 handleForceOffDuringGracefulCpuShutdownOkWait();
+            }
+            else
+            {
+                lg2::info("No action taken for event: {EVENT}", "EVENT",
+                          getEventName(event));
+            }
+            break;
+
+        case Event::resetRequest:
+            if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                handleForceWarmRebootDuringGracefulCpuShutdownOkWait();
             }
             else
             {
@@ -923,6 +983,10 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             {
                 // Both GRACE_OFF and GRACEFUL_POWER_CYCLE use graceful shutdown
                 handleCPUShutdownOkWatchdogExpiry_GraceOff();
+            }
+            else if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                abortGracefulWarmReboot();
             }
             else
             {
@@ -1001,7 +1065,7 @@ void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
             // Reject all other events during power cycle delay
             lg2::warning(
                 "Event {EVENT} rejected - power cycle delay in progress",
-                "EVENT", static_cast<int>(event));
+                "EVENT", getEventName(event));
             break;
     }
 }
@@ -1012,8 +1076,21 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
     switch (event)
     {
         case Event::warmRebootDelayTimerExpired:
-            lg2::info(
-                "Warm reboot delay complete - de-asserting Pre System Reset signals");
+            if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                lg2::info(
+                    "Graceful warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
+            else if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                lg2::info(
+                    "Force warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
+            else
+            {
+                lg2::info(
+                    "Warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
             cancelTimer("Warm Reboot Delay Timer", warmRebootDelayTimer);
 
             // De-assert Pre System Reset signals (Board 0 and Board 1 if
@@ -1031,7 +1108,7 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
             // Reject all other events during warm reboot delay
             lg2::warning(
                 "Event {EVENT} rejected - warm reboot delay in progress",
-                "EVENT", static_cast<int>(event));
+                "EVENT", getEventName(event));
             break;
     }
 }
@@ -1110,7 +1187,8 @@ std::string_view VRPowerControl::getChassisState() const
         case PowerState::waitForCPUResetAssert:
             // For warm reboot, chassis stays On (no power cycle)
             // For shutdown, chassis is transitioning to off
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.On";
             }

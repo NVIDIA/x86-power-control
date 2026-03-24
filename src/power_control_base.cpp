@@ -85,6 +85,8 @@ std::string PowerControl::getEventName(Event event)
             return "power-cycle request";
         case Event::resetRequest:
             return "reset request";
+        case Event::gracefulResetRequest:
+            return "graceful reset request";
         case Event::gracefulPowerOffRequest:
             return "graceful power-off request";
         case Event::gracefulPowerCycleRequest:
@@ -1154,9 +1156,7 @@ void PowerControl::registerHostInterface()
                         "Host transition to GracefulWarmReboot requested");
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        // TODO: Currently performs a Force Warm Reboot. To be
-                        // replaced with a graceful warm reboot.
-                        sendPowerControlEvent(Event::resetRequest);
+                        sendPowerControlEvent(Event::gracefulResetRequest);
                     });
                 }
                 else

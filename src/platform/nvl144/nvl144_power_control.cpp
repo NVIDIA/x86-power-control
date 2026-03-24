@@ -305,14 +305,20 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         {
             lg2::error(
                 "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor!"
-                "Host Graceful Shutdown operation cannot proceed.");
+                "Host Graceful Operations cannot proceed.");
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! Host Graceful Operations cannot proceed."},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             return; // No-op, stay in current power state
         }
 
         else if (bootDoneState == 0)
         {
             lg2::error(
-                "CPU Boot Done is DE-ASSERTED. Host Graceful Shutdown operation cannot proceed");
+                "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed.");
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed."},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
             return; // No-op, stay in current power state
         }
         else
@@ -327,7 +333,8 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     // direct shutdown requests
     if (action != PowerAction::POWER_CYCLE &&
         action != PowerAction::GRACEFUL_POWER_CYCLE &&
-        action != PowerAction::FORCE_WARM_REBOOT)
+        action != PowerAction::FORCE_WARM_REBOOT &&
+        action != PowerAction::GRACEFUL_WARM_REBOOT)
     {
         action = isForceful ? PowerAction::FORCE_OFF : PowerAction::GRACE_OFF;
     }
@@ -359,6 +366,12 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
                 "Power already off during graceful power cycle. Setting GPIOs for host state OFF, starting power cycle delay timer, and transitioning to PowerState::waitForPowerCycleDelay");
             transitionToPowerCycleDelay();
         }
+        else if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+        {
+            lg2::info(
+                "Graceful warm reboot requested while host appears powered off. Cannot proceed with warm reboot. Transitioning to PowerState::Off");
+            transitionToOffState();
+        }
         else
         {
             // Normal shutdown when already off - just transition to off state
@@ -378,15 +391,27 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
 void NVL144PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
 {
     lg2::info(
-        "Forceful shutdown during Graceful shutdown Shutdown OK wait; upgrading to forceful shutdown sequence");
+        "Forceful shutdown during graceful wait for CPU Shutdown OK; upgrading to forceful shutdown sequence");
 
-    if (action == PowerAction::GRACEFUL_POWER_CYCLE)
-    {
-        action = PowerAction::POWER_CYCLE;
-    }
-    // GRACE_OFF: handleShutdownRequest assigns PowerAction::FORCE_OFF
 
+    action = PowerAction::FORCE_OFF;
     handleShutdownRequest(Event::powerOffRequest);
+}
+
+void NVL144PowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
+{
+    lg2::info(
+        "Force warm reboot during graceful warm reboot wait for CPU Shutdown OK; upgrading to force warm reboot sequence");
+
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+
+    auto board0Req = powerSignalMap.find("Board0CpuShutdownRequest");
+    if (board0Req != powerSignalMap.end())
+    {
+        setGPIOOutput(board0Req->second, !board0Req->second->polarity);
+    }
+
+    initiateForceWarmReboot();
 }
 
 // ============================================================================
@@ -430,7 +455,14 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
                 "Graceful Power Cycle Request received. Initiating graceful shutdown");
             action = PowerAction::GRACEFUL_POWER_CYCLE;
             handleShutdownRequest(
-                Event::gracefulPowerOffRequest); // Reuse graceful shutdown
+                Event::gracefulPowerCycleRequest);
+            break;
+
+        case Event::gracefulResetRequest:
+            lg2::info(
+                "Graceful warm reboot requested. Initiating graceful shutdown request then warm reset sequence");
+            action = PowerAction::GRACEFUL_WARM_REBOOT;
+            handleShutdownRequest(Event::gracefulResetRequest);
             break;
 
         case Event::resetRequest:
@@ -565,7 +597,12 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
             break;
         case Event::powerButtonPressed:
             break;
+        case Event::gracefulResetRequest:
+            lg2::info(
+                "Graceful warm reboot requested while host is off; no action. Host must be powered on and booted before issuing graceful warm reboot request.");
+            break;
         case Event::resetRequest:
+            lg2::info("Reset request received while host is off; no action. Host must be powered on. ");
             break;
         default:
             lg2::info("No action taken.");
@@ -927,15 +964,28 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             lg2::info("CPU Reset Indicator asserted - CPUs entered reset");
 
             // Check if this is a warm reboot flow
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
-                // Warm reboot: start delay timer before de-asserting Pre System
-                // Reset
-                auto it = TimerMap.find("ForceWarmRebootDelayMs");
+                const char* warmRebootDelayKey =
+                    (action == PowerAction::GRACEFUL_WARM_REBOOT)
+                        ? "GracefulWarmRebootDelayMs"
+                        : "ForceWarmRebootDelayMs";
+                auto it = TimerMap.find(warmRebootDelayKey);
                 int delayMs = (it != TimerMap.end()) ? it->second : 0;
-                lg2::info("Starting force warm reboot delay of {DELAY}ms",
-                          "DELAY", delayMs);
-                startTimer("ForceWarmRebootDelayMs", warmRebootDelayTimer,
+                if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+                {
+                    lg2::info(
+                        "Starting graceful warm reboot delay ({KEY}) of {DELAY}ms",
+                        "KEY", warmRebootDelayKey, "DELAY", delayMs);
+                }
+                else
+                {
+                    lg2::info(
+                        "Starting force warm reboot delay ({KEY}) of {DELAY}ms",
+                        "KEY", warmRebootDelayKey, "DELAY", delayMs);
+                }
+                startTimer(warmRebootDelayKey, warmRebootDelayTimer,
                            Event::warmRebootDelayTimerExpired);
                 setPowerState(PowerState::waitForRebootDelay);
             }
@@ -947,13 +997,16 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             break;
 
         case Event::cpuResetWatchdogTimerExpired:
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 lg2::error(
-                    "CPU Reset Assert Watchdog expired during warm reboot. CPUs did not enter reset. Aborting warm reboot");
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Reset Watchdog expired (warm reboot)"},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
+                    "Warm reboot fault: CPU_RESET_L did not assert within the timeout period. CPUs did not enter reset. Host Power State is still On. Conducting cleanup: Setting GPIO states to match Host State On.");
+                abortWarmRebootCpuResetWatchdogFault(
+                    "Warm reboot fault: CPU_RESET_L did not assert within "
+                    "CpuResetWatchdogMs (CPUs did not enter reset). "
+                    "PRE_SYS_RST de-asserted; run power unchanged.");
+                setGPIOsForHostStateOn();
             }
             else
             {
@@ -962,12 +1015,11 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
                 logResourceEvent("ResourceErrorsDetected",
                                  {"Host0", "CPU Reset Watchdog expired"},
                                  "xyz.openbmc_project.Logging.Entry.Level.Error");
+                lg2::error(
+                    "Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+                action = PowerAction::NONE;
+                transitionToOffStateWithRunPowerCheck();
             }
-
-            lg2::error(
-                "Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
-            action = PowerAction::NONE;
-            transitionToOffStateWithRunPowerCheck();
             break;
 
         default:
