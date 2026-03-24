@@ -236,6 +236,7 @@ class PowerControl
         powerOffRequest,
         powerCycleRequest,
         resetRequest,
+        gracefulResetRequest,
         gracefulPowerOffRequest,
         gracefulPowerCycleRequest,
         warmResetDetected,
@@ -277,8 +278,6 @@ class PowerControl
      * Logs a ResourceEvent with the given event name and message args (e.g.
      * logResourceEvent("ResourcePoweredOn", {"Host0"}) or
      * logResourceEvent("ResourceErrorsDetected", {"Host0", "CPU Reset Watchdog expired"}).
-     * RequestedHostTransition / RequestedPowerTransition writes also log
-     * ResourcePowerTransitionRequested.
      *
      * @param eventName Message key (e.g. "ResourcePoweredOn",
      *                  "ResourceErrorsDetected")
@@ -341,6 +340,8 @@ class PowerControl
         SYSTEM_RESET,
         HOST_INITIATED_SHUTDOWN,
         FORCE_WARM_REBOOT,
+        /** Graceful warm reboot: SHDN_REQ / SHDN_OK then same reset tail as force */
+        GRACEFUL_WARM_REBOOT,
     };
 
     // This map contains all timer values that are to be read from json config

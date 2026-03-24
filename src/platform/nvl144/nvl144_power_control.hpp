@@ -130,6 +130,11 @@ class NVL144PowerControl : public VRPowerControl
     void handleForceOffDuringGracefulCpuShutdownOkWait() override;
 
     /**
+     * @brief Upgrade graceful warm reboot SHDN_OK wait to force warm reboot
+     */
+    void handleForceWarmRebootDuringGracefulCpuShutdownOkWait() override;
+
+    /**
      * @brief Handle shutdown request (forceful or graceful) from PowerState::on
      *
      * Determines whether to assert CPU Shutdown Force or CPU Shutdown Request

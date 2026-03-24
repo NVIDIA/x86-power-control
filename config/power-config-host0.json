@@ -118,6 +118,7 @@
         "PdbMainPowerOkWatchdogMs": 1000,
         "PowerCycleDelayMs": 15000,
         "ForceWarmRebootDelayMs": 1000,
+        "GracefulWarmRebootDelayMs": 1000,
         "PowerOffSaveMs": 10000
     },
     "event_configs": {
