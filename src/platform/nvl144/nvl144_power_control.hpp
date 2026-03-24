@@ -290,6 +290,15 @@ class NVL144PowerControl : public VRPowerControl
     // PLATFORM GPIO HANDLERS (Member functions)
 
     /**
+     * @brief Mask HSC alerts and clear faults on shared PDB interrupt line
+     *
+     * HSCs share an interrupt with a PDB IOX; uncleared faults can hold the line
+     * low and block IOX interrupts. Called on each PDBMainPowerOk assert
+     * because masking may reset with power events.
+     */
+    void maskHscAlertsAndClearFaults();
+
+    /**
      * @brief Handler for PDB Main Power OK GPIO events
      *
      * - If state == true: Send Event::pdbMainPowerOkAssert
