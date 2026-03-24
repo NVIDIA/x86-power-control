@@ -5,8 +5,13 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <chrono>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace power_control
 {
@@ -85,7 +90,62 @@ void NVL144PowerControl::pdbMainPowerOkHandler(bool state)
     Event powerControlEvent = (state == config.polarity)
                                   ? Event::pdbMainPowerOkAssert
                                   : Event::pdbMainPowerOkDeAssert;
+
+    // WAR: Mask HSC alerts and clear faults on each PDBMainPowerOk assert
+    if (powerControlEvent == Event::pdbMainPowerOkAssert)
+    {
+        maskHscAlertsAndClearFaults();
+    }
+
     this->sendPowerControlEvent(powerControlEvent);
+}
+
+void NVL144PowerControl::maskHscAlertsAndClearFaults()
+{
+    constexpr int hscBus = 9;
+    static const std::vector<uint16_t> hscAddrs = {0x10, 0x12, 0x14, 0x16};
+
+    const std::string i2cPath = "/dev/i2c-" + std::to_string(hscBus);
+    int file = open(i2cPath.c_str(), O_RDWR | O_CLOEXEC);
+    if (file < 0)
+    {
+        lg2::error("HSC WAR: failed to open I2C bus {PATH}", "PATH", i2cPath);
+        return;
+    }
+
+    const std::vector<uint8_t> maskCmd = {0xD8, 0xFF, 0xFF};
+    const std::vector<uint8_t> clearCmd = {0x03};
+
+    for (uint16_t addr : hscAddrs)
+    {
+        if (PowerControl::i2cWrite(file, addr, maskCmd) < 0)
+        {
+            lg2::error(
+                "HSC mask alert failed: bus {BUS}, addr {ADDR}", "BUS", hscBus,
+                "ADDR", static_cast<int>(addr));
+        }
+        else
+        {
+            lg2::info(
+                "HSC mask alert success: bus {BUS}, addr {ADDR}", "BUS", hscBus,
+                "ADDR", static_cast<int>(addr));
+        }
+
+        if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
+        {
+            lg2::error(
+                "HSC clear fault failed: bus {BUS}, addr {ADDR}", "BUS", hscBus,
+                "ADDR", static_cast<int>(addr));
+        }
+        else
+        {
+            lg2::info(
+                "HSC clear fault success: bus {BUS}, addr {ADDR}", "BUS", hscBus,
+                "ADDR", static_cast<int>(addr));
+        }
+    }
+
+    close(file);
 }
 
 std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()

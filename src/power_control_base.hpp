@@ -9,6 +9,7 @@
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -16,6 +17,7 @@
 #include <regex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // Forward declarations
 namespace power_control
@@ -278,6 +280,17 @@ class PowerControl
      * @param event The event that was received
      */
     static void logEvent(std::string_view stateHandler, Event event);
+
+    /**
+     * @brief Write bytes to an I2C slave using the I2C_RDWR ioctl
+     *
+     * @param file Open I2C adapter device (e.g. /dev/i2c-N) file descriptor
+     * @param address 7-bit I2C slave address
+     * @param data Payload to write (e.g. register byte followed by data)
+     * @return 0 on success, -1 on failure
+     */
+    static int i2cWrite(int file, uint16_t address,
+                        const std::vector<uint8_t>& data);
 
     /**
      * @brief Request all D-Bus bus names for this service
