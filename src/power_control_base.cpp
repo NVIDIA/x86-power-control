@@ -6,7 +6,10 @@
 #include "power_restore.hpp"
 
 #include <fcntl.h>
+#include <linux/i2c-dev.h>
+#include <linux/i2c.h>
 #include <linux/input.h>
+#include <sys/ioctl.h>
 #include <systemd/sd-journal.h>
 #include <unistd.h>
 
@@ -135,6 +138,31 @@ void PowerControl::logEvent(std::string_view stateHandler, Event event)
 {
     lg2::info("{STATE_HANDLER}: {EVENT} event received", "STATE_HANDLER",
               stateHandler, "EVENT", getEventName(event));
+}
+
+int PowerControl::i2cWrite(int file, uint16_t address,
+                           const std::vector<uint8_t>& data)
+{
+    if (data.empty())
+    {
+        return -1;
+    }
+
+    struct i2c_msg msg
+    {};
+    struct i2c_rdwr_ioctl_data rdwr
+    {};
+
+    msg.addr = address;
+    msg.flags = 0;
+    msg.len = static_cast<__u16>(data.size());
+    msg.buf = const_cast<uint8_t*>(data.data());
+
+    rdwr.msgs = &msg;
+    rdwr.nmsgs = 1;
+
+    int ret = ioctl(file, I2C_RDWR, &rdwr);
+    return (ret == 1) ? 0 : -1;
 }
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
