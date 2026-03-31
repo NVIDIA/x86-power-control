@@ -354,9 +354,31 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 // Helper function: Initiate a force warm reboot sequence
 void VRPowerControl::initiateForceWarmReboot()
 {
-    lg2::info(
-        "Force Warm Reboot request received - asserting Pre System Reset signals");
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+
     action = PowerAction::FORCE_WARM_REBOOT;
+    
+    lg2::info("De-asserting Shutdown Force signals");
+    auto board0CpuShutdownForce = getSignal("Board0CpuShutdownForce");
+    if (!board0CpuShutdownForce)
+    {
+        return;
+    }
+    setGPIOOutput(board0CpuShutdownForce,
+                  !board0CpuShutdownForce->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1CpuShutdownForce = getSignal("Board1CpuShutdownForce");
+        if (!board1CpuShutdownForce)
+        {
+            return;
+        }
+        setGPIOOutput(board1CpuShutdownForce,
+                      !board1CpuShutdownForce->polarity);
+    }
+
+    lg2::info("Asserting Pre System Reset signals");
 
     // Assert Pre System Reset for Board 0
     auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
@@ -676,8 +698,8 @@ void VRPowerControl::transitionToCPUResetAssertState()
 
 #ifdef CPU_RESET_EARLY_ASSERT_WAR
     // Hardware bug workaround: CPU_RESET_L may assert before we enter this
-    // state Check if CPU reset is already asserted immediately after state
-    // transition
+    // state. Check if CPU reset is already asserted immediately after state
+    // transition.
     auto cpuResetIndicator = getSignal("CpuResetIndicator");
     if (cpuResetIndicator && cpuResetIndicator->gpioLine)
     {
@@ -688,7 +710,6 @@ void VRPowerControl::transitionToCPUResetAssertState()
         {
             lg2::info(
                 "WAR: CPU Reset Indicator already asserted upon entering waitForCPUResetAssert state. Manually triggering Event::cpuResetIndicatorAssert.");
-            // Manually send the event to trigger normal handler flow
             sendPowerControlEvent(Event::cpuResetIndicatorAssert);
         }
     }
@@ -718,6 +739,13 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
     startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
                Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
+}
+
+void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot()
+{
+    lg2::info(
+        "CPU Shutdown OK watchdog expired during Force Warm Reboot. Proceeding with Force Warm Reboot.");
+    initiateForceWarmReboot();
 }
 
 // Helper function: Handle CPU Shutdown OK watchdog expiry during GRACE_OFF
@@ -812,7 +840,14 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             if (areAllRequiredBoardsShutdownOk())
             {
                 // All required boards have asserted - proceed with reset
-                transitionToCPUResetAssertState();
+                if (action == PowerAction::FORCE_WARM_REBOOT)
+                {
+                    initiateForceWarmReboot();
+                }
+                else
+                {
+                    transitionToCPUResetAssertState();
+                }
             }
             else
             {
@@ -838,6 +873,10 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
             {
                 // Both FORCE_OFF and POWER_CYCLE use forceful shutdown
                 handleCPUShutdownOkWatchdogExpiry_ForceOff();
+            }
+            else if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot();
             }
             else if (action == PowerAction::GRACE_OFF ||
                      action == PowerAction::GRACEFUL_POWER_CYCLE)
