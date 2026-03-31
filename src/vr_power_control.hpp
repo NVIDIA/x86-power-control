@@ -218,6 +218,14 @@ class VRPowerControl : public PowerControl
     void handleCPUShutdownOkWatchdogExpiry_GraceOff();
 
     /**
+     * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_WARM_REBOOT
+     *
+     * Proceeds with Pre System Reset assert and waitForCPUResetAssert even if
+     * SHDN_OK did not arrive in Safe Stating time.
+     */
+    void handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot();
+
+    /**
      * @brief De-assert Pre System Reset lines during HPM power-on sequence
      *
      * De-asserts Board 0 Pre System Reset and Board 1 Pre System Reset (if
@@ -569,7 +577,10 @@ class VRPowerControl : public PowerControl
      *
      * This is a common helper function that can be used by any VR platform.
      * It performs the following:
+     * - Cancels the CPU Shutdown OK watchdog (if running)
      * - Sets action to FORCE_WARM_REBOOT
+     * - De-asserts Board0CpuShutdownForce (SHDN_FORCE)
+     * - De-asserts Board1CpuShutdownForce if Board1 is present
      * - Asserts Board0PreSystemReset
      * - Asserts Board1PreSystemReset (if Board1 is present)
      * - Starts CPU Reset watchdog timer
