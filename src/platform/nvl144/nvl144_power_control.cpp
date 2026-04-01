@@ -312,16 +312,25 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         // bootDoneState == 1, proceed with graceful operation
     }
 
-    // Preserve power cycle context; only set action for direct shutdown
-    // requests
+    // Preserve power cycle / force warm reboot context; only set action for
+    // direct shutdown requests
     if (action != PowerAction::POWER_CYCLE &&
-        action != PowerAction::GRACEFUL_POWER_CYCLE)
+        action != PowerAction::GRACEFUL_POWER_CYCLE &&
+        action != PowerAction::FORCE_WARM_REBOOT)
     {
         action = isForceful ? PowerAction::FORCE_OFF : PowerAction::GRACE_OFF;
     }
 
-    lg2::info("Commencing {SHUTDOWN_TYPE} sequence.", "SHUTDOWN_TYPE",
-              shutdownType);
+    if (action == PowerAction::FORCE_WARM_REBOOT)
+    {
+        lg2::info(
+            "Commencing force warm reboot sequence: asserting SHDN FORCE to safe state PHYs, then toggling Pre System Reset signals.");
+    }
+    else
+    {
+        lg2::info("Commencing {SHUTDOWN_TYPE} sequence.", "SHUTDOWN_TYPE",
+                  shutdownType);
+    }
 
     // Check if system is already powered off
     if (isSystemPowerOff())
@@ -400,8 +409,9 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             break;
 
         case Event::resetRequest:
-            // Initiate force warm reboot using common VR helper
-            initiateForceWarmReboot();
+            // Safe stating PHYs: (SHDN_FORCE & SHDN_OK) then toggle Pre System Reset signals
+            action = PowerAction::FORCE_WARM_REBOOT;
+            handleShutdownRequest(Event::powerOffRequest);
             break;
 
         case Event::powerButtonPressed:
