@@ -6,6 +6,7 @@
 #include "power_control_base.hpp"
 
 #include <functional>
+#include <string_view>
 
 namespace power_control
 {
@@ -200,6 +201,26 @@ class VRPowerControl : public PowerControl
     void abortGracefulShutdown();
 
     /**
+     * @brief Abort graceful warm reboot during SHDN_OK wait and return to on
+     *
+     * Called when the graceful CPU Shutdown OK watchdog expires during
+     * GRACEFUL_WARM_REBOOT (no warm reset performed).
+     */
+    void abortGracefulWarmReboot();
+
+    /**
+     * @brief Warm reboot CPU reset watchdog fault: no run-power teardown
+     *
+     * For FORCE_WARM_REBOOT / GRACEFUL_WARM_REBOOT when CpuResetWatchdogMs
+     * expires in waitForCPUResetAssert or waitForCPUResetDeAssert: cancel the
+     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal and
+     * ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM run-power teardown.
+     *
+     * @param faultDetail Human-readable fault text for event log / journal
+     */
+    void abortWarmRebootCpuResetWatchdogFault(std::string_view faultDetail);
+
+    /**
      * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
      *
      * For forced power off, we don't care about SHDN_OK state - just proceed
@@ -269,6 +290,7 @@ class VRPowerControl : public PowerControl
         "HPMPowerGoodWatchdogMs",
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
+        "GracefulWarmRebootDelayMs",
         "CpuBootDoneDeAssertDelayMs",
         "PowerOffSaveMs"};
 
@@ -523,6 +545,27 @@ class VRPowerControl : public PowerControl
      * case Event::cpuShutdownOkWatchdogTimerExpired:
      */
     virtual void handleWaitForCPUShutdownOk(Event event);
+
+    /**
+     * @brief Handle force power-off while waiting for CPU Shutdown OK during a
+     * graceful shutdown, graceful power cycle, or graceful warm reboot
+     * (GRACE_OFF, GRACEFUL_POWER_CYCLE, or GRACEFUL_WARM_REBOOT).
+     *
+     * Invoked when Event::powerOffRequest is received in
+     * waitForCPUShutdownOk so the sequence can be upgraded to forceful
+     * shutdown without waiting for the graceful watchdog. Platform
+     * implementations typically call the same path as handlePowerStateOn for
+     * force-off
+     */
+    virtual void handleForceOffDuringGracefulCpuShutdownOkWait();
+
+    /**
+     * @brief Upgrade graceful warm reboot to force warm reboot during wait for CPU Shutdown OK
+     *
+     * Invoked when Event::resetRequest is received while
+     * action == GRACEFUL_WARM_REBOOT in waitForCPUShutdownOk.
+     */
+    virtual void handleForceWarmRebootDuringGracefulCpuShutdownOkWait();
 
     /**
      * @brief Handler for PowerState::waitForCPUBootDoneDeAssert

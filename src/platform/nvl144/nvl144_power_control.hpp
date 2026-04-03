@@ -122,6 +122,19 @@ class NVL144PowerControl : public VRPowerControl
     void setDefaultValues() override;
 
     /**
+     * @brief Upgrade graceful CPU Shutdown OK wait to forceful shutdown
+     *
+     * Reuses handleShutdownRequest(Event::powerOffRequest) so correct GPIOs and
+     * watchdog are used for forceful shutdown behavior.
+     */
+    void handleForceOffDuringGracefulCpuShutdownOkWait() override;
+
+    /**
+     * @brief Upgrade graceful warm reboot SHDN_OK wait to force warm reboot
+     */
+    void handleForceWarmRebootDuringGracefulCpuShutdownOkWait() override;
+
+    /**
      * @brief Handle shutdown request (forceful or graceful) from PowerState::on
      *
      * Determines whether to assert CPU Shutdown Force or CPU Shutdown Request
@@ -141,16 +154,14 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Initiate CPU shutdown sequence
      *
-     * @param shutdownSignalName Name of the shutdown signal to assert
-     * @param shutdownOkTimerName TimerMap key for CPU Shutdown OK watchdog
-     * @param shutdownAction Description of shutdown action for logging
+     * @param isForceful If true, uses force shutdown GPIO and watchdog; otherwise
+     * graceful request line and graceful watchdog.
      *
-     * Asserts the specified shutdown signal, starts the watchdog timer,
-     * and transitions to waitForCPUShutdownOk state.
+     * Asserts the appropriate Board 0 shutdown signal (and de-asserts Board 1
+     * counterpart when present), starts the CPU Shutdown OK watchdog, and
+     * transitions to waitForCPUShutdownOk state.
      */
-    void initiateCPUShutdown(const std::string& shutdownSignalName,
-                             const std::string& shutdownOkTimerName,
-                             const std::string& shutdownAction);
+    void initiateCPUShutdown(bool isForceful);
 
     /**
      * @brief Handle power on request from PowerState::off
