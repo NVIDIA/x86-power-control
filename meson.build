@@ -46,7 +46,7 @@ endif
 conf_data = configuration_data()
 conf_data.set_quoted('GB300_PDB_IOX_PATH', get_option('gb300-pdb-iox-path'))
 conf_data.set_quoted('C2_PDB_IOX_PATH', get_option('c2-pdb-iox-path'))
-conf_data.set_quoted('NVL144_PDB_IOX_PATH', get_option('nvl144-pdb-iox-path'))
+conf_data.set_quoted('NVL72_PDB_IOX_PATH', get_option('nvl72-pdb-iox-path'))
 conf_data.set_quoted('BOARD0_IOX_PATH', get_option('board0-iox-path'))
 conf_data.set_quoted('BOARD1_IOX_PATH', get_option('board1-iox-path'))
 
@@ -85,7 +85,7 @@ executable(
     'src/power_control.cpp',
     'src/power_control_base.cpp',
     'src/vr_power_control.cpp',
-    'src/platform/nvl144/nvl144_power_control.cpp',
+    'src/platform/nvl72/nvl72_power_control.cpp',
     include_directories: include_directories('src'),
     cpp_args: cpp_args,
     dependencies: deps,

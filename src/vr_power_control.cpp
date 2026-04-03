@@ -68,7 +68,7 @@ void VRPowerControl::detectBoardPresence()
     // Check presence and update context using paths from build configuration
     boardPresence.parsecPdbPresent = checkIOXPresence(GB300_PDB_IOX_PATH);
     boardPresence.c2PdbPresent = checkIOXPresence(C2_PDB_IOX_PATH);
-    boardPresence.nvl144PdbPresent = checkIOXPresence(NVL144_PDB_IOX_PATH);
+    boardPresence.nvl72PdbPresent = checkIOXPresence(NVL72_PDB_IOX_PATH);
     boardPresence.board0Present = checkIOXPresence(BOARD0_IOX_PATH);
     boardPresence.board1Present = checkIOXPresence(BOARD1_IOX_PATH);
 
@@ -80,9 +80,9 @@ void VRPowerControl::detectBoardPresence()
     lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH",
               std::string(C2_PDB_IOX_PATH), "PRESENT",
               boardPresence.c2PdbPresent);
-    lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH",
-              std::string(NVL144_PDB_IOX_PATH), "PRESENT",
-              boardPresence.nvl144PdbPresent);
+    lg2::info("  NVL72 PDB ({PATH}): {PRESENT}", "PATH",
+              std::string(NVL72_PDB_IOX_PATH), "PRESENT",
+              boardPresence.nvl72PdbPresent);
     lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH",
               std::string(BOARD0_IOX_PATH), "PRESENT",
               boardPresence.board0Present);
@@ -331,19 +331,19 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 void VRPowerControl::handlePowerStateOn(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateOn() implementation here
+    // TODO: Move NVL72-specific powerStateOn() implementation here
 }
 
 void VRPowerControl::handlePowerStateOff(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateOff() implementation here
+    // TODO: Move NVL72-specific powerStateOff() implementation here
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateWaitForPDBMainPowerOk()
+    // TODO: Move NVL72-specific powerStateWaitForPDBMainPowerOk()
     // implementation here
 }
 
