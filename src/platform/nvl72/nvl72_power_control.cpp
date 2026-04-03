@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Copyright OpenBMC Authors
 
-#include "nvl144_power_control.hpp"
+#include "nvl72_power_control.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -18,8 +18,8 @@ namespace power_control
 // Type aliases for convenience
 using Event = PowerControl::Event;
 
-// Constructor: Assigns handlers and registers events for NVL144-specific GPIOs
-NVL144PowerControl::NVL144PowerControl(
+// Constructor: Assigns handlers and registers events for NVL72-specific GPIOs
+NVL72PowerControl::NVL72PowerControl(
     boost::asio::io_context& ioContext,
     std::shared_ptr<sdbusplus::asio::connection> conn,
     const std::string& configFilePath, const std::string& node,
@@ -30,7 +30,7 @@ NVL144PowerControl::NVL144PowerControl(
 {
     // powerSignalMap is now populated by base class
     // PowerControl::loadConfigValues() VR handlers already added to
-    // gpioHandlerMap by VRPowerControl constructor Now add NVL144-specific
+    // gpioHandlerMap by VRPowerControl constructor Now add NVL72-specific
     // handlers to the map
 
     // Add PDB-specific required signals (Board 0)
@@ -53,7 +53,7 @@ NVL144PowerControl::NVL144PowerControl(
         addBoard1GpioStateProperties();
     }
 
-    // Validate all required signals (VR + NVL144)
+    // Validate all required signals (VR + NVL72)
     PowerControl::validateRequiredSignals();
 
     // call validateTimerConfigs() to validate all required timers
@@ -74,7 +74,7 @@ NVL144PowerControl::NVL144PowerControl(
 }
 
 // PDB-specific GPIO handler implementations
-void NVL144PowerControl::pdbMainPowerOkHandler(bool state)
+void NVL72PowerControl::pdbMainPowerOkHandler(bool state)
 {
     lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
               static_cast<int>(state));
@@ -98,7 +98,7 @@ void NVL144PowerControl::pdbMainPowerOkHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent);
 }
 
-void NVL144PowerControl::maskHscAlertsAndClearFaults()
+void NVL72PowerControl::maskHscAlertsAndClearFaults()
 {
     constexpr int hscBus = 9;
     static const std::vector<uint16_t> hscAddrs = {0x10, 0x12, 0x14, 0x16};
@@ -142,13 +142,13 @@ void NVL144PowerControl::maskHscAlertsAndClearFaults()
     close(file);
 }
 
-std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
+std::function<void(Event)> NVL72PowerControl::getPowerStateHandler()
 {
-    // NVL144 does not define new PowerState values, so delegate everything
+    // NVL72 does not define new PowerState values, so delegate everything
     // to VRPowerControl which handles all VR and upstream states
     switch (powerState)
     {
-        // No NVL144-specific states (empty switch)
+        // No NVL72-specific states (empty switch)
         case PowerState::off:
             return [this](Event e) { this->handlePowerStateOff(e); };
         case PowerState::on:
@@ -163,13 +163,13 @@ std::function<void(Event)> NVL144PowerControl::getPowerStateHandler()
             return
                 [this](Event e) { this->handleWaitForHPMPowerGoodDeAssert(e); };
         // Add more as Power State Handlers are overridden and implemented by
-        // NVL144PowerControl
+        // NVL72PowerControl
         default:
             return VRPowerControl::getPowerStateHandler();
     }
 }
 
-void NVL144PowerControl::addBoard1GpioStateProperties()
+void NVL72PowerControl::addBoard1GpioStateProperties()
 {
     gpioStateIface->register_property_r(
         "Board1CpuShutdownOk", int{-1},
@@ -187,7 +187,7 @@ void NVL144PowerControl::addBoard1GpioStateProperties()
 // ============================================================================
 
 // Helper function: Check if system power is already off
-bool NVL144PowerControl::isSystemPowerOff()
+bool NVL72PowerControl::isSystemPowerOff()
 {
     auto board0RunPowerPG = getSignal("Board0RunPowerPG");
     if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
@@ -209,7 +209,7 @@ bool NVL144PowerControl::isSystemPowerOff()
 }
 
 // Helper function: Initiate CPU shutdown sequence
-void NVL144PowerControl::initiateCPUShutdown(bool isForceful)
+void NVL72PowerControl::initiateCPUShutdown(bool isForceful)
 {
     const char* shutdownSignalName =
         isForceful ? "Board0CpuShutdownForce" : "Board0CpuShutdownRequest";
@@ -268,7 +268,7 @@ void NVL144PowerControl::initiateCPUShutdown(bool isForceful)
 }
 
 // Helper function: Handle shutdown requests (force or graceful)
-void NVL144PowerControl::handleShutdownRequest(Event event)
+void NVL72PowerControl::handleShutdownRequest(Event event)
 {
     bool isForceful = (event == Event::powerOffRequest);
     std::string shutdownType = isForceful ? "Forceful" : "Graceful";
@@ -368,7 +368,7 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
     }
 }
 
-void NVL144PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
+void NVL72PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
 {
     lg2::info(
         "Forceful shutdown during graceful wait for CPU Shutdown OK; upgrading to forceful shutdown sequence");
@@ -377,7 +377,7 @@ void NVL144PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
     handleShutdownRequest(Event::powerOffRequest);
 }
 
-void NVL144PowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
+void NVL72PowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
 {
     lg2::info(
         "Force warm reboot during graceful warm reboot wait for CPU Shutdown OK; upgrading to force warm reboot sequence");
@@ -397,9 +397,9 @@ void NVL144PowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
 // handlePowerStateOn state handler
 // ============================================================================
 
-void NVL144PowerControl::handlePowerStateOn(Event event)
+void NVL72PowerControl::handlePowerStateOn(Event event)
 {
-    // TODO: Move NVL144-specific powerStateOn() implementation here
+    // TODO: Move NVL72-specific powerStateOn() implementation here
     switch (event)
     {
         case Event::board0CpuShutdownOkAssert:
@@ -463,7 +463,7 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
 // ============================================================================
 
 // Helper function: Handle power on request
-void NVL144PowerControl::handlePowerOnRequest()
+void NVL72PowerControl::handlePowerOnRequest()
 {
     lg2::info(
         "Power On Request received. Setting GPIOs to default state for host state Off and Commencing Host Main Power On sequence.");
@@ -515,7 +515,7 @@ void NVL144PowerControl::handlePowerOnRequest()
 }
 
 // Helper function: Handle power cycle request when in off state
-void NVL144PowerControl::handlePowerCycleWhenOff(Event event)
+void NVL72PowerControl::handlePowerCycleWhenOff(Event event)
 {
     // Determine the type of power cycle based on the event
     bool isForceful = (event == Event::powerCycleRequest);
@@ -559,9 +559,9 @@ void NVL144PowerControl::handlePowerCycleWhenOff(Event event)
 // handlePowerStateOff state handler
 // ============================================================================
 
-void NVL144PowerControl::handlePowerStateOff(Event event)
+void NVL72PowerControl::handlePowerStateOff(Event event)
 {
-    // TODO: Move NVL144-specific powerStateOff() implementation here
+    // TODO: Move NVL72-specific powerStateOff() implementation here
     switch (event)
     {
         case Event::powerOnRequest:
@@ -593,7 +593,7 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
 // ============================================================================
 
 // Helper function: Assert HPM board power sequence during power-on
-void NVL144PowerControl::assertHPMBoardPowerSequence()
+void NVL72PowerControl::assertHPMBoardPowerSequence()
 {
     auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
     if (!board0RunPowerEnable)
@@ -674,7 +674,7 @@ void NVL144PowerControl::assertHPMBoardPowerSequence()
 }
 
 // Helper function: Transition to HPM Power Good assert wait state
-void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
+void NVL72PowerControl::transitionToHPMPowerGoodAssertState()
 {
     cancelTimer("PDB Main Power OK Watchdog Timer",
                 pdbMainPowerOkWatchdogTimer);
@@ -692,7 +692,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodAssertState()
 // handleWaitForPDBMainPowerOk state handler
 // ============================================================================
 
-void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
+void NVL72PowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     switch (event)
     {
@@ -723,7 +723,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
 // ============================================================================
 
 // Helper function: Transition to off state after successful shutdown
-void NVL144PowerControl::transitionToOffState()
+void NVL72PowerControl::transitionToOffState()
 {
     action = PowerAction::NONE;
     setGPIOsForHostStateOff();
@@ -731,7 +731,7 @@ void NVL144PowerControl::transitionToOffState()
 }
 
 // Helper function: Transition to power cycle delay state
-void NVL144PowerControl::transitionToPowerCycleDelay()
+void NVL72PowerControl::transitionToPowerCycleDelay()
 {
     // Keep action (POWER_CYCLE or GRACEFUL_POWER_CYCLE) - don't clear it
     setGPIOsForHostStateOff();
@@ -741,7 +741,7 @@ void NVL144PowerControl::transitionToPowerCycleDelay()
 }
 
 // Helper function: Complete shutdown and transition to off state
-void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
+void NVL72PowerControl::completeShutdownAndTransitionToOff(bool success)
 {
     cancelTimer("PDB Main Power OK Watchdog Timer",
                 pdbMainPowerOkWatchdogTimer);
@@ -812,7 +812,7 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
 // handleWaitForPDBMainPowerOff state handler
 // ============================================================================
 
-void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
+void NVL72PowerControl::handleWaitForPDBMainPowerOff(Event event)
 {
     switch (event)
     {
@@ -835,7 +835,7 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOff(Event event)
 // ============================================================================
 
 // Helper function: De-assert HPM power and peripherals when CPUs are in reset
-void NVL144PowerControl::deassertHPMPowerAndPeripherals()
+void NVL72PowerControl::deassertHPMPowerAndPeripherals()
 {
     auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
     if (!board0RunPowerEnable)
@@ -875,7 +875,7 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
 }
 
 // Helper function: Transition to HPM Power Good de-assert wait state
-void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
+void NVL72PowerControl::transitionToHPMPowerGoodDeAssertState()
 {
     cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
 
@@ -892,7 +892,7 @@ void NVL144PowerControl::transitionToHPMPowerGoodDeAssertState()
 // handleWaitForCPUResetAssert state handler
 // ============================================================================
 
-void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
+void NVL72PowerControl::handleWaitForCPUResetAssert(Event event)
 {
     logEvent(__FUNCTION__, event);
 
@@ -974,7 +974,7 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
 // ============================================================================
 
 // Helper function: De-assert Pre System Resets and PDB Main Power
-void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
+void NVL72PowerControl::deassertPreSystemResetsAndPDBMainPower()
 {
     auto pdbMainPowerEnable = getSignal("PDBMainPowerEnable");
     if (!pdbMainPowerEnable)
@@ -987,7 +987,7 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
 }
 
 // Helper function: Transition to PDB Main Power Off wait state
-void NVL144PowerControl::transitionToPDBMainPowerOffState()
+void NVL72PowerControl::transitionToPDBMainPowerOffState()
 {
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
@@ -1002,7 +1002,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffState()
 
 // Helper function: Transition to PDB Main Power Off state with PDB Main Power
 // OK check
-void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
+void NVL72PowerControl::transitionToPDBMainPowerOffStateWithCheck()
 {
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
@@ -1056,7 +1056,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
 // handleWaitForHPMPowerGoodDeAssert state handler
 // ============================================================================
 
-void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
+void NVL72PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 {
     switch (event)
     {
@@ -1086,18 +1086,18 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
     }
 }
 
-void NVL144PowerControl::validateTimerConfigs()
+void NVL72PowerControl::validateTimerConfigs()
 {
-    // Validate NVL144-specific PDB timer
+    // Validate NVL72-specific PDB timer
     for (const auto& timerName : platformRequiredTimeoutValues)
     {
         if (TimerMap.find(timerName) == TimerMap.end())
         {
             lg2::error(
-                "Required NVL144 timer config '{TIMER}' not found in config",
+                "Required NVL72 timer config '{TIMER}' not found in config",
                 "TIMER", timerName);
             throw std::runtime_error(
-                "NVL144PowerControl: Required timer config missing: " +
+                "NVL72PowerControl: Required timer config missing: " +
                 timerName);
         }
     }
@@ -1106,10 +1106,10 @@ void NVL144PowerControl::validateTimerConfigs()
     VRPowerControl::validateTimerConfigs();
 
     lg2::info(
-        "NVL144 timer configuration validation complete - all required timers present");
+        "NVL72 timer configuration validation complete - all required timers present");
 }
 
-void NVL144PowerControl::setDefaultValues()
+void NVL72PowerControl::setDefaultValues()
 {
     // Set platform PDB-specific default values for output signals
     lg2::info(
@@ -1172,7 +1172,7 @@ void NVL144PowerControl::setDefaultValues()
     VRPowerControl::setDefaultValues();
 
     lg2::info(
-        "NVL144 GPIOs asserted and de-asserted states defined successfully");
+        "NVL72 GPIOs asserted and de-asserted states defined successfully");
 }
 
 } // namespace power_control

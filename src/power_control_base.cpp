@@ -262,7 +262,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
          }}};
 
     // Note: initializeHostStateInterface() is called by derived classes
-    // (e.g., NVL144PowerControl) after they register any additional GPIO
+    // (e.g., NVL72PowerControl) after they register any additional GPIO
     // properties. It initializes ALL host0 interfaces at once.
 }
 

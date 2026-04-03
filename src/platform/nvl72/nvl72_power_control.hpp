@@ -9,12 +9,12 @@ namespace power_control
 {
 
 /**
- * @brief NVL144 Power Control class
+ * @brief NVL72 Power Control class
  *
- * This class represents the NVL144 platform-specific power control.
- * Since VRPowerControl's default implementations already use NVL144 behavior,
+ * This class represents the NVL72 platform-specific power control.
+ * Since VRPowerControl's default implementations already use NVL72 behavior,
  * this class typically does NOT need to override anything unless there are
- * NVL144-specific deviations from the VR defaults.
+ * NVL72-specific deviations from the VR defaults.
  *
  * Platform characteristics:
  * - Has PDB (Power Distribution Board)
@@ -23,20 +23,20 @@ namespace power_control
  * - Supports Board 0 and optionally Board 1
  * - After PDB powers up, asserts E1S and BMC SSD enables before HPM sequencing
  */
-class NVL144PowerControl : public VRPowerControl
+class NVL72PowerControl : public VRPowerControl
 {
   public:
-    NVL144PowerControl(boost::asio::io_context& ioContext,
-                       std::shared_ptr<sdbusplus::asio::connection> conn,
-                       const std::string& configFilePath,
-                       const std::string& node, PersistentState& appState);
+    NVL72PowerControl(boost::asio::io_context& ioContext,
+                      std::shared_ptr<sdbusplus::asio::connection> conn,
+                      const std::string& configFilePath,
+                      const std::string& node, PersistentState& appState);
 
-    ~NVL144PowerControl() override = default;
+    ~NVL72PowerControl() override = default;
 
     /**
      * @brief Get the handler function for a given power state
      *
-     * NVL144 does not add new states, so this delegates to VRPowerControl.
+     * NVL72 does not add new states, so this delegates to VRPowerControl.
      *
      * @param state The power state to get a handler for
      * @return Function that handles events in the given state
@@ -45,10 +45,10 @@ class NVL144PowerControl : public VRPowerControl
 
   protected:
     /**
-     * @brief Validate that all required timer configurations for NVL144
+     * @brief Validate that all required timer configurations for NVL72
      * platform are present in TimerMap
      *
-     * Checks for NVL144-specific PDB timer, then calls
+     * Checks for NVL72-specific PDB timer, then calls
      * VRPowerControl::validateTimerConfigs() to check common VR timers.
      *
      * @throws std::runtime_error if any required timer config is missing
@@ -65,58 +65,58 @@ class NVL144PowerControl : public VRPowerControl
      */
     void addBoard1GpioStateProperties();
 
-    // NVL144 uses the default VR implementations (which are NVL144 behavior)
-    // Override only if NVL144 needs platform-specific variations
+    // NVL72 uses the default VR implementations (which are NVL72 behavior)
+    // Override only if NVL72 needs platform-specific variations
 
     /**
-     * @brief Handler for PowerState::on (NVL144 Override)
-     * Override if NVL144 needs platform-specific on-state monitoring.
+     * @brief Handler for PowerState::on (NVL72 Override)
+     * Override if NVL72 needs platform-specific on-state monitoring.
      */
     void handlePowerStateOn(Event event) override;
 
     /**
-     * @brief Handler for PowerState::off (NVL144 Override)
-     * Override if NVL144 needs platform-specific off-state monitoring.
+     * @brief Handler for PowerState::off (NVL72 Override)
+     * Override if NVL72 needs platform-specific off-state monitoring.
      */
     void handlePowerStateOff(Event event) override;
 
     /**
-     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL144 Override )
+     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL72 Override )
      *
-     * Override if NVL144 needs platform-specific waitForPDBMainPowerOk
+     * Override if NVL72 needs platform-specific waitForPDBMainPowerOk
      * monitoring.
      */
     void handleWaitForPDBMainPowerOk(Event event) override;
 
     /**
-     * @brief Handler for PowerState::waitForPDBMainPowerOff (NVL144 Override)
+     * @brief Handler for PowerState::waitForPDBMainPowerOff (NVL72 Override)
      *
-     * Override if NVL144 needs platform-specific waitForPDBMainPowerOff
+     * Override if NVL72 needs platform-specific waitForPDBMainPowerOff
      * monitoring.
      */
     void handleWaitForPDBMainPowerOff(Event event) override;
 
     /**
-     * @brief Handler for PowerState::waitForCPUResetAssert (NVL144 Override)
+     * @brief Handler for PowerState::waitForCPUResetAssert (NVL72 Override)
      *
-     * Override if NVL144 needs platform-specific waitForCPUResetAssert
+     * Override if NVL72 needs platform-specific waitForCPUResetAssert
      * monitoring.
      */
     void handleWaitForCPUResetAssert(Event event) override;
 
     /**
-     * @brief Handler for PowerState::waitForHPMPowerGoodDeAssert (NVL144
+     * @brief Handler for PowerState::waitForHPMPowerGoodDeAssert (NVL72
      * Override)
      *
-     * Override if NVL144 needs platform-specific waitForHPMPowerGoodDeAssert
+     * Override if NVL72 needs platform-specific waitForHPMPowerGoodDeAssert
      * monitoring.
      */
     void handleWaitForHPMPowerGoodDeAssert(Event event) override;
 
     /**
-     * @brief Set default values for NVL144 output signals (NVL144 override)
+     * @brief Set default values for NVL72 output signals (NVL72 override)
      *
-     * Sets NVL144 specific default values for output signals, then calls
+     * Sets NVL72 specific default values for output signals, then calls
      * VRPowerControl::setDefaultValues() to set common VR defaults.
      */
     void setDefaultValues() override;

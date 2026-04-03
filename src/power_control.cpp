@@ -3,7 +3,7 @@
 
 #include "config.h"
 
-#include "platform/nvl144/nvl144_power_control.hpp"
+#include "platform/nvl72/nvl72_power_control.hpp"
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
 
@@ -199,7 +199,7 @@ static std::string readPlatformType(const std::string& configPath)
         return jsonData["platform-type"].get<std::string>();
     }
 
-    return "nvl144";
+    return "nvl72";
 }
 
 static std::unique_ptr<PowerControl> createPowerControl(
@@ -211,16 +211,16 @@ static std::unique_ptr<PowerControl> createPowerControl(
     lg2::info("Creating power control for platform: {PLATFORM}", "PLATFORM",
               platformType);
 
-    if (platformType == "nvl144")
+    if (platformType == "nvl72")
     {
-        return std::make_unique<NVL144PowerControl>(io, conn, configPath, node,
-                                                    appState);
+        return std::make_unique<NVL72PowerControl>(io, conn, configPath, node,
+                                                   appState);
     }
 
-    lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl144",
+    lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl72",
                "PLATFORM", platformType);
-    return std::make_unique<NVL144PowerControl>(io, conn, configPath, node,
-                                                appState);
+    return std::make_unique<NVL72PowerControl>(io, conn, configPath, node,
+                                               appState);
 }
 
 } // namespace power_control
@@ -250,7 +250,8 @@ int main(int argc, char* argv[])
     auto powerControl =
         createPowerControl(platformType, io, conn, configPath, node, appState);
 
-    PowerRestoreController powerRestore(io, conn, node, *powerControl, appState);
+    PowerRestoreController powerRestore(io, conn, node, *powerControl,
+                                        appState);
 
 #ifdef USE_PLT_RST
     sdbusplus::bus::match_t pltRstMatch(

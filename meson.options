@@ -42,10 +42,10 @@ option(
     description: 'C2 PDB IOX PCA953x driver bound path',
 )
 option(
-    'nvl144-pdb-iox-path',
+    'nvl72-pdb-iox-path',
     type: 'string',
     value: '/sys/bus/i2c/drivers/pca953x/9-0020',
-    description: 'NVL144 PDB IOX PCA953x driver bound path',
+    description: 'NVL72 PDB IOX PCA953x driver bound path',
 )
 option(
     'board0-iox-path',
