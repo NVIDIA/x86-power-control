@@ -19,9 +19,7 @@ HOST_TRANSITION_REBOOT="xyz.openbmc_project.State.Host.Transition.Reboot"
 HOST_TRANSITION_GRACEFUL_WARM_REBOOT="xyz.openbmc_project.State.Host.Transition.GracefulWarmReboot"
 HOST_TRANSITION_FORCE_WARM_REBOOT="xyz.openbmc_project.State.Host.Transition.ForceWarmReboot"
 
-CHASSIS_TRANSITION_ON="xyz.openbmc_project.State.Chassis.Transition.On"
 CHASSIS_TRANSITION_OFF="xyz.openbmc_project.State.Chassis.Transition.Off"
-CHASSIS_TRANSITION_POWER_CYCLE="xyz.openbmc_project.State.Chassis.Transition.PowerCycle"
 
 # State values for comparison
 HOST_STATE_RUNNING="xyz.openbmc_project.State.Host.HostState.Running"
