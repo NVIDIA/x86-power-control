@@ -140,8 +140,7 @@ std::string PowerControl::getEventName(Event event)
 
 void PowerControl::logResourceEvent(
     const std::string& eventName,
-    std::initializer_list<std::string> messageArgs,
-    std::string_view severity)
+    std::initializer_list<std::string> messageArgs, std::string_view severity)
 {
     if (messageArgs.size() == 0)
     {
@@ -185,10 +184,8 @@ int PowerControl::i2cWrite(int file, uint16_t address,
         return -1;
     }
 
-    struct i2c_msg msg
-    {};
-    struct i2c_rdwr_ioctl_data rdwr
-    {};
+    struct i2c_msg msg{};
+    struct i2c_rdwr_ioctl_data rdwr{};
 
     msg.addr = address;
     msg.flags = 0;
@@ -971,13 +968,15 @@ void PowerControl::setPowerState(const PowerState state)
     {
         setBootProgress(
             "xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
-        logResourceEvent("ResourcePoweredOff", {"Host0"},
-                        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        logResourceEvent(
+            "ResourcePoweredOff", {"Host0"},
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
     }
     else if (state == PowerState::on)
     {
-        logResourceEvent("ResourcePoweredOn", {"Host0"},
-                        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        logResourceEvent(
+            "ResourcePoweredOn", {"Host0"},
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
     }
 
     // Save the power state for the restore policy

@@ -213,8 +213,9 @@ class VRPowerControl : public PowerControl
      *
      * For FORCE_WARM_REBOOT / GRACEFUL_WARM_REBOOT when CpuResetWatchdogMs
      * expires in waitForCPUResetAssert or waitForCPUResetDeAssert: cancel the
-     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal and
-     * ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM run-power teardown.
+     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal
+     * and ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM
+     * run-power teardown.
      *
      * @param faultDetail Human-readable fault text for event log / journal
      */
@@ -361,8 +362,6 @@ class VRPowerControl : public PowerControl
      * Checks if the IOX presence is present
      */
     bool checkIOXPresence(const std::string& ioxPath);
-
-
 
     /**
      * @brief Handler for Board 0 CPU Shutdown OK GPIO events
@@ -560,7 +559,8 @@ class VRPowerControl : public PowerControl
     virtual void handleForceOffDuringGracefulCpuShutdownOkWait();
 
     /**
-     * @brief Upgrade graceful warm reboot to force warm reboot during wait for CPU Shutdown OK
+     * @brief Upgrade graceful warm reboot to force warm reboot during wait for
+     * CPU Shutdown OK
      *
      * Invoked when Event::resetRequest is received while
      * action == GRACEFUL_WARM_REBOOT in waitForCPUShutdownOk.

@@ -154,8 +154,8 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Initiate CPU shutdown sequence
      *
-     * @param isForceful If true, uses force shutdown GPIO and watchdog; otherwise
-     * graceful request line and graceful watchdog.
+     * @param isForceful If true, uses force shutdown GPIO and watchdog;
+     * otherwise graceful request line and graceful watchdog.
      *
      * Asserts the appropriate Board 0 shutdown signal (and de-asserts Board 1
      * counterpart when present), starts the CPU Shutdown OK watchdog, and
@@ -285,9 +285,9 @@ class NVL144PowerControl : public VRPowerControl
      * @brief Power indicator signals used to determine initial hardware power
      * state
      *
-     * The host is considered ON only if BOTH Board0RunPowerPG AND PDBMainPowerOk
-     * are asserted. If either is de-asserted, the host is in an OFF or bad
-     * state.
+     * The host is considered ON only if BOTH Board0RunPowerPG AND
+     * PDBMainPowerOk are asserted. If either is de-asserted, the host is in an
+     * OFF or bad state.
      */
     const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
                                                       "PDBMainPowerOk"};
@@ -303,8 +303,8 @@ class NVL144PowerControl : public VRPowerControl
     /**
      * @brief Mask HSC alerts and clear faults on shared PDB interrupt line
      *
-     * HSCs share an interrupt with a PDB IOX; uncleared faults can hold the line
-     * low and block IOX interrupts. Called on each PDBMainPowerOk assert
+     * HSCs share an interrupt with a PDB IOX; uncleared faults can hold the
+     * line low and block IOX interrupts. Called on each PDBMainPowerOk assert
      * because masking may reset with power events.
      */
     void maskHscAlertsAndClearFaults();

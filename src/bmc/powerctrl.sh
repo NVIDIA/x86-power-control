@@ -30,13 +30,13 @@ CHASSIS_STATE_OFF="xyz.openbmc_project.State.Chassis.PowerState.Off"
 #
 # Power on the host
 #
-power_on()
+function power_on()
 {
     echo "Power On Host"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
     echo "Starting log capture..."
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
-    LOG_PID=$!    
+    LOG_PID=$!
     sleep 1 # Give journalctl time to start
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_ON"
@@ -57,7 +57,7 @@ power_on()
 #
 # Force power off (immediate, no graceful shutdown)
 #
-power_off()
+function power_off()
 {
     echo "Force Power Off Host"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -65,7 +65,7 @@ power_off()
     timeout 5 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1  # Give journalctl time to start
-    
+
     busctl set-property "$CHASSIS_SERVICE" "$CHASSIS_PATH" "$CHASSIS_IFACE" \
         RequestedPowerTransition s "$CHASSIS_TRANSITION_OFF"
     local rc=$?
@@ -84,7 +84,7 @@ power_off()
 #
 # Force shutdown (same as power_off - immediate power removal)
 #
-do_shutdown_force()
+function do_shutdown_force()
 {
     echo "Force Shutdown Host"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -92,7 +92,7 @@ do_shutdown_force()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$CHASSIS_SERVICE" "$CHASSIS_PATH" "$CHASSIS_IFACE" \
         RequestedPowerTransition s "$CHASSIS_TRANSITION_OFF"
     local rc=$?
@@ -111,7 +111,7 @@ do_shutdown_force()
 #
 # Graceful shutdown request (asks host to shut down cleanly)
 #
-do_shutdown_request()
+function do_shutdown_request()
 {
     echo "Graceful Shutdown Request"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -119,7 +119,7 @@ do_shutdown_request()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_OFF"
     local rc=$?
@@ -138,7 +138,7 @@ do_shutdown_request()
 #
 # Graceful power off (same as do_shutdown_request)
 #
-grace_off()
+function grace_off()
 {
     echo "Graceful Power Off"
     do_shutdown_request
@@ -147,7 +147,7 @@ grace_off()
 #
 # Get current power status
 #
-power_status()
+function power_status()
 {
     echo "Power Status:"
 
@@ -191,7 +191,7 @@ power_status()
 #
 # Reset/reboot the host (warm reboot)
 #
-reset()
+function reset()
 {
     echo "Reset Host"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -199,7 +199,7 @@ reset()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_FORCE_WARM_REBOOT"
     local rc=$?
@@ -218,7 +218,7 @@ reset()
 #
 # Power cycle (power off then on)
 #
-power_cycle()
+function power_cycle()
 {
     echo "Power Cycle Host"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -226,7 +226,7 @@ power_cycle()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_REBOOT"
     local rc=$?
@@ -245,7 +245,7 @@ power_cycle()
 #
 # Graceful warm reboot
 #
-graceful_warm_reboot()
+function graceful_warm_reboot()
 {
     echo "Graceful Warm Reboot"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -253,7 +253,7 @@ graceful_warm_reboot()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_GRACEFUL_WARM_REBOOT"
     local rc=$?
@@ -272,7 +272,7 @@ graceful_warm_reboot()
 #
 # Force warm reboot
 #
-force_warm_reboot()
+function force_warm_reboot()
 {
     echo "Force Warm Reboot"
     echo "For detailed logging, use: 'journalctl -u xyz.openbmc_project.Chassis.Control.Power@0'"
@@ -280,7 +280,7 @@ force_warm_reboot()
     timeout 10 journalctl -fu xyz.openbmc_project.Chassis.Control.Power@0 -n 0 --no-pager &
     LOG_PID=$!
     sleep 1
-    
+
     busctl set-property "$HOST_SERVICE" "$HOST_PATH" "$HOST_IFACE" \
         RequestedHostTransition s "$HOST_TRANSITION_FORCE_WARM_REBOOT"
     local rc=$?
@@ -299,7 +299,7 @@ force_warm_reboot()
 #
 # Usage/help
 #
-usage()
+function usage()
 {
     echo "Usage: $0 <command>"
     echo ""

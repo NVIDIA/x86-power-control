@@ -3,10 +3,10 @@
 
 #include "nvl144_power_control.hpp"
 
-#include <phosphor-logging/lg2.hpp>
-
 #include <fcntl.h>
 #include <unistd.h>
+
+#include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
 #include <string>
@@ -118,28 +118,24 @@ void NVL144PowerControl::maskHscAlertsAndClearFaults()
     {
         if (PowerControl::i2cWrite(file, addr, maskCmd) < 0)
         {
-            lg2::error(
-                "HSC mask alert failed: bus {BUS}, addr {ADDR}", "BUS", hscBus,
-                "ADDR", static_cast<int>(addr));
+            lg2::error("HSC mask alert failed: bus {BUS}, addr {ADDR}", "BUS",
+                       hscBus, "ADDR", static_cast<int>(addr));
         }
         else
         {
-            lg2::info(
-                "HSC mask alert success: bus {BUS}, addr {ADDR}", "BUS", hscBus,
-                "ADDR", static_cast<int>(addr));
+            lg2::info("HSC mask alert success: bus {BUS}, addr {ADDR}", "BUS",
+                      hscBus, "ADDR", static_cast<int>(addr));
         }
 
         if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
         {
-            lg2::error(
-                "HSC clear fault failed: bus {BUS}, addr {ADDR}", "BUS", hscBus,
-                "ADDR", static_cast<int>(addr));
+            lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}", "BUS",
+                       hscBus, "ADDR", static_cast<int>(addr));
         }
         else
         {
-            lg2::info(
-                "HSC clear fault success: bus {BUS}, addr {ADDR}", "BUS", hscBus,
-                "ADDR", static_cast<int>(addr));
+            lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}", "BUS",
+                      hscBus, "ADDR", static_cast<int>(addr));
         }
     }
 
@@ -229,8 +225,8 @@ void NVL144PowerControl::initiateCPUShutdown(bool isForceful)
         return;
     }
 
-    // When asserting force, de-assert graceful request lines so both are not active
-    // (e.g. upgrade from graceful SHDN_OK wait to forceful shutdown).
+    // When asserting force, de-assert graceful request lines so both are not
+    // active (e.g. upgrade from graceful SHDN_OK wait to forceful shutdown).
     if (isForceful)
     {
         auto board0Req = getSignal("Board0CpuShutdownRequest");
@@ -263,8 +259,7 @@ void NVL144PowerControl::initiateCPUShutdown(bool isForceful)
                   "SHUTDOWN_ACTION", shutdownAction);
 
         // De-assert Board 1 shutdown signal
-        setGPIOOutput(board1ShutdownSignal,
-                      !board1ShutdownSignal->polarity);
+        setGPIOOutput(board1ShutdownSignal, !board1ShutdownSignal->polarity);
     }
 
     startTimer(shutdownOkTimerName, cpuShutdownOkWatchdogTimer,
@@ -288,9 +283,11 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
             lg2::error(
                 "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor!"
                 "Host Graceful Operations cannot proceed.");
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! Host Graceful Operations cannot proceed."},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! Host Graceful Operations cannot proceed."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             return; // No-op, stay in current power state
         }
 
@@ -298,9 +295,11 @@ void NVL144PowerControl::handleShutdownRequest(Event event)
         {
             lg2::error(
                 "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed.");
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed."},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             return; // No-op, stay in current power state
         }
         else
@@ -374,7 +373,6 @@ void NVL144PowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
     lg2::info(
         "Forceful shutdown during graceful wait for CPU Shutdown OK; upgrading to forceful shutdown sequence");
 
-
     action = PowerAction::FORCE_OFF;
     handleShutdownRequest(Event::powerOffRequest);
 }
@@ -435,8 +433,7 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             lg2::info(
                 "Graceful Power Cycle Request received. Initiating graceful shutdown");
             action = PowerAction::GRACEFUL_POWER_CYCLE;
-            handleShutdownRequest(
-                Event::gracefulPowerCycleRequest);
+            handleShutdownRequest(Event::gracefulPowerCycleRequest);
             break;
 
         case Event::gracefulResetRequest:
@@ -447,7 +444,8 @@ void NVL144PowerControl::handlePowerStateOn(Event event)
             break;
 
         case Event::resetRequest:
-            // Safe stating PHYs: (SHDN_FORCE & SHDN_OK) then toggle Pre System Reset signals
+            // Safe stating PHYs: (SHDN_FORCE & SHDN_OK) then toggle Pre System
+            // Reset signals
             action = PowerAction::FORCE_WARM_REBOOT;
             handleShutdownRequest(Event::powerOffRequest);
             break;
@@ -481,8 +479,7 @@ void NVL144PowerControl::handlePowerOnRequest()
     auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
     if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
     {
-        lg2::error(
-            "CRITICAL: PDBMainPowerOk not available - cannot power on");
+        lg2::error("CRITICAL: PDBMainPowerOk not available - cannot power on");
         return;
     }
 
@@ -511,8 +508,7 @@ void NVL144PowerControl::handlePowerOnRequest()
             "Asserting PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
         action = PowerAction::POWER_ON;
         setGPIOOutput(pdbMainPowerEnable, pdbMainPowerEnable->polarity);
-        startTimer("PdbMainPowerOkWatchdogMs",
-                   pdbMainPowerOkWatchdogTimer,
+        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         setPowerState(PowerState::waitForPDBMainPowerOk);
     }
@@ -583,7 +579,8 @@ void NVL144PowerControl::handlePowerStateOff(Event event)
                 "Graceful warm reboot requested while host is off; no action. Host must be powered on and booted before issuing graceful warm reboot request.");
             break;
         case Event::resetRequest:
-            lg2::info("Reset request received while host is off; no action. Host must be powered on. ");
+            lg2::info(
+                "Reset request received while host is off; no action. Host must be powered on. ");
             break;
         default:
             lg2::info("No action taken.");
@@ -708,9 +705,10 @@ void NVL144PowerControl::handleWaitForPDBMainPowerOk(Event event)
                 "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "PDB Main Power OK watchdog expired (power on)"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "PDB Main Power OK watchdog expired (power on)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
             break;
 
@@ -754,9 +752,10 @@ void NVL144PowerControl::completeShutdownAndTransitionToOff(bool success)
         lg2::error(
             "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Setting Host Power State to Off.");
         action = PowerAction::NONE;
-        logResourceEvent("ResourceErrorsDetected",
-                         {"Host0", "PDB Main Power OK watchdog expired (power off)"},
-                         "xyz.openbmc_project.Logging.Entry.Level.Error");
+        logResourceEvent(
+            "ResourceErrorsDetected",
+            {"Host0", "PDB Main Power OK watchdog expired (power off)"},
+            "xyz.openbmc_project.Logging.Entry.Level.Error");
         setPowerState(PowerState::off);
         setGPIOsForHostStateOff();
         return;
@@ -857,8 +856,7 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
     }
 
     // De-assert Board 0 Run Power Enable
-    setGPIOOutput(board0RunPowerEnable,
-                  !board0RunPowerEnable->polarity);
+    setGPIOOutput(board0RunPowerEnable, !board0RunPowerEnable->polarity);
 
     // De-assert Board 1 Run Power Enable if present
     if (boardPresence.board1Present)
@@ -868,8 +866,7 @@ void NVL144PowerControl::deassertHPMPowerAndPeripherals()
         {
             return;
         }
-        setGPIOOutput(board1RunPowerEnable,
-                      !board1RunPowerEnable->polarity);
+        setGPIOOutput(board1RunPowerEnable, !board1RunPowerEnable->polarity);
     }
 
     // De-assert peripheral power and assert BMC SSD Reset and SSD Powe
@@ -954,9 +951,10 @@ void NVL144PowerControl::handleWaitForCPUResetAssert(Event event)
             {
                 lg2::error(
                     "CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence failed {recommend checking CPLD status}");
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Reset Watchdog expired"},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0", "CPU Reset Watchdog expired"},
+                    "xyz.openbmc_project.Logging.Entry.Level.Error");
                 lg2::error(
                     "Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
                 action = PowerAction::NONE;
@@ -985,8 +983,7 @@ void NVL144PowerControl::deassertPreSystemResetsAndPDBMainPower()
     }
 
     // De-assert PDB Main Power Enable
-    setGPIOOutput(pdbMainPowerEnable,
-                  !pdbMainPowerEnable->polarity);
+    setGPIOOutput(pdbMainPowerEnable, !pdbMainPowerEnable->polarity);
 }
 
 // Helper function: Transition to PDB Main Power Off wait state
@@ -1019,8 +1016,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
             "HPM Board 0 Run Power Good de-asserted. De-asserting Pre System Reset lines. De-asserting PDB Main Power Enable, Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer("PdbMainPowerOkWatchdogMs",
-                   pdbMainPowerOkWatchdogTimer,
+        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
         return;
     }
@@ -1036,8 +1032,7 @@ void NVL144PowerControl::transitionToPDBMainPowerOffStateWithCheck()
 
         setPowerState(PowerState::waitForPDBMainPowerOff);
         deassertPreSystemResetsAndPDBMainPower();
-        startTimer("PdbMainPowerOkWatchdogMs",
-                   pdbMainPowerOkWatchdogTimer,
+        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
                    Event::pdbMainPowerOkWatchdogTimerExpired);
     }
     else
@@ -1076,9 +1071,11 @@ void NVL144PowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
                 "HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! Conducting Cleanup Sequence: Setting GPIO states to match Host State ON. Setting Host Power State to On.");
 
             action = PowerAction::NONE;
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "HPM Power Good Watchdog expired (shutdown sequence)"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "HPM Power Good Watchdog expired (shutdown sequence)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             setGPIOsForHostStateOn(); // TODO: fill function implementation
             setPowerState(PowerState::on);
             break;
@@ -1148,10 +1145,8 @@ void NVL144PowerControl::setDefaultValues()
     // PDB Main Power Enable
     // - ON: Asserted (PDB should be powered)
     // - OFF: DeAsserted (PDB should be unpowered)
-    pdbMainPowerEnable->defaultStateHostStateOn =
-        DefaultState::Asserted;
-    pdbMainPowerEnable->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
+    pdbMainPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    pdbMainPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // E1S Power Enable
     // - ON: Asserted (E1S should be powered)
@@ -1171,8 +1166,7 @@ void NVL144PowerControl::setDefaultValues()
     // - OFF: DeAsserted (SSD power should be enabled) (should not be toggled
     // when Host is OFF)
     ssdPowerDisable->defaultStateHostStateOn = DefaultState::DeAsserted;
-    ssdPowerDisable->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
+    ssdPowerDisable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();

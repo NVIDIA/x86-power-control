@@ -153,9 +153,12 @@ bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
 
             // Transition to off, checking if we need to wait for de-assertion
             action = PowerAction::NONE;
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.", "STATE", getPowerStateName()},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
 
             return true;
@@ -356,15 +359,14 @@ void VRPowerControl::initiateForceWarmReboot()
     cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
 
     action = PowerAction::FORCE_WARM_REBOOT;
-    
+
     lg2::info("De-asserting Shutdown Force signals");
     auto board0CpuShutdownForce = getSignal("Board0CpuShutdownForce");
     if (!board0CpuShutdownForce)
     {
         return;
     }
-    setGPIOOutput(board0CpuShutdownForce,
-                  !board0CpuShutdownForce->polarity);
+    setGPIOOutput(board0CpuShutdownForce, !board0CpuShutdownForce->polarity);
 
     if (boardPresence.board1Present)
     {
@@ -417,8 +419,7 @@ void VRPowerControl::deassertPreSystemResets()
     }
 
     // De-assert Board 0 Pre System Reset
-    setGPIOOutput(board0PreSystemReset,
-                  !board0PreSystemReset->polarity);
+    setGPIOOutput(board0PreSystemReset, !board0PreSystemReset->polarity);
 
     // De-assert Board 1 Pre System Reset if present
     if (boardPresence.board1Present)
@@ -429,8 +430,7 @@ void VRPowerControl::deassertPreSystemResets()
             return;
         }
 
-        setGPIOOutput(board1PreSystemReset,
-                      !board1PreSystemReset->polarity);
+        setGPIOOutput(board1PreSystemReset, !board1PreSystemReset->polarity);
     }
 }
 
@@ -446,10 +446,9 @@ void VRPowerControl::abortWarmRebootCpuResetWatchdogFault(
 
     deassertPreSystemResets();
 
-    logResourceEvent(
-        "ResourceErrorsDetected",
-        {std::string("Host0"), std::string(faultDetail)},
-        "xyz.openbmc_project.Logging.Entry.Level.Error");
+    logResourceEvent("ResourceErrorsDetected",
+                     {std::string("Host0"), std::string(faultDetail)},
+                     "xyz.openbmc_project.Logging.Entry.Level.Error");
 
     action = PowerAction::NONE;
     setPowerState(PowerState::on);
@@ -488,9 +487,10 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
                 "HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "HPM Power Good Watchdog expired (power on)"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "HPM Power Good Watchdog expired (power on)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
             break;
 
@@ -558,9 +558,10 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
                     "CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
                 action = PowerAction::NONE;
                 transitionToOffStateWithRunPowerCheck();
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Reset Watchdog expired"},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Error");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0", "CPU Reset Watchdog expired"},
+                    "xyz.openbmc_project.Logging.Entry.Level.Error");
             }
             break;
 
@@ -754,9 +755,10 @@ void VRPowerControl::abortGracefulWarmReboot()
     cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
     lg2::error(
         "Graceful warm reboot aborted - CPU(s) failed to assert SHDN_OK within timeout. No warm reset performed. Returning to powered-on state.");
-    logResourceEvent("ResourceErrorsDetected",
-                     {"Host0", "Graceful warm reboot aborted (SHDN_OK timeout)"},
-                     "xyz.openbmc_project.Logging.Entry.Level.Warning");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0", "Graceful warm reboot aborted (SHDN_OK timeout)"},
+        "xyz.openbmc_project.Logging.Entry.Level.Warning");
     action = PowerAction::NONE;
     setGPIOsForHostStateOn();
     setPowerState(PowerState::on);
@@ -795,9 +797,11 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Board 0 did not assert SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Board 0 CPU failed to assert SHDN_OK.");
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "CPU Shutdown OK watchdog expired (Board 0 did not assert SHDN_OK)"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Shutdown OK watchdog expired (Board 0 did not assert SHDN_OK)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else
@@ -817,9 +821,11 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Neither board asserted SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during GRACE_OFF. Neither CPU asserted SHDN_OK.");
-            logResourceEvent("ResourceErrorsDetected",
-                             {"Host0", "CPU Shutdown OK watchdog expired (neither CPU asserted SHDN_OK)"},
-                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Shutdown OK watchdog expired (neither CPU asserted SHDN_OK)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else if (assertedCount == 1)
@@ -842,17 +848,21 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 0 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Shutdown OK watchdog expired (only Board 0 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (only Board 0 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             else
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 1 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Shutdown OK watchdog expired (only Board 1 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (only Board 1 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
 
             assertBoardPreSystemResets();
@@ -976,9 +986,11 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
                 // Unknown action - log and do nothing
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired with unexpected power action. No action taken.");
-                logResourceEvent("ResourceErrorsDetected",
-                                 {"Host0", "CPU Shutdown OK watchdog expired (unexpected power action). No action taken."},
-                                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (unexpected power action). No action taken."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             break;
 
@@ -1330,20 +1342,14 @@ void VRPowerControl::setDefaultValues()
     }
 
     // All signals validated, now set the default states
-    board0RunPowerEnable->defaultStateHostStateOn =
-        DefaultState::Asserted;
-    board0RunPowerEnable->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
+    board0RunPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    board0RunPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
-    board0PreSystemReset->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    board0PreSystemReset->defaultStateHostStateOff =
-        DefaultState::Asserted;
+    board0PreSystemReset->defaultStateHostStateOn = DefaultState::DeAsserted;
+    board0PreSystemReset->defaultStateHostStateOff = DefaultState::Asserted;
 
-    board0CpuShutdownForce->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    board0CpuShutdownForce->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
+    board0CpuShutdownForce->defaultStateHostStateOn = DefaultState::DeAsserted;
+    board0CpuShutdownForce->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     board0CpuShutdownRequest->defaultStateHostStateOn =
         DefaultState::DeAsserted;
@@ -1355,15 +1361,13 @@ void VRPowerControl::setDefaultValues()
 
     if (boardPresence.board1Present)
     {
-        board1RunPowerEnable->defaultStateHostStateOn =
-            DefaultState::Asserted;
+        board1RunPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
         board1RunPowerEnable->defaultStateHostStateOff =
             DefaultState::DeAsserted;
 
         board1PreSystemReset->defaultStateHostStateOn =
             DefaultState::DeAsserted;
-        board1PreSystemReset->defaultStateHostStateOff =
-            DefaultState::Asserted;
+        board1PreSystemReset->defaultStateHostStateOff = DefaultState::Asserted;
     }
 
     lg2::info("VR default values set successfully");
