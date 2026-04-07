@@ -1,21 +1,9 @@
-/*
-// Copyright (c) 2018-2019 Intel Corporation
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-*/
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
+
 #include "config.h"
 
-#include "platform/nvl144/nvl144_power_control.hpp"
+#include "platform/nvl72/nvl72_power_control.hpp"
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
 
@@ -34,6 +22,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <regex>
 #include <string_view>
@@ -195,6 +184,45 @@ void systemReset(std::shared_ptr<sdbusplus::asio::connection> conn)
 }
 #endif
 
+static std::string readPlatformType(const std::string& configPath)
+{
+    std::ifstream configFile(configPath);
+    if (!configFile.is_open())
+    {
+        lg2::error("Cannot open config path '{PATH}'", "PATH", configPath);
+        throw std::runtime_error("Failed to open config file: " + configPath);
+    }
+
+    auto jsonData = nlohmann::json::parse(configFile, nullptr, true, true);
+    if (jsonData.contains("platform-type"))
+    {
+        return jsonData["platform-type"].get<std::string>();
+    }
+
+    return "nvl72";
+}
+
+static std::unique_ptr<PowerControl> createPowerControl(
+    const std::string& platformType, boost::asio::io_context& io,
+    std::shared_ptr<sdbusplus::asio::connection> conn,
+    const std::string& configPath, const std::string& node,
+    PersistentState& appState)
+{
+    lg2::info("Creating power control for platform: {PLATFORM}", "PLATFORM",
+              platformType);
+
+    if (platformType == "nvl72")
+    {
+        return std::make_unique<NVL72PowerControl>(io, conn, configPath, node,
+                                                   appState);
+    }
+
+    lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl72",
+               "PLATFORM", platformType);
+    return std::make_unique<NVL72PowerControl>(io, conn, configPath, node,
+                                               appState);
+}
+
 } // namespace power_control
 
 int main(int argc, char* argv[])
@@ -216,11 +244,14 @@ int main(int argc, char* argv[])
     std::shared_ptr<sdbusplus::asio::connection> conn =
         std::make_shared<sdbusplus::asio::connection>(io);
 
-    NVL144PowerControl powerControl(
-        io, conn, "/usr/share/x86-power-control/power-config-host0.json", node,
-        appState);
+    const std::string configPath =
+        "/usr/share/x86-power-control/power-config-host0.json";
+    std::string platformType = readPlatformType(configPath);
+    auto powerControl =
+        createPowerControl(platformType, io, conn, configPath, node, appState);
 
-    PowerRestoreController powerRestore(io, conn, node, powerControl, appState);
+    PowerRestoreController powerRestore(io, conn, node, *powerControl,
+                                        appState);
 
 #ifdef USE_PLT_RST
     sdbusplus::bus::match_t pltRstMatch(
@@ -228,7 +259,7 @@ int main(int argc, char* argv[])
         "type='signal',interface='org.freedesktop.DBus.Properties',member='"
         "PropertiesChanged',arg0='xyz.openbmc_project.State.Host.Misc'",
         [&powerControl](sdbusplus::message_t& msg) {
-            powerControl.hostMiscHandler(msg);
+            powerControl->hostMiscHandler(msg);
         });
 #endif
 
@@ -239,7 +270,7 @@ int main(int argc, char* argv[])
 
     // NMI source property monitor is initialized by the powerControl object
     // if NMIOut is configured in powerSignalMap
-    powerControl.nmiSourcePropertyMonitor();
+    powerControl->nmiSourcePropertyMonitor();
 
     lg2::info("Initializing power state.");
 
@@ -247,9 +278,9 @@ int main(int argc, char* argv[])
     // restart cause) are now initialized by the PowerControl base class
     // constructor
 
-    powerControl.currentHostStateMonitor();
+    powerControl->currentHostStateMonitor();
 
-    powerControl.requestBusNames();
+    powerControl->requestBusNames();
 
     io.run();
 

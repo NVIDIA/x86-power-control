@@ -1,13 +1,13 @@
 {
     "gpio_configs": [
         {
-            "Name": "NVL144PDBMainPowerEnable",
+            "Name": "PDBMainPowerEnable",
             "LineName": "MAIN_PWR_EN-O",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
         },
         {
-            "Name": "NVL144PDBMainPowerOk",
+            "Name": "PDBMainPowerOk",
             "LineName": "MAIN_PWR_OK-I",
             "Type": "GPIO",
             "Polarity": "ActiveHigh"
@@ -115,12 +115,14 @@
         "CpuResetWatchdogMs": 2000,
         "CpuBootDoneDeAssertDelayMs": 2000,
         "HPMPowerGoodWatchdogMs": 10000,
-        "NVL144PdbMainPowerOkWatchdogMs": 1000,
+        "PdbMainPowerOkWatchdogMs": 1000,
         "PowerCycleDelayMs": 15000,
         "ForceWarmRebootDelayMs": 1000,
+        "GracefulWarmRebootDelayMs": 1000,
         "PowerOffSaveMs": 10000
     },
     "event_configs": {
         "NMIWhenPoweredOff": true
-    }
+    },
+    "platform-type": "nvl72"
 }

@@ -1,7 +1,5 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- * Copyright (C) 2021-2022 YADRO.
- */
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
 
 #include "config.h"
 
@@ -70,7 +68,7 @@ void VRPowerControl::detectBoardPresence()
     // Check presence and update context using paths from build configuration
     boardPresence.parsecPdbPresent = checkIOXPresence(GB300_PDB_IOX_PATH);
     boardPresence.c2PdbPresent = checkIOXPresence(C2_PDB_IOX_PATH);
-    boardPresence.nvl144PdbPresent = checkIOXPresence(NVL144_PDB_IOX_PATH);
+    boardPresence.nvl72PdbPresent = checkIOXPresence(NVL72_PDB_IOX_PATH);
     boardPresence.board0Present = checkIOXPresence(BOARD0_IOX_PATH);
     boardPresence.board1Present = checkIOXPresence(BOARD1_IOX_PATH);
 
@@ -82,9 +80,9 @@ void VRPowerControl::detectBoardPresence()
     lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH",
               std::string(C2_PDB_IOX_PATH), "PRESENT",
               boardPresence.c2PdbPresent);
-    lg2::info("  NVL144 PDB ({PATH}): {PRESENT}", "PATH",
-              std::string(NVL144_PDB_IOX_PATH), "PRESENT",
-              boardPresence.nvl144PdbPresent);
+    lg2::info("  NVL72 PDB ({PATH}): {PRESENT}", "PATH",
+              std::string(NVL72_PDB_IOX_PATH), "PRESENT",
+              boardPresence.nvl72PdbPresent);
     lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH",
               std::string(BOARD0_IOX_PATH), "PRESENT",
               boardPresence.board0Present);
@@ -155,6 +153,12 @@ bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
 
             // Transition to off, checking if we need to wait for de-assertion
             action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
 
             return true;
@@ -183,14 +187,13 @@ bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
 
 void VRPowerControl::board0RunPowerPGHandler(bool state)
 {
-    auto it = powerSignalMap.find("Board0RunPowerPG");
-    if (it == powerSignalMap.end())
+    auto configPtr = getSignal("Board0RunPowerPG");
+    if (!configPtr)
     {
-        lg2::error("Board0RunPowerPG signal not found in powerSignalMap");
         return;
     }
 
-    auto& config = *it->second;
+    auto& config = *configPtr;
 
     // Update D-Bus property
     setBoard0RunPowerPGState(state);
@@ -211,32 +214,15 @@ void VRPowerControl::board0RunPowerPGHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent);
 }
 
-void VRPowerControl::board1RunPowerPGHandler(bool state)
-{
-    auto it = powerSignalMap.find("Board1RunPowerPG");
-    if (it == powerSignalMap.end())
-    {
-        lg2::error("Board1RunPowerPG signal not found in powerSignalMap");
-        return;
-    }
-
-    auto& config = *it->second;
-    Event powerControlEvent = (state == config.polarity)
-                                  ? Event::board1RunPowerPGAssert
-                                  : Event::board1RunPowerPGDeAssert;
-    this->sendPowerControlEvent(powerControlEvent);
-}
-
 void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 {
-    auto it = powerSignalMap.find("Board0CpuShutdownOk");
-    if (it == powerSignalMap.end())
+    auto configPtr = getSignal("Board0CpuShutdownOk");
+    if (!configPtr)
     {
-        lg2::error("Board0CpuShutdownOk signal not found in powerSignalMap");
         return;
     }
 
-    auto& config = *it->second;
+    auto& config = *configPtr;
 
     // Update D-Bus property
     setBoard0CpuShutdownOkState(state);
@@ -251,14 +237,19 @@ void VRPowerControl::board0CpuShutdownOkHandler(bool state)
 
 void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 {
-    auto it = powerSignalMap.find("Board1CpuShutdownOk");
-    if (it == powerSignalMap.end())
+    if (!boardPresence.board1Present)
     {
-        lg2::error("Board1CpuShutdownOk signal not found in powerSignalMap");
+        // Defensive guard: ignore Board 1 events on 1P systems.
         return;
     }
 
-    auto& config = *it->second;
+    auto configPtr = getSignal("Board1CpuShutdownOk");
+    if (!configPtr)
+    {
+        return;
+    }
+
+    auto& config = *configPtr;
 
     // Update D-Bus property
     setBoard1CpuShutdownOkState(state);
@@ -273,14 +264,13 @@ void VRPowerControl::board1CpuShutdownOkHandler(bool state)
 
 void VRPowerControl::cpuResetIndicatorHandler(bool state)
 {
-    auto it = powerSignalMap.find("CpuResetIndicator");
-    if (it == powerSignalMap.end())
+    auto configPtr = getSignal("CpuResetIndicator");
+    if (!configPtr)
     {
-        lg2::error("CpuResetIndicator signal not found in powerSignalMap");
         return;
     }
 
-    auto& config = *it->second;
+    auto& config = *configPtr;
 
     // Update D-Bus property
     setCpuResetIndicatorState(state);
@@ -341,19 +331,19 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 void VRPowerControl::handlePowerStateOn(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateOn() implementation here
+    // TODO: Move NVL72-specific powerStateOn() implementation here
 }
 
 void VRPowerControl::handlePowerStateOff(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateOff() implementation here
+    // TODO: Move NVL72-specific powerStateOff() implementation here
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
     (void)event;
-    // TODO: Move NVL144-specific powerStateWaitForPDBMainPowerOk()
+    // TODO: Move NVL72-specific powerStateWaitForPDBMainPowerOk()
     // implementation here
 }
 
@@ -366,32 +356,48 @@ void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 // Helper function: Initiate a force warm reboot sequence
 void VRPowerControl::initiateForceWarmReboot()
 {
-    lg2::info(
-        "Force Warm Reboot request received - asserting Pre System Reset signals");
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+
     action = PowerAction::FORCE_WARM_REBOOT;
 
-    // Assert Pre System Reset for Board 0
-    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-    if (board0PreSystemReset == powerSignalMap.end())
+    lg2::info("De-asserting Shutdown Force signals");
+    auto board0CpuShutdownForce = getSignal("Board0CpuShutdownForce");
+    if (!board0CpuShutdownForce)
     {
-        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
         return;
     }
-    setGPIOOutput(board0PreSystemReset->second,
-                  board0PreSystemReset->second->polarity);
+    setGPIOOutput(board0CpuShutdownForce, !board0CpuShutdownForce->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1CpuShutdownForce = getSignal("Board1CpuShutdownForce");
+        if (!board1CpuShutdownForce)
+        {
+            return;
+        }
+        setGPIOOutput(board1CpuShutdownForce,
+                      !board1CpuShutdownForce->polarity);
+    }
+
+    lg2::info("Asserting Pre System Reset signals");
+
+    // Assert Pre System Reset for Board 0
+    auto board0PreSystemReset = getSignal("Board0PreSystemReset");
+    if (!board0PreSystemReset)
+    {
+        return;
+    }
+    setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
 
     // Assert Pre System Reset for Board 1 if present
     if (boardPresence.board1Present)
     {
-        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-        if (board1PreSystemReset == powerSignalMap.end())
+        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
         {
-            lg2::error(
-                "Board1PreSystemReset signal not found in powerSignalMap");
             return;
         }
-        setGPIOOutput(board1PreSystemReset->second,
-                      board1PreSystemReset->second->polarity);
+        setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
     }
 
     // Start CPU Reset Assert watchdog and wait for CPU_RESET_L to assert
@@ -406,31 +412,46 @@ void VRPowerControl::initiateForceWarmReboot()
 
 void VRPowerControl::deassertPreSystemResets()
 {
-    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-    if (board0PreSystemReset == powerSignalMap.end())
+    auto board0PreSystemReset = getSignal("Board0PreSystemReset");
+    if (!board0PreSystemReset)
     {
-        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
         return;
     }
 
     // De-assert Board 0 Pre System Reset
-    setGPIOOutput(board0PreSystemReset->second,
-                  !board0PreSystemReset->second->polarity);
+    setGPIOOutput(board0PreSystemReset, !board0PreSystemReset->polarity);
 
     // De-assert Board 1 Pre System Reset if present
     if (boardPresence.board1Present)
     {
-        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-        if (board1PreSystemReset == powerSignalMap.end())
+        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
         {
-            lg2::error(
-                "Board1PreSystemReset signal not found in powerSignalMap");
             return;
         }
 
-        setGPIOOutput(board1PreSystemReset->second,
-                      !board1PreSystemReset->second->polarity);
+        setGPIOOutput(board1PreSystemReset, !board1PreSystemReset->polarity);
     }
+}
+
+void VRPowerControl::abortWarmRebootCpuResetWatchdogFault(
+    std::string_view faultDetail)
+{
+    cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
+
+    lg2::error(
+        "CRITICAL WARM REBOOT FAULT: {DETAIL}. De-asserting Pre System Reset only; "
+        "HPM run power is NOT removed. Returning host/chassis to On.",
+        "DETAIL", faultDetail);
+
+    deassertPreSystemResets();
+
+    logResourceEvent("ResourceErrorsDetected",
+                     {std::string("Host0"), std::string(faultDetail)},
+                     "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    action = PowerAction::NONE;
+    setPowerState(PowerState::on);
 }
 
 // Helper function: Transition to CPU Reset Assert wait state
@@ -466,6 +487,10 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
                 "HPM Power Good Watchdog Timer Expired. Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
 
             action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "HPM Power Good Watchdog expired (power on)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             transitionToOffStateWithRunPowerCheck();
             break;
 
@@ -497,11 +522,13 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
 
             // Check if this is warm reboot or normal power-on
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
-                // Warm reboot complete - GPIOs already in correct state
+                // Warm reboot complete
                 lg2::info(
-                    "CPU Reset Indicator de-asserted. CPUs are out of reset. Warm reboot complete! Setting Host State to On/Running.");
+                    "CPU Reset Indicator de-asserted. CPUs are out of reset. Warm reboot complete! Setting Host State to On/Running. Setting GPIOs to default state for host state ON.");
+                setGPIOsForHostStateOn();
             }
             else
             {
@@ -514,19 +541,28 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
             break;
 
         case Event::cpuResetWatchdogTimerExpired:
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 lg2::error(
-                    "CPU Reset Watchdog expired during warm reboot. CPUs did not come out of reset. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+                    "Warm reboot fault: CPU_RESET_L did not de-assert within the timeout period. CPUs may still be in reset. Host Power State is stil On. Conducting cleanup: Setting GPIO states to match Host State On.");
+                abortWarmRebootCpuResetWatchdogFault(
+                    "Warm reboot fault: CPU_RESET_L did not de-assert within "
+                    "CpuResetWatchdogMs (CPUs may still be in reset). "
+                    "PRE_SYS_RST de-asserted; run power domain unchanged.");
+                setGPIOsForHostStateOff();
             }
             else
             {
                 lg2::error(
                     "CPU Reset Watchdog expired. CPUs are not out of reset. Host Power On sequence failed. Conducting cleanup: Setting GPIO states to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+                action = PowerAction::NONE;
+                transitionToOffStateWithRunPowerCheck();
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0", "CPU Reset Watchdog expired"},
+                    "xyz.openbmc_project.Logging.Entry.Level.Error");
             }
-
-            action = PowerAction::NONE;
-            transitionToOffStateWithRunPowerCheck();
             break;
 
         default:
@@ -639,28 +675,23 @@ void VRPowerControl::handleHostInitiatedShutdown()
 // Helper function: Assert Pre System Reset lines for all present boards
 void VRPowerControl::assertBoardPreSystemResets()
 {
-    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-    if (board0PreSystemReset == powerSignalMap.end())
+    auto board0PreSystemReset = getSignal("Board0PreSystemReset");
+    if (!board0PreSystemReset)
     {
-        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
         return;
     }
 
-    setGPIOOutput(board0PreSystemReset->second,
-                  board0PreSystemReset->second->polarity);
+    setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
 
     if (boardPresence.board1Present)
     {
-        auto board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-        if (board1PreSystemReset == powerSignalMap.end())
+        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
         {
-            lg2::error(
-                "Board1PreSystemReset signal not found in powerSignalMap");
             return;
         }
 
-        setGPIOOutput(board1PreSystemReset->second,
-                      board1PreSystemReset->second->polarity);
+        setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
     }
 }
 
@@ -688,8 +719,8 @@ void VRPowerControl::transitionToCPUResetAssertState()
 
 #ifdef CPU_RESET_EARLY_ASSERT_WAR
     // Hardware bug workaround: CPU_RESET_L may assert before we enter this
-    // state Check if CPU reset is already asserted immediately after state
-    // transition
+    // state. Check if CPU reset is already asserted immediately after state
+    // transition.
     auto cpuResetIndicator = getSignal("CpuResetIndicator");
     if (cpuResetIndicator && cpuResetIndicator->gpioLine)
     {
@@ -700,7 +731,6 @@ void VRPowerControl::transitionToCPUResetAssertState()
         {
             lg2::info(
                 "WAR: CPU Reset Indicator already asserted upon entering waitForCPUResetAssert state. Manually triggering Event::cpuResetIndicatorAssert.");
-            // Manually send the event to trigger normal handler flow
             sendPowerControlEvent(Event::cpuResetIndicatorAssert);
         }
     }
@@ -720,6 +750,20 @@ void VRPowerControl::abortGracefulShutdown()
     setGPIOsForHostStateOn();
 }
 
+void VRPowerControl::abortGracefulWarmReboot()
+{
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+    lg2::error(
+        "Graceful warm reboot aborted - CPU(s) failed to assert SHDN_OK within timeout. No warm reset performed. Returning to powered-on state.");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0", "Graceful warm reboot aborted (SHDN_OK timeout)"},
+        "xyz.openbmc_project.Logging.Entry.Level.Warning");
+    action = PowerAction::NONE;
+    setGPIOsForHostStateOn();
+    setPowerState(PowerState::on);
+}
+
 // Helper function: Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
 void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
 {
@@ -730,6 +774,13 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceOff()
     startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
                Event::cpuResetWatchdogTimerExpired);
     setPowerState(PowerState::waitForCPUResetAssert);
+}
+
+void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot()
+{
+    lg2::info(
+        "CPU Shutdown OK watchdog expired during Force Warm Reboot. Proceeding with Force Warm Reboot.");
+    initiateForceWarmReboot();
 }
 
 // Helper function: Handle CPU Shutdown OK watchdog expiry during GRACE_OFF
@@ -746,6 +797,11 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Board 0 did not assert SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Board 0 CPU failed to assert SHDN_OK.");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Shutdown OK watchdog expired (Board 0 did not assert SHDN_OK)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else
@@ -765,6 +821,11 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             // Neither board asserted SHDN_OK - abort graceful shutdown
             lg2::error(
                 "CPU Shutdown OK watchdog expired during GRACE_OFF. Neither CPU asserted SHDN_OK.");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Shutdown OK watchdog expired (neither CPU asserted SHDN_OK)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
             abortGracefulShutdown();
         }
         else if (assertedCount == 1)
@@ -787,11 +848,21 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 0 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (only Board 0 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             else
             {
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired during Host Graceful Shutdown sequence. Only Board 1 asserted SHDN_OK in 2P configuration. System in bad state - proceeding with host shutdown. Asserting Pre System Reset lines and transitioning to PowerState::waitForCPUResetAssert.");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (only Board 1 asserted SHDN_OK in 2P configuration). Continuing with host shutdown."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
 
             assertBoardPreSystemResets();
@@ -814,17 +885,62 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
 // handleWaitForCPUShutdownOk state handler
 // ============================================================================
 
+void VRPowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
+{
+    lg2::warning(
+        "Force power-off during graceful CPU Shutdown OK wait is not handled on this platform");
+}
+
+void VRPowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
+{
+    lg2::warning(
+        "Force warm reboot during graceful warm reboot SHDN_OK wait is not handled on this platform");
+}
+
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 {
     switch (event)
     {
+        case Event::powerOffRequest:
+            if (action == PowerAction::GRACE_OFF ||
+                action == PowerAction::GRACEFUL_POWER_CYCLE ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                handleForceOffDuringGracefulCpuShutdownOkWait();
+            }
+            else
+            {
+                lg2::info("No action taken for event: {EVENT}", "EVENT",
+                          getEventName(event));
+            }
+            break;
+
+        case Event::resetRequest:
+            if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                handleForceWarmRebootDuringGracefulCpuShutdownOkWait();
+            }
+            else
+            {
+                lg2::info("No action taken for event: {EVENT}", "EVENT",
+                          getEventName(event));
+            }
+            break;
+
         case Event::board0CpuShutdownOkAssert:
         case Event::board1CpuShutdownOkAssert:
             // Check if all required boards have now asserted SHDN_OK
             if (areAllRequiredBoardsShutdownOk())
             {
                 // All required boards have asserted - proceed with reset
-                transitionToCPUResetAssertState();
+                if (action == PowerAction::FORCE_WARM_REBOOT)
+                {
+                    initiateForceWarmReboot();
+                }
+                else
+                {
+                    transitionToCPUResetAssertState();
+                }
             }
             else
             {
@@ -851,17 +967,30 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
                 // Both FORCE_OFF and POWER_CYCLE use forceful shutdown
                 handleCPUShutdownOkWatchdogExpiry_ForceOff();
             }
+            else if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot();
+            }
             else if (action == PowerAction::GRACE_OFF ||
                      action == PowerAction::GRACEFUL_POWER_CYCLE)
             {
                 // Both GRACE_OFF and GRACEFUL_POWER_CYCLE use graceful shutdown
                 handleCPUShutdownOkWatchdogExpiry_GraceOff();
             }
+            else if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                abortGracefulWarmReboot();
+            }
             else
             {
                 // Unknown action - log and do nothing
                 lg2::warning(
                     "CPU Shutdown OK watchdog expired with unexpected power action. No action taken.");
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0",
+                     "CPU Shutdown OK watchdog expired (unexpected power action). No action taken."},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
             }
             break;
 
@@ -931,7 +1060,7 @@ void VRPowerControl::handleWaitForPowerCycleDelay(Event event)
             // Reject all other events during power cycle delay
             lg2::warning(
                 "Event {EVENT} rejected - power cycle delay in progress",
-                "EVENT", static_cast<int>(event));
+                "EVENT", getEventName(event));
             break;
     }
 }
@@ -942,8 +1071,21 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
     switch (event)
     {
         case Event::warmRebootDelayTimerExpired:
-            lg2::info(
-                "Warm reboot delay complete - de-asserting Pre System Reset signals");
+            if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+            {
+                lg2::info(
+                    "Graceful warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
+            else if (action == PowerAction::FORCE_WARM_REBOOT)
+            {
+                lg2::info(
+                    "Force warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
+            else
+            {
+                lg2::info(
+                    "Warm reboot delay complete - de-asserting Pre System Reset signals");
+            }
             cancelTimer("Warm Reboot Delay Timer", warmRebootDelayTimer);
 
             // De-assert Pre System Reset signals (Board 0 and Board 1 if
@@ -961,7 +1103,7 @@ void VRPowerControl::handleWaitForRebootDelay(Event event)
             // Reject all other events during warm reboot delay
             lg2::warning(
                 "Event {EVENT} rejected - warm reboot delay in progress",
-                "EVENT", static_cast<int>(event));
+                "EVENT", getEventName(event));
             break;
     }
 }
@@ -1040,7 +1182,8 @@ std::string_view VRPowerControl::getChassisState() const
         case PowerState::waitForCPUResetAssert:
             // For warm reboot, chassis stays On (no power cycle)
             // For shutdown, chassis is transitioning to off
-            if (action == PowerAction::FORCE_WARM_REBOOT)
+            if (action == PowerAction::FORCE_WARM_REBOOT ||
+                action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.On";
             }
@@ -1149,103 +1292,82 @@ void VRPowerControl::setDefaultValues()
     lg2::info("Initializing default values for VR output signals");
 
     // Find and validate all required signals first
-    auto board0RunPowerEnable = powerSignalMap.find("Board0RunPowerEnable");
-    if (board0RunPowerEnable == powerSignalMap.end())
+    auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
+    if (!board0RunPowerEnable)
     {
-        lg2::error("Board0RunPowerEnable signal not found in powerSignalMap");
         return;
     }
 
-    auto board0PreSystemReset = powerSignalMap.find("Board0PreSystemReset");
-    if (board0PreSystemReset == powerSignalMap.end())
+    auto board0PreSystemReset = getSignal("Board0PreSystemReset");
+    if (!board0PreSystemReset)
     {
-        lg2::error("Board0PreSystemReset signal not found in powerSignalMap");
         return;
     }
 
-    auto board0CpuShutdownForce = powerSignalMap.find("Board0CpuShutdownForce");
-    if (board0CpuShutdownForce == powerSignalMap.end())
+    auto board0CpuShutdownForce = getSignal("Board0CpuShutdownForce");
+    if (!board0CpuShutdownForce)
     {
-        lg2::error("Board0CpuShutdownForce signal not found in powerSignalMap");
         return;
     }
 
-    auto board0CpuShutdownRequest =
-        powerSignalMap.find("Board0CpuShutdownRequest");
-    if (board0CpuShutdownRequest == powerSignalMap.end())
+    auto board0CpuShutdownRequest = getSignal("Board0CpuShutdownRequest");
+    if (!board0CpuShutdownRequest)
     {
-        lg2::error(
-            "Board0CpuShutdownRequest signal not found in powerSignalMap");
         return;
     }
 
-    auto usbPowerEnable = powerSignalMap.find("USBPowerEnable");
-    if (usbPowerEnable == powerSignalMap.end())
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
     {
-        lg2::error("USBPowerEnable signal not found in powerSignalMap");
         return;
     }
 
     // Board 1 signals (if present)
-    std::map<std::string, std::shared_ptr<ConfigData>>::iterator
-        board1RunPowerEnable;
-    std::map<std::string, std::shared_ptr<ConfigData>>::iterator
-        board1PreSystemReset;
+    std::shared_ptr<ConfigData> board1RunPowerEnable;
+    std::shared_ptr<ConfigData> board1PreSystemReset;
 
     if (boardPresence.board1Present)
     {
-        board1RunPowerEnable = powerSignalMap.find("Board1RunPowerEnable");
-        if (board1RunPowerEnable == powerSignalMap.end())
+        board1RunPowerEnable = getSignal("Board1RunPowerEnable");
+        if (!board1RunPowerEnable)
         {
-            lg2::error(
-                "Board1RunPowerEnable signal not found in powerSignalMap");
             return;
         }
 
-        board1PreSystemReset = powerSignalMap.find("Board1PreSystemReset");
-        if (board1PreSystemReset == powerSignalMap.end())
+        board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
         {
-            lg2::error(
-                "Board1PreSystemReset signal not found in powerSignalMap");
             return;
         }
     }
 
     // All signals validated, now set the default states
-    board0RunPowerEnable->second->defaultStateHostStateOn =
-        DefaultState::Asserted;
-    board0RunPowerEnable->second->defaultStateHostStateOff =
+    board0RunPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    board0RunPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
+
+    board0PreSystemReset->defaultStateHostStateOn = DefaultState::DeAsserted;
+    board0PreSystemReset->defaultStateHostStateOff = DefaultState::Asserted;
+
+    board0CpuShutdownForce->defaultStateHostStateOn = DefaultState::DeAsserted;
+    board0CpuShutdownForce->defaultStateHostStateOff = DefaultState::DeAsserted;
+
+    board0CpuShutdownRequest->defaultStateHostStateOn =
+        DefaultState::DeAsserted;
+    board0CpuShutdownRequest->defaultStateHostStateOff =
         DefaultState::DeAsserted;
 
-    board0PreSystemReset->second->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    board0PreSystemReset->second->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
-
-    board0CpuShutdownForce->second->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    board0CpuShutdownForce->second->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
-
-    board0CpuShutdownRequest->second->defaultStateHostStateOn =
-        DefaultState::DeAsserted;
-    board0CpuShutdownRequest->second->defaultStateHostStateOff =
-        DefaultState::DeAsserted;
-
-    usbPowerEnable->second->defaultStateHostStateOn = DefaultState::Asserted;
-    usbPowerEnable->second->defaultStateHostStateOff = DefaultState::DeAsserted;
+    usbPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    usbPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     if (boardPresence.board1Present)
     {
-        board1RunPowerEnable->second->defaultStateHostStateOn =
-            DefaultState::Asserted;
-        board1RunPowerEnable->second->defaultStateHostStateOff =
+        board1RunPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+        board1RunPowerEnable->defaultStateHostStateOff =
             DefaultState::DeAsserted;
 
-        board1PreSystemReset->second->defaultStateHostStateOn =
+        board1PreSystemReset->defaultStateHostStateOn =
             DefaultState::DeAsserted;
-        board1PreSystemReset->second->defaultStateHostStateOff =
-            DefaultState::DeAsserted;
+        board1PreSystemReset->defaultStateHostStateOff = DefaultState::Asserted;
     }
 
     lg2::info("VR default values set successfully");

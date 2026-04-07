@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
+
 #include "power_control_base.hpp"
 
 #include "power_restore.hpp"
 
 #include <fcntl.h>
+#include <linux/i2c-dev.h>
+#include <linux/i2c.h>
 #include <linux/input.h>
+#include <sys/ioctl.h>
 #include <systemd/sd-journal.h>
 #include <unistd.h>
 
@@ -15,7 +21,9 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <vector>
 
 namespace power_control
 {
@@ -77,6 +85,8 @@ std::string PowerControl::getEventName(Event event)
             return "power-cycle request";
         case Event::resetRequest:
             return "reset request";
+        case Event::gracefulResetRequest:
+            return "graceful reset request";
         case Event::gracefulPowerOffRequest:
             return "graceful power-off request";
         case Event::gracefulPowerCycleRequest:
@@ -87,10 +97,10 @@ std::string PowerControl::getEventName(Event event)
             return "power cycle delay timer expired";
         case Event::warmRebootDelayTimerExpired:
             return "warm reboot delay timer expired";
-        case Event::nvl144pdbMainPowerOkAssert:
-            return "NVL144 PDB main power OK assert";
-        case Event::nvl144pdbMainPowerOkDeAssert:
-            return "NVL144 PDB main power OK de-assert";
+        case Event::pdbMainPowerOkAssert:
+            return "PDB main power OK assert";
+        case Event::pdbMainPowerOkDeAssert:
+            return "PDB main power OK de-assert";
         case Event::gb300pdbMainPowerOkAssert:
             return "GB300 PDB main power OK assert";
         case Event::gb300pdbMainPowerOkDeAssert:
@@ -128,10 +138,65 @@ std::string PowerControl::getEventName(Event event)
     }
 }
 
+void PowerControl::logResourceEvent(
+    const std::string& eventName,
+    std::initializer_list<std::string> messageArgs, std::string_view severity)
+{
+    if (messageArgs.size() == 0)
+    {
+        lg2::error("logResourceEvent: messageArgs is empty");
+        return;
+    }
+
+    auto method = conn->new_method_call(
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+        "xyz.openbmc_project.Logging.Create", "Create");
+
+    std::map<std::string, std::string> additionalData;
+    additionalData["REDFISH_MESSAGE_ID"] =
+        std::format("ResourceEvent.1.0.{}", eventName);
+
+    std::string argsStr;
+    auto it = messageArgs.begin();
+    argsStr += *it;
+    for (++it; it != messageArgs.end(); ++it)
+    {
+        argsStr += ',';
+        argsStr += *it;
+    }
+    additionalData["REDFISH_MESSAGE_ARGS"] = argsStr;
+
+    method.append(eventName, severity, additionalData);
+    conn->call(method);
+}
+
 void PowerControl::logEvent(std::string_view stateHandler, Event event)
 {
     lg2::info("{STATE_HANDLER}: {EVENT} event received", "STATE_HANDLER",
               stateHandler, "EVENT", getEventName(event));
+}
+
+int PowerControl::i2cWrite(int file, uint16_t address,
+                           const std::vector<uint8_t>& data)
+{
+    if (data.empty())
+    {
+        return -1;
+    }
+
+    struct i2c_msg msg{};
+    struct i2c_rdwr_ioctl_data rdwr{};
+
+    msg.addr = address;
+    msg.flags = 0;
+    msg.len = static_cast<__u16>(data.size());
+    msg.buf = const_cast<uint8_t*>(data.data());
+
+    rdwr.msgs = &msg;
+    rdwr.nmsgs = 1;
+
+    int ret = ioctl(file, I2C_RDWR, &rdwr);
+    return (ret == 1) ? 0 : -1;
 }
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
@@ -183,7 +248,6 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
 #endif
     initializeButtonInterfaces();
     initializeOSInterface();
-    initializeRestartCauseInterface();
     registerGpioStateInterface();
 
     // Initialize GPIO property setters map with common Board0 signals
@@ -198,7 +262,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
          }}};
 
     // Note: initializeHostStateInterface() is called by derived classes
-    // (e.g., NVL144PowerControl) after they register any additional GPIO
+    // (e.g., NVL72PowerControl) after they register any additional GPIO
     // properties. It initializes ALL host0 interfaces at once.
 }
 
@@ -904,6 +968,15 @@ void PowerControl::setPowerState(const PowerState state)
     {
         setBootProgress(
             "xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
+        logResourceEvent(
+            "ResourcePoweredOff", {"Host0"},
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
+    }
+    else if (state == PowerState::on)
+    {
+        logResourceEvent(
+            "ResourcePoweredOn", {"Host0"},
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
     }
 
     // Save the power state for the restore policy
@@ -970,7 +1043,6 @@ void PowerControl::requestBusNames()
         conn->request_name(chassisDbusName.c_str());
         conn->request_name(osDbusName.c_str());
         conn->request_name(nmiDbusName.c_str());
-        conn->request_name(rstCauseDbusName.c_str());
     }
 
     // Append the node ID to the dbus names & Request all the dbus names
@@ -978,7 +1050,6 @@ void PowerControl::requestBusNames()
     conn->request_name((chassisDbusName + nodeId).c_str());
     conn->request_name((osDbusName + nodeId).c_str());
     conn->request_name((nmiDbusName + nodeId).c_str());
-    conn->request_name((rstCauseDbusName + nodeId).c_str());
 
     // Only claim buttons name if we created button interfaces
     // (avoid conflict with separate buttons daemon)
@@ -1063,7 +1134,7 @@ void PowerControl::registerHostInterface()
                     addRestartCause(RestartCause::command);
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        sendPowerControlEvent(Event::gracefulPowerCycleRequest);
+                        sendPowerControlEvent(Event::powerCycleRequest);
                     });
                 }
                 else
@@ -1084,9 +1155,7 @@ void PowerControl::registerHostInterface()
                         "Host transition to GracefulWarmReboot requested");
                     // Defer event processing to avoid D-Bus reentrancy
                     boost::asio::post(ioContext, [this]() {
-                        // TODO: Currently performs a Force Warm Reboot. To be
-                        // replaced with a graceful warm reboot.
-                        sendPowerControlEvent(Event::resetRequest);
+                        sendPowerControlEvent(Event::gracefulResetRequest);
                     });
                 }
                 else
@@ -1126,6 +1195,34 @@ void PowerControl::registerHostInterface()
 
     hostIface->register_property("CurrentHostState",
                                  std::string(getHostState()));
+
+    // RestartCause and RequestedRestartCause on State.Host for parity with
+    // PSM/legacy; path is /xyz/openbmc_project/state/host{nodeId}
+    hostIface->register_property(
+        "RestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"));
+
+    hostIface->register_property(
+        "RequestedRestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"),
+        [this](const std::string& requested, std::string& resp) {
+            if (requested ==
+                "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer")
+            {
+                addRestartCause(RestartCause::watchdog);
+                lg2::info("Restart cause watchdog requested");
+            }
+            else
+            {
+                lg2::error("Unrecognized RestartCause Request");
+                return 0;
+            }
+
+            lg2::info("RestartCause requested: {RESTART_CAUSE}",
+                      "RESTART_CAUSE", requested);
+            resp = requested;
+            return 1;
+        });
 
     // NOTE: Do NOT call hostIface->initialize() here!
     // The Host interface should be initialized LAST (after all other interfaces
@@ -1541,44 +1638,6 @@ void PowerControl::initializeOSInterface()
     // NOTE: Do NOT call initialize() here - deferred to
     // initializeHostStateInterface()
     lg2::info("OS state interface registered (not yet initialized)");
-}
-
-void PowerControl::initializeRestartCauseInterface()
-{
-    // Restart Cause Interface
-    restartCauseIface = objServer.add_interface(
-        "/xyz/openbmc_project/control/host" + nodeId + "/restart_cause",
-        "xyz.openbmc_project.Control.Host.RestartCause");
-
-    restartCauseIface->register_property(
-        "RestartCause",
-        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"));
-
-    restartCauseIface->register_property(
-        "RequestedRestartCause",
-        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"),
-        [this](const std::string& requested, std::string& resp) {
-            if (requested ==
-                "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer")
-            {
-                // TODO: addRestartCause(RestartCause::watchdog);
-                lg2::info("Restart cause watchdog requested");
-            }
-            else
-            {
-                lg2::error("Unrecognized RestartCause Request");
-                return 0;
-            }
-
-            lg2::info("RestartCause requested: {RESTART_CAUSE}",
-                      "RESTART_CAUSE", requested);
-            resp = requested;
-            return 1;
-        });
-
-    restartCauseIface->initialize();
-
-    lg2::info("Created the restart cause interface successfully");
 }
 
 void PowerControl::registerGpioStateInterface()
@@ -2768,7 +2827,7 @@ std::string getRestartCause(RestartCause cause)
     switch (cause)
     {
         case RestartCause::command:
-            return "xyz.openbmc_project.State.Host.RestartCause.IpmiCommand";
+            return "xyz.openbmc_project.State.Host.RestartCause.RemoteCommand";
             break;
         case RestartCause::resetButton:
             return "xyz.openbmc_project.State.Host.RestartCause.ResetButton";
@@ -2809,7 +2868,7 @@ void PowerControl::clearRestartCause()
 void PowerControl::setRestartCauseProperty(const std::string& cause)
 {
     lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
-    restartCauseIface->set_property("RestartCause", cause);
+    hostIface->set_property("RestartCause", cause);
 }
 
 void PowerControl::setRestartCause()

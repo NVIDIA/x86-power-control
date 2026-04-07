@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
+
 #pragma once
 
 #include <boost/asio/posix/stream_descriptor.hpp>
@@ -6,13 +9,16 @@
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <regex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // Forward declarations
 namespace power_control
@@ -230,13 +236,14 @@ class PowerControl
         powerOffRequest,
         powerCycleRequest,
         resetRequest,
+        gracefulResetRequest,
         gracefulPowerOffRequest,
         gracefulPowerCycleRequest,
         warmResetDetected,
         powerCycleDelayTimerExpired,
         warmRebootDelayTimerExpired,
-        nvl144pdbMainPowerOkAssert,
-        nvl144pdbMainPowerOkDeAssert,
+        pdbMainPowerOkAssert,
+        pdbMainPowerOkDeAssert,
         gb300pdbMainPowerOkAssert,
         gb300pdbMainPowerOkDeAssert,
         c2pdbPSUPowerOkAssert,
@@ -266,6 +273,28 @@ class PowerControl
     static std::string getEventName(Event event);
 
     /**
+     * @brief Log a resource event to the Redfish event log
+     *
+     * Logs a ResourceEvent with the given event name and message args (e.g.
+     * logResourceEvent("ResourcePoweredOn", {"Host0"}) or
+     * logResourceEvent("ResourceErrorsDetected", {"Host0", "CPU Reset Watchdog
+     * expired"}).
+     *
+     * @param eventName Message key (e.g. "ResourcePoweredOn",
+     *                  "ResourceErrorsDetected")
+     * @param messageArgs Arguments for the message (joined as comma-separated
+     *                    REDFISH_MESSAGE_ARGS)
+     * @param severity D-Bus severity (default Informational; use
+     *                 xyz.openbmc_project.Logging.Entry.Level.Warning for
+     *                 ResourceErrorsDetected)
+     */
+    void logResourceEvent(
+        const std::string& eventName,
+        std::initializer_list<std::string> messageArgs,
+        std::string_view severity =
+            "xyz.openbmc_project.Logging.Entry.Level.Informational");
+
+    /**
      * @brief Log an event received by a state handler
      *
      * Logs an informational message showing which state handler received which
@@ -275,6 +304,17 @@ class PowerControl
      * @param event The event that was received
      */
     static void logEvent(std::string_view stateHandler, Event event);
+
+    /**
+     * @brief Write bytes to an I2C slave using the I2C_RDWR ioctl
+     *
+     * @param file Open I2C adapter device (e.g. /dev/i2c-N) file descriptor
+     * @param address 7-bit I2C slave address
+     * @param data Payload to write (e.g. register byte followed by data)
+     * @return 0 on success, -1 on failure
+     */
+    static int i2cWrite(int file, uint16_t address,
+                        const std::vector<uint8_t>& data);
 
     /**
      * @brief Request all D-Bus bus names for this service
@@ -289,8 +329,6 @@ class PowerControl
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
     std::string buttonDbusName = "xyz.openbmc_project.Chassis.Buttons";
     std::string nmiDbusName = "xyz.openbmc_project.Control.Host.NMI";
-    std::string rstCauseDbusName =
-        "xyz.openbmc_project.Control.Host.RestartCause";
 
     enum class PowerAction
     {
@@ -303,6 +341,9 @@ class PowerControl
         SYSTEM_RESET,
         HOST_INITIATED_SHUTDOWN,
         FORCE_WARM_REBOOT,
+        /** Graceful warm reboot: SHDN_REQ / SHDN_OK then same reset tail as
+           force */
+        GRACEFUL_WARM_REBOOT,
     };
 
     // This map contains all timer values that are to be read from json config
@@ -339,7 +380,6 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> gpioStateIface;
 
     /**
@@ -974,14 +1014,6 @@ class PowerControl
      * Creates and registers the Operating System Status interface.
      */
     void initializeOSInterface();
-
-    /**
-     * @brief Initialize Restart Cause D-Bus interface
-     *
-     * Creates and registers the Restart Cause interface for tracking
-     * why the host was restarted.
-     */
-    void initializeRestartCauseInterface();
 
     /**
      * @brief Register GPIO State D-Bus interface

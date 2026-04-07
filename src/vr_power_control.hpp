@@ -1,13 +1,12 @@
-/*
- * SPDX-License-Identifier: Apache-2.0
- * Copyright (C) 2021-2022 YADRO.
- */
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright OpenBMC Authors
 
 #pragma once
 
 #include "power_control_base.hpp"
 
 #include <functional>
+#include <string_view>
 
 namespace power_control
 {
@@ -22,13 +21,13 @@ struct BoardPresence
 {
     bool board0Present;    // HPM Board 0 IOX
     bool board1Present;    // HPM Board 1 IOX
-    bool nvl144PdbPresent; // NVL144 PDB IOX
+    bool nvl72PdbPresent;  // NVL72 PDB IOX
     bool c2PdbPresent;     // C2 PDB IOX
     bool parsecPdbPresent; // Parsec/GB300 PDB IOX
 };
 
 /**
- * @brief VR Power Control class - VR-specific extensions (NVL144 default)
+ * @brief VR Power Control class - VR-specific extensions (NVL72 default)
  *
  * This class extends PowerControl with VR-specific functionality:
  * - PDB power sequencing
@@ -47,7 +46,7 @@ struct BoardPresence
  * - waitForCPUShutdownOk
  * - ...
  *
- * Default implementations use NVL144 behavior. Platform-specific classes
+ * Default implementations use NVL72 behavior. Platform-specific classes
  * (C2PowerControl, ParsecPowerControl, E5010PowerControl) override as needed.
  */
 class VRPowerControl : public PowerControl
@@ -202,6 +201,27 @@ class VRPowerControl : public PowerControl
     void abortGracefulShutdown();
 
     /**
+     * @brief Abort graceful warm reboot during SHDN_OK wait and return to on
+     *
+     * Called when the graceful CPU Shutdown OK watchdog expires during
+     * GRACEFUL_WARM_REBOOT (no warm reset performed).
+     */
+    void abortGracefulWarmReboot();
+
+    /**
+     * @brief Warm reboot CPU reset watchdog fault: no run-power teardown
+     *
+     * For FORCE_WARM_REBOOT / GRACEFUL_WARM_REBOOT when CpuResetWatchdogMs
+     * expires in waitForCPUResetAssert or waitForCPUResetDeAssert: cancel the
+     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal
+     * and ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM
+     * run-power teardown.
+     *
+     * @param faultDetail Human-readable fault text for event log / journal
+     */
+    void abortWarmRebootCpuResetWatchdogFault(std::string_view faultDetail);
+
+    /**
      * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_OFF
      *
      * For forced power off, we don't care about SHDN_OK state - just proceed
@@ -218,6 +238,14 @@ class VRPowerControl : public PowerControl
      * - 2P: Abort if neither asserted, warn and proceed if only one asserted
      */
     void handleCPUShutdownOkWatchdogExpiry_GraceOff();
+
+    /**
+     * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_WARM_REBOOT
+     *
+     * Proceeds with Pre System Reset assert and waitForCPUResetAssert even if
+     * SHDN_OK did not arrive in Safe Stating time.
+     */
+    void handleCPUShutdownOkWatchdogExpiry_ForceWarmReboot();
 
     /**
      * @brief De-assert Pre System Reset lines during HPM power-on sequence
@@ -263,6 +291,7 @@ class VRPowerControl : public PowerControl
         "HPMPowerGoodWatchdogMs",
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
+        "GracefulWarmRebootDelayMs",
         "CpuBootDoneDeAssertDelayMs",
         "PowerOffSaveMs"};
 
@@ -335,13 +364,6 @@ class VRPowerControl : public PowerControl
     bool checkIOXPresence(const std::string& ioxPath);
 
     /**
-     * @brief Handler for Board 1 Run Power Good GPIO events
-     *
-     * @param state The GPIO state (true = asserted, false = de-asserted)
-     */
-    void board1RunPowerPGHandler(bool state);
-
-    /**
      * @brief Handler for Board 0 CPU Shutdown OK GPIO events
      *
      * @param state The GPIO state (true = asserted, false = de-asserted)
@@ -368,9 +390,9 @@ class VRPowerControl : public PowerControl
     // =============================================================================
 
     /**
-     * @brief Handler for PowerState::on (VR Override - NVL144 default)
+     * @brief Handler for PowerState::on (VR Override - NVL72 default)
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 behavior in powerStateOn):
+     * PREVIOUS IMPLEMENTATION (NVL72 behavior in powerStateOn):
      * Extends base class behavior to add:
      *
      * case Event::powerOffRequest:
@@ -386,9 +408,9 @@ class VRPowerControl : public PowerControl
     void handlePowerStateOn(Event event) override;
 
     /**
-     * @brief Handler for PowerState::off (VR Override - NVL144 default)
+     * @brief Handler for PowerState::off (VR Override - NVL72 default)
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 behavior in powerStateOff):
+     * PREVIOUS IMPLEMENTATION (NVL72 behavior in powerStateOff):
      * Extends base class behavior to define support for these events:
      *
      * case Event::powerOffRequest:
@@ -413,10 +435,10 @@ class VRPowerControl : public PowerControl
     /**
      * @brief Handler for PowerState::waitForPDBMainPowerOk
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 default in
+     * PREVIOUS IMPLEMENTATION (NVL72 default in
      * powerStateWaitForPDBMainPowerOk):
      *
-     * NOTE: NVL144 overrides for NVL144-specific PDB behavior
+     * NOTE: NVL72 overrides for NVL72-specific PDB behavior
      * NOTE: C2 overrides to enable 12V rails after PDB powers up
      * NOTE: Parsec (GB300) overrides for GB300-specific PDB behavior
      * NOTE: E5010 defines skip PDB sequencing and go directly to HPM sequencing
@@ -431,7 +453,7 @@ class VRPowerControl : public PowerControl
      * Waits for PDB Main Power OK to de-assert after:
      * - De-asserting PDB Main Power Enable during power off sequence
      *
-     * case Event::nvl144pdbMainPowerOkDeAssert:
+     * case Event::pdbMainPowerOkDeAssert:
      * case Event::pdbMainPowerOkWatchdogTimerExpired:
      *
      * NOTE: C2 overrides to handle C2 PDB PSU Power OK De-Assert
@@ -524,6 +546,28 @@ class VRPowerControl : public PowerControl
     virtual void handleWaitForCPUShutdownOk(Event event);
 
     /**
+     * @brief Handle force power-off while waiting for CPU Shutdown OK during a
+     * graceful shutdown, graceful power cycle, or graceful warm reboot
+     * (GRACE_OFF, GRACEFUL_POWER_CYCLE, or GRACEFUL_WARM_REBOOT).
+     *
+     * Invoked when Event::powerOffRequest is received in
+     * waitForCPUShutdownOk so the sequence can be upgraded to forceful
+     * shutdown without waiting for the graceful watchdog. Platform
+     * implementations typically call the same path as handlePowerStateOn for
+     * force-off
+     */
+    virtual void handleForceOffDuringGracefulCpuShutdownOkWait();
+
+    /**
+     * @brief Upgrade graceful warm reboot to force warm reboot during wait for
+     * CPU Shutdown OK
+     *
+     * Invoked when Event::resetRequest is received while
+     * action == GRACEFUL_WARM_REBOOT in waitForCPUShutdownOk.
+     */
+    virtual void handleForceWarmRebootDuringGracefulCpuShutdownOkWait();
+
+    /**
      * @brief Handler for PowerState::waitForCPUBootDoneDeAssert
      *
      * Waits for CPU_BOOT_DONE to de-assert (reboot) or timer to expire
@@ -576,7 +620,10 @@ class VRPowerControl : public PowerControl
      *
      * This is a common helper function that can be used by any VR platform.
      * It performs the following:
+     * - Cancels the CPU Shutdown OK watchdog (if running)
      * - Sets action to FORCE_WARM_REBOOT
+     * - De-asserts Board0CpuShutdownForce (SHDN_FORCE)
+     * - De-asserts Board1CpuShutdownForce if Board1 is present
      * - Asserts Board0PreSystemReset
      * - Asserts Board1PreSystemReset (if Board1 is present)
      * - Starts CPU Reset watchdog timer
