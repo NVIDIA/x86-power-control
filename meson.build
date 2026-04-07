@@ -104,8 +104,9 @@ if systemd.found()
 endif
 
 install_data(
-    'config/power-config-host0.json',
+    get_option('power-config-file'),
     install_dir: '/usr/share/x86-power-control/',
+    rename: 'power-config-host0.json',
 )
 
 subdir('src/bmc')

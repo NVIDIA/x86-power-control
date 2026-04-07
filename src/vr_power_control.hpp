@@ -289,6 +289,7 @@ class VRPowerControl : public PowerControl
         "GracefulCpuShutdownOkWatchdogMs",
         "CpuResetWatchdogMs",
         "HPMPowerGoodWatchdogMs",
+        "PdbMainPowerOkWatchdogMs",
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
         "GracefulWarmRebootDelayMs",
@@ -334,6 +335,12 @@ class VRPowerControl : public PowerControl
      * graceful warm reboot)
      */
     boost::asio::steady_timer warmRebootDelayTimer;
+
+    /**
+     * @brief Timer for PDB main power OK assertion/de-assertion in PDB
+     * power sequencing
+     */
+    boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
 
   protected:
     // GPIO EVENT HANDLERS (Member functions)
@@ -383,6 +390,17 @@ class VRPowerControl : public PowerControl
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void cpuResetIndicatorHandler(bool state);
+
+    /**
+     * @brief Handler for PDB Main Power OK GPIO events
+     *
+     * Sends Event::pdbMainPowerOkAssert or Event::pdbMainPowerOkDeAssert.
+     * Platform classes override to add platform-specific behaviour (e.g. NVL72
+     * adds HSC alert masking) and then call this base implementation.
+     *
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    virtual void pdbMainPowerOkHandler(bool state);
 
   protected:
     // =============================================================================
@@ -596,6 +614,208 @@ class VRPowerControl : public PowerControl
      * @param event Event that triggered this handler
      */
     virtual void handleWaitForRebootDelay(Event event);
+
+    // =============================================================================
+    // PLATFORM-SPECIFIC VIRTUAL METHODS (pure virtual or overridable defaults)
+    // =============================================================================
+
+    /**
+     * @brief Handle power on request from PowerState::off
+     *
+     * Platform-specific: asserts platform PDB enable signals, starts the
+     * appropriate watchdog timer, and transitions to the first PDB power-on
+     * wait state.
+     *
+     * Pure virtual — every platform must provide an implementation.
+     */
+    virtual void handlePowerOnRequest() = 0;
+
+    /**
+     * @brief Check if system power is already fully off
+     *
+     * Platform-specific: checks whichever power-indicator signals the
+     * platform uses (e.g. Board0RunPowerPG + PDBMainPowerOk for NVL72).
+     *
+     * Pure virtual — every platform must provide an implementation.
+     *
+     * @return true if all platform power indicators are de-asserted
+     */
+    virtual bool isSystemPowerOff() = 0;
+
+    /**
+     * @brief Assert HPM board power sequence during power-on
+     *
+     * VR default: asserts Board0/1 Pre System Reset, USB Power Enable, and
+     * Board0/1 Run Power Enable.
+     *
+     * Platform classes override to insert additional peripheral enable
+     * signals (e.g. NVL72 adds E1S Power Enable, BMC SSD Reset de-assert,
+     * SSD Power Disable de-assert, and hardware-workaround sleeps).
+     */
+    virtual void assertHPMBoardPowerSequence();
+
+    /**
+     * @brief De-assert HPM power and peripheral signals during shutdown
+     *
+     * VR default: de-asserts Board0/1 Run Power Enable and USB Power Enable.
+     *
+     * Platform classes override to de-assert additional peripheral signals
+     * (e.g. NVL72 also de-asserts E1S Power Enable).
+     * Overrides should call VRPowerControl::deassertHPMPowerAndPeripherals()
+     * first to handle the common signals.
+     */
+    virtual void deassertHPMPowerAndPeripherals();
+
+    /**
+     * @brief Initiate the PDB power-off sequence after HPM boards have
+     * powered down
+     *
+     * Called when Board0RunPowerPG de-asserts. Platform-specific: de-asserts
+     * the platform PDB enable signal(s), starts the PDB watchdog, and
+     * transitions to waitForPDBMainPowerOff (or bypasses intermediate wait
+     * states if the PDB ok signals are already de-asserted).
+     *
+     * Pure virtual — every platform must provide an implementation.
+     */
+    virtual void initiatePDBPowerOff() = 0;
+
+    /**
+     * @brief Complete shutdown and transition to the appropriate next state
+     *
+     * Called from handleWaitForPDBMainPowerOff with success=true on
+     * pdbMainPowerOkDeAssert and success=false on watchdog expiry.
+     *
+     * VR default (NVL72 behaviour): dispatches on action to either
+     * transitionToOffState() or transitionToPowerCycleDelay().
+     *
+     * Platform classes override when their PDB teardown has additional steps
+     * after PDB Main Power OK de-asserts (e.g. C2 de-asserts PSU enable and
+     * waits for PSU power off before finishing).
+     *
+     * @param success true if PDB ok de-asserted normally, false on watchdog
+     */
+    virtual void completeShutdownAndTransitionToOff(bool success);
+
+    // =============================================================================
+    // HELPER FUNCTIONS (moved from platform, shared by all VR platforms)
+    // =============================================================================
+
+    /**
+     * @brief Handle shutdown request (forceful or graceful) from
+     * PowerState::on
+     *
+     * Validates graceful operations (CPU Boot Done check), sets the action,
+     * calls the virtual isSystemPowerOff() to decide whether to initiate CPU
+     * shutdown or transition directly to off/power-cycle-delay.
+     *
+     * @param event powerOffRequest (forceful) or gracefulPowerOffRequest /
+     *              gracefulPowerCycleRequest / gracefulResetRequest (graceful)
+     */
+    void handleShutdownRequest(Event event);
+
+    /**
+     * @brief Initiate CPU shutdown sequence
+     *
+     * Asserts the appropriate Board 0 shutdown signal (Force or Request),
+     * de-asserts the Board 1 counterpart if present, starts the CPU Shutdown
+     * OK watchdog, and transitions to waitForCPUShutdownOk.
+     *
+     * @param isForceful true → use SHDN_FORCE + forceful watchdog;
+     *                   false → use SHDN_REQ + graceful watchdog
+     */
+    void initiateCPUShutdown(bool isForceful);
+
+    /**
+     * @brief Handle power cycle request when in off state
+     *
+     * Reads Board0RunPowerPG to verify power is off: if de-asserted, calls
+     * handlePowerOnRequest(); if still asserted, transitions to on and calls
+     * handleShutdownRequest() to power down first.
+     *
+     * @param event powerCycleRequest (forceful) or gracefulPowerCycleRequest
+     */
+    void handlePowerCycleWhenOff(Event event);
+
+    /**
+     * @brief Dispatch to the appropriate final state after all PDB power
+     * sequencing is complete
+     *
+     * Platform-agnostic action dispatch: looks at the current action and
+     * calls transitionToOffState() or transitionToPowerCycleDelay().
+     * Called by completeShutdownAndTransitionToOff (VR default) and directly
+     * by platform state handlers when the final PDB signal de-asserts
+     * (e.g. C2 calls this from handleWaitForPDBPSUPowerOff).
+     */
+    void applyShutdownAction();
+
+    /**
+     * @brief Transition to off state after successful shutdown
+     *
+     * Clears action, sets GPIOs to off state, transitions to
+     * PowerState::off.
+     */
+    void transitionToOffState();
+
+    /**
+     * @brief Transition to power cycle delay state
+     *
+     * Preserves action, sets GPIOs to off state, starts the power cycle
+     * delay timer, and transitions to waitForPowerCycleDelay.
+     */
+    void transitionToPowerCycleDelay();
+
+    /**
+     * @brief Transition to HPM Power Good assert wait state
+     *
+     * Cancels the PDB Main Power OK watchdog, calls the virtual
+     * assertHPMBoardPowerSequence(), starts the HPM Power Good watchdog,
+     * and transitions to waitForHPMPowerGoodAssert.
+     */
+    void transitionToHPMPowerGoodAssertState();
+
+    /**
+     * @brief Transition to HPM Power Good de-assert wait state
+     *
+     * Cancels the CPU reset watchdog, calls the virtual
+     * deassertHPMPowerAndPeripherals(), starts the HPM Power Good watchdog,
+     * and transitions to waitForHPMPowerGoodDeAssert.
+     */
+    void transitionToHPMPowerGoodDeAssertState();
+
+    /**
+     * @brief Handle CPU Reset Indicator assertion in waitForCPUResetAssert
+     *
+     * VR default: if warm reboot action, starts warm reboot delay timer and
+     * transitions to waitForRebootDelay; otherwise calls
+     * transitionToHPMPowerGoodDeAssertState() for the shutdown path.
+     *
+     * Platform classes override if they need different behaviour when CPUs
+     * enter reset (e.g. different reboot delay logic or additional GPIO ops).
+     */
+    virtual void handleCPUResetIndicatorAsserted();
+
+    /**
+     * @brief Handle CPU Reset Watchdog expiry in waitForCPUResetAssert
+     *
+     * VR default: if warm reboot action, calls
+     * abortWarmRebootCpuResetWatchdogFault() and restores host-ON GPIOs;
+     * otherwise logs shutdown-sequence fault and calls
+     * transitionToOffStateWithRunPowerCheck().
+     *
+     * Platform classes override if they need different fault recovery.
+     */
+    virtual void handleCPUResetWatchdogExpired();
+
+    /**
+     * @brief Handle HPM Power Good watchdog expiry during shutdown sequence
+     *
+     * VR default: logs fault, resets action to NONE, calls
+     * setGPIOsForHostStateOn() and setPowerState(on).
+     *
+     * Platform classes override if they need additional cleanup when the
+     * HPM power good watchdog fires during a shutdown.
+     */
+    virtual void handleHPMPowerGoodWatchdogExpiredDuringShutdown();
 
     // GPIO EVENT HANDLER HELPER FUNCTIONS
 
