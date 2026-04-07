@@ -123,5 +123,6 @@
     },
     "event_configs": {
         "NMIWhenPoweredOff": true
-    }
+    },
+    "platform-type": "nvl72"
 }

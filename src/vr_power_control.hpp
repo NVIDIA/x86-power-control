@@ -21,13 +21,13 @@ struct BoardPresence
 {
     bool board0Present;    // HPM Board 0 IOX
     bool board1Present;    // HPM Board 1 IOX
-    bool nvl144PdbPresent; // NVL144 PDB IOX
+    bool nvl72PdbPresent;  // NVL72 PDB IOX
     bool c2PdbPresent;     // C2 PDB IOX
     bool parsecPdbPresent; // Parsec/GB300 PDB IOX
 };
 
 /**
- * @brief VR Power Control class - VR-specific extensions (NVL144 default)
+ * @brief VR Power Control class - VR-specific extensions (NVL72 default)
  *
  * This class extends PowerControl with VR-specific functionality:
  * - PDB power sequencing
@@ -46,7 +46,7 @@ struct BoardPresence
  * - waitForCPUShutdownOk
  * - ...
  *
- * Default implementations use NVL144 behavior. Platform-specific classes
+ * Default implementations use NVL72 behavior. Platform-specific classes
  * (C2PowerControl, ParsecPowerControl, E5010PowerControl) override as needed.
  */
 class VRPowerControl : public PowerControl
@@ -213,8 +213,9 @@ class VRPowerControl : public PowerControl
      *
      * For FORCE_WARM_REBOOT / GRACEFUL_WARM_REBOOT when CpuResetWatchdogMs
      * expires in waitForCPUResetAssert or waitForCPUResetDeAssert: cancel the
-     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal and
-     * ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM run-power teardown.
+     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal
+     * and ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM
+     * run-power teardown.
      *
      * @param faultDetail Human-readable fault text for event log / journal
      */
@@ -362,8 +363,6 @@ class VRPowerControl : public PowerControl
      */
     bool checkIOXPresence(const std::string& ioxPath);
 
-
-
     /**
      * @brief Handler for Board 0 CPU Shutdown OK GPIO events
      *
@@ -391,9 +390,9 @@ class VRPowerControl : public PowerControl
     // =============================================================================
 
     /**
-     * @brief Handler for PowerState::on (VR Override - NVL144 default)
+     * @brief Handler for PowerState::on (VR Override - NVL72 default)
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 behavior in powerStateOn):
+     * PREVIOUS IMPLEMENTATION (NVL72 behavior in powerStateOn):
      * Extends base class behavior to add:
      *
      * case Event::powerOffRequest:
@@ -409,9 +408,9 @@ class VRPowerControl : public PowerControl
     void handlePowerStateOn(Event event) override;
 
     /**
-     * @brief Handler for PowerState::off (VR Override - NVL144 default)
+     * @brief Handler for PowerState::off (VR Override - NVL72 default)
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 behavior in powerStateOff):
+     * PREVIOUS IMPLEMENTATION (NVL72 behavior in powerStateOff):
      * Extends base class behavior to define support for these events:
      *
      * case Event::powerOffRequest:
@@ -436,10 +435,10 @@ class VRPowerControl : public PowerControl
     /**
      * @brief Handler for PowerState::waitForPDBMainPowerOk
      *
-     * PREVIOUS IMPLEMENTATION (NVL144 default in
+     * PREVIOUS IMPLEMENTATION (NVL72 default in
      * powerStateWaitForPDBMainPowerOk):
      *
-     * NOTE: NVL144 overrides for NVL144-specific PDB behavior
+     * NOTE: NVL72 overrides for NVL72-specific PDB behavior
      * NOTE: C2 overrides to enable 12V rails after PDB powers up
      * NOTE: Parsec (GB300) overrides for GB300-specific PDB behavior
      * NOTE: E5010 defines skip PDB sequencing and go directly to HPM sequencing
@@ -560,7 +559,8 @@ class VRPowerControl : public PowerControl
     virtual void handleForceOffDuringGracefulCpuShutdownOkWait();
 
     /**
-     * @brief Upgrade graceful warm reboot to force warm reboot during wait for CPU Shutdown OK
+     * @brief Upgrade graceful warm reboot to force warm reboot during wait for
+     * CPU Shutdown OK
      *
      * Invoked when Event::resetRequest is received while
      * action == GRACEFUL_WARM_REBOOT in waitForCPUShutdownOk.
