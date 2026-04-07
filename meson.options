@@ -83,3 +83,9 @@ option(
     value: 'disabled',
     description: 'Enable workaround for hardware bug where CPU_RESET asserts before entering waitForCPUResetAssert state (old/broken hardware only)',
 )
+option(
+    'power-config-file',
+    type: 'string',
+    value: 'config/nvl72_power-config-host0.json',
+    description: 'Path to the platform power config JSON installed as power-config-host0.json',
+)

@@ -24,7 +24,8 @@ VRPowerControl::VRPowerControl(
     hpmPowerGoodWatchdogTimer(ioContext), cpuResetWatchdogTimer(ioContext),
     cpuShutdownOkWatchdogTimer(ioContext),
     cpuBootDoneDeAssertWatchdogTimer(ioContext),
-    powerCycleDelayTimer(ioContext), warmRebootDelayTimer(ioContext)
+    powerCycleDelayTimer(ioContext), warmRebootDelayTimer(ioContext),
+    pdbMainPowerOkWatchdogTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
@@ -58,6 +59,15 @@ VRPowerControl::VRPowerControl(
                               this->board1CpuShutdownOkHandler(state);
                           });
     }
+
+    // Add PDB signals shared by all VR platforms
+    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
+                      [this](bool state) {
+                          this->pdbMainPowerOkHandler(state);
+                      });
+    // Note: PDBMainPowerEnable is NOT registered here — each platform registers
+    // its own PDB enable signal(s) in its constructor (e.g. NVL72 registers
+    // PDBMainPowerEnable; C2 has no such signal and uses PDBPSUPowerOn instead).
 
     // call validateRequiredSignals() in the platform-specific class constructor
     // validateRequiredSignals();
@@ -97,89 +107,6 @@ bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
     return std::filesystem::exists(ioxPath);
 }
 
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
-
-void VRPowerControl::transitionToOffStateWithRunPowerCheck()
-{
-    // Check current state of Board0RunPowerPG
-    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
-    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
-    {
-        lg2::error(
-            "CRITICAL: Board0RunPowerPG not available - transitioning directly to off");
-        setGPIOsForHostStateOff();
-        setPowerState(PowerState::off);
-        return;
-    }
-
-    bool runPowerPGAsserted =
-        board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity;
-
-    if (runPowerPGAsserted)
-    {
-        // Run Power is still asserted - need to wait for de-assertion
-        lg2::info(
-            "Board0RunPowerPG is currently asserted. Transitioning to waitForHPMPowerGoodDeAssert to wait for de-assertion.");
-        setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
-        setGPIOsForHostStateOff();
-        startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
-                   Event::hpmPowerGoodWatchdogTimerExpired);
-    }
-    else
-    {
-        // Run Power is already de-asserted - go directly to off
-        lg2::info(
-            "Board0RunPowerPG is already de-asserted. Transitioning directly to PowerState::off.");
-        setGPIOsForHostStateOff();
-        setPowerState(PowerState::off);
-    }
-}
-
-// board0RunPowerPGHandler Helper Function
-bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
-{
-    // Power fault detection: Check for unexpected de-assertion
-    if (powerControlEvent == Event::board0RunPowerPGDeAssert)
-    {
-        if (powerState != PowerState::waitForHPMPowerGoodDeAssert)
-        {
-            // POWER FAULT: Run Power Good de-asserted unexpectedly
-            lg2::error(
-                "POWER FAULT DETECTED: Board0RunPowerPG de-asserted unexpectedly while in power state {STATE}. "
-                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
-                "STATE", getPowerStateName());
-
-            // Transition to off, checking if we need to wait for de-assertion
-            action = PowerAction::NONE;
-            logResourceEvent(
-                "ResourceErrorsDetected",
-                {"Host0",
-                 "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.",
-                 "STATE", getPowerStateName()},
-                "xyz.openbmc_project.Logging.Entry.Level.Error");
-            transitionToOffStateWithRunPowerCheck();
-
-            return true;
-        }
-        // else: Expected de-assertion in waitForHPMPowerGoodDeAssert state
-    }
-    else if (powerControlEvent == Event::board0RunPowerPGAssert)
-    {
-        if (powerState != PowerState::waitForHPMPowerGoodAssert)
-        {
-            // Unexpected assertion (not critical, but worth logging)
-            lg2::info(
-                "Board0RunPowerPG asserted unexpectedly while in power state {STATE}. Continuing with normal event processing.",
-                "STATE", getPowerStateName());
-        }
-        // else: Expected assertion in waitForHPMPowerGoodAssert state
-    }
-
-    // Return false to indicate normal processing should continue
-    return false;
-}
 
 // =============================================================================
 // GPIO EVENT HANDLERS (Member functions)
@@ -283,6 +210,24 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent);
 }
 
+void VRPowerControl::pdbMainPowerOkHandler(bool state)
+{
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
+
+    auto configPtr = getSignal("PDBMainPowerOk");
+    if (!configPtr)
+    {
+        return;
+    }
+
+    Event powerControlEvent = (state == configPtr->polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+
+    this->sendPowerControlEvent(powerControlEvent);
+}
+
 std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 {
     // Map VR-specific PowerState values to their handler functions
@@ -328,29 +273,617 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
     }
 }
 
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+void VRPowerControl::transitionToOffStateWithRunPowerCheck()
+{
+    // Check current state of Board0RunPowerPG
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
+    {
+        lg2::error(
+            "CRITICAL: Board0RunPowerPG not available - transitioning directly to off");
+        setGPIOsForHostStateOff();
+        setPowerState(PowerState::off);
+        return;
+    }
+
+    bool runPowerPGAsserted =
+        board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity;
+
+    if (runPowerPGAsserted)
+    {
+        // Run Power is still asserted - need to wait for de-assertion
+        lg2::info(
+            "Board0RunPowerPG is currently asserted. Transitioning to waitForHPMPowerGoodDeAssert to wait for de-assertion.");
+        setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
+        setGPIOsForHostStateOff();
+        startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+                   Event::hpmPowerGoodWatchdogTimerExpired);
+    }
+    else
+    {
+        // Run Power is already de-asserted - go directly to off
+        lg2::info(
+            "Board0RunPowerPG is already de-asserted. Transitioning directly to PowerState::off.");
+        setGPIOsForHostStateOff();
+        setPowerState(PowerState::off);
+    }
+}
+
+// board0RunPowerPGHandler Helper Function
+bool VRPowerControl::checkAndHandleRunPowerFault(Event powerControlEvent)
+{
+    // Power fault detection: Check for unexpected de-assertion
+    if (powerControlEvent == Event::board0RunPowerPGDeAssert)
+    {
+        if (powerState != PowerState::waitForHPMPowerGoodDeAssert)
+        {
+            // POWER FAULT: Run Power Good de-asserted unexpectedly
+            lg2::error(
+                "POWER FAULT DETECTED: Board0RunPowerPG de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+
+            // Transition to off, checking if we need to wait for de-assertion
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "Board0 Run Power Good de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+
+            return true;
+        }
+        // else: Expected de-assertion in waitForHPMPowerGoodDeAssert state
+    }
+    else if (powerControlEvent == Event::board0RunPowerPGAssert)
+    {
+        if (powerState != PowerState::waitForHPMPowerGoodAssert)
+        {
+            // Unexpected assertion (not critical, but worth logging)
+            lg2::info(
+                "Board0RunPowerPG asserted unexpectedly while in power state {STATE}. Continuing with normal event processing.",
+                "STATE", getPowerStateName());
+        }
+        // else: Expected assertion in waitForHPMPowerGoodAssert state
+    }
+
+    // Return false to indicate normal processing should continue
+    return false;
+}
+
 void VRPowerControl::handlePowerStateOn(Event event)
 {
-    (void)event;
-    // TODO: Move NVL72-specific powerStateOn() implementation here
+    switch (event)
+    {
+        case Event::board0CpuShutdownOkAssert:
+        case Event::board1CpuShutdownOkAssert:
+            // Host-initiated shutdown: CPU has asserted SHDN_OK
+            handleHostInitiatedShutdown();
+            break;
+
+        case Event::powerOffRequest:
+        case Event::gracefulPowerOffRequest:
+            handleShutdownRequest(event);
+            break;
+
+        case Event::powerCycleRequest:
+            lg2::info(
+                "Forceful Power Cycle Request received. Initiating forceful shutdown");
+            action = PowerAction::POWER_CYCLE;
+            handleShutdownRequest(Event::powerOffRequest);
+            break;
+
+        case Event::gracefulPowerCycleRequest:
+            lg2::info(
+                "Graceful Power Cycle Request received. Initiating graceful shutdown");
+            action = PowerAction::GRACEFUL_POWER_CYCLE;
+            handleShutdownRequest(Event::gracefulPowerCycleRequest);
+            break;
+
+        case Event::gracefulResetRequest:
+            lg2::info(
+                "Graceful warm reboot requested. Initiating graceful shutdown request then warm reset sequence");
+            action = PowerAction::GRACEFUL_WARM_REBOOT;
+            handleShutdownRequest(Event::gracefulResetRequest);
+            break;
+
+        case Event::resetRequest:
+            // Safe stating PHYs: (SHDN_FORCE & SHDN_OK) then toggle Pre System
+            // Reset signals
+            action = PowerAction::FORCE_WARM_REBOOT;
+            handleShutdownRequest(Event::powerOffRequest);
+            break;
+
+        case Event::powerButtonPressed:
+            break;
+
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void VRPowerControl::handlePowerStateOff(Event event)
 {
-    (void)event;
-    // TODO: Move NVL72-specific powerStateOff() implementation here
+    switch (event)
+    {
+        case Event::powerOnRequest:
+            handlePowerOnRequest();
+            break;
+
+        case Event::powerCycleRequest:
+        case Event::gracefulPowerCycleRequest:
+            handlePowerCycleWhenOff(event);
+            break;
+
+        case Event::powerButtonPressed:
+            break;
+
+        case Event::gracefulResetRequest:
+            lg2::info(
+                "Graceful warm reboot requested while host is off; no action. "
+                "Host must be powered on and booted before issuing graceful warm reboot request.");
+            break;
+
+        case Event::resetRequest:
+            lg2::info(
+                "Reset request received while host is off; no action. Host must be powered on.");
+            break;
+
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOk(Event event)
 {
-    (void)event;
-    // TODO: Move NVL72-specific powerStateWaitForPDBMainPowerOk()
-    // implementation here
+    switch (event)
+    {
+        case Event::pdbMainPowerOkAssert:
+            transitionToHPMPowerGoodAssertState();
+            break;
+
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
+            lg2::error(
+                "PDB Main Power OK watchdog timer expired. PDB Main Power On Sequence Failed. "
+                "Host Power On sequence failed. Conducting Cleanup Sequence: Setting GPIO states "
+                "to match Host State OFF. Checking Board0RunPowerPG state and transitioning appropriately.");
+
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "PDB Main Power OK watchdog expired (power on)"},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+            break;
+
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
 }
 
 void VRPowerControl::handleWaitForPDBMainPowerOff(Event event)
 {
-    (void)event;
-    // TODO: Move powerStateWaitForPDBMainPowerOff() implementation here
+    switch (event)
+    {
+        case Event::pdbMainPowerOkDeAssert:
+            completeShutdownAndTransitionToOff(true);
+            break;
+
+        case Event::pdbMainPowerOkWatchdogTimerExpired:
+            completeShutdownAndTransitionToOff(false);
+            break;
+
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
+}
+
+// =============================================================================
+// HELPER FUNCTIONS (moved from platform, shared by all VR platforms)
+// =============================================================================
+
+void VRPowerControl::handleShutdownRequest(Event event)
+{
+    bool isForceful = (event == Event::powerOffRequest);
+    std::string shutdownType = isForceful ? "Forceful" : "Graceful";
+
+    if (!isForceful)
+    {
+        // Validate CPU Boot Done state for graceful operations
+        int bootDoneState = getCPUBootDoneState();
+
+        if (bootDoneState < 0)
+        {
+            lg2::error(
+                "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! "
+                "Host Graceful Operations cannot proceed.");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! "
+                 "Host Graceful Operations cannot proceed."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            return;
+        }
+        else if (bootDoneState == 0)
+        {
+            lg2::error(
+                "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed.");
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "CPU Boot Done is DE-ASSERTED. Host Graceful Operations cannot proceed."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            return;
+        }
+        else
+        {
+            lg2::info(
+                "CPU Boot Done is ASSERTED. Proceeding with Host Graceful Shutdown operation");
+        }
+    }
+
+    // Preserve power cycle / force warm reboot context; only set action for
+    // direct shutdown requests
+    if (action != PowerAction::POWER_CYCLE &&
+        action != PowerAction::GRACEFUL_POWER_CYCLE &&
+        action != PowerAction::FORCE_WARM_REBOOT &&
+        action != PowerAction::GRACEFUL_WARM_REBOOT)
+    {
+        action = isForceful ? PowerAction::FORCE_OFF : PowerAction::GRACE_OFF;
+    }
+
+    if (action == PowerAction::FORCE_WARM_REBOOT)
+    {
+        lg2::info(
+            "Commencing force warm reboot sequence: asserting SHDN FORCE to safe state PHYs, "
+            "then toggling Pre System Reset signals.");
+    }
+    else
+    {
+        lg2::info("Commencing {SHUTDOWN_TYPE} sequence.", "SHUTDOWN_TYPE",
+                  shutdownType);
+    }
+
+    if (isSystemPowerOff())
+    {
+        if (action == PowerAction::POWER_CYCLE)
+        {
+            lg2::info(
+                "Power already off during forceful power cycle. Setting GPIOs for host state OFF, "
+                "starting power cycle delay timer, and transitioning to PowerState::waitForPowerCycleDelay");
+            transitionToPowerCycleDelay();
+        }
+        else if (action == PowerAction::GRACEFUL_POWER_CYCLE)
+        {
+            lg2::info(
+                "Power already off during graceful power cycle. Setting GPIOs for host state OFF, "
+                "starting power cycle delay timer, and transitioning to PowerState::waitForPowerCycleDelay");
+            transitionToPowerCycleDelay();
+        }
+        else if (action == PowerAction::GRACEFUL_WARM_REBOOT)
+        {
+            lg2::info(
+                "Graceful warm reboot requested while host appears powered off. "
+                "Cannot proceed with warm reboot. Transitioning to PowerState::Off");
+            transitionToOffState();
+        }
+        else
+        {
+            lg2::info(
+                "PDB Main Power and HPM Run Power is already disabled. Setting GPIOs for host state OFF "
+                "and transitioning to PowerState::Off");
+            transitionToOffState();
+        }
+    }
+    else
+    {
+        initiateCPUShutdown(isForceful);
+    }
+}
+
+void VRPowerControl::initiateCPUShutdown(bool isForceful)
+{
+    const char* shutdownSignalName =
+        isForceful ? "Board0CpuShutdownForce" : "Board0CpuShutdownRequest";
+    const char* shutdownOkTimerName =
+        isForceful ? "ForcefulCpuShutdownOkWatchdogMs"
+                   : "GracefulCpuShutdownOkWatchdogMs";
+    const char* shutdownAction =
+        isForceful ? "Shutdown Force" : "Shutdown Request";
+
+    auto shutdownSignal = getSignal(shutdownSignalName);
+    if (!shutdownSignal)
+    {
+        return;
+    }
+
+    // When asserting force, de-assert graceful request lines so both are not
+    // active (e.g. upgrade from graceful SHDN_OK wait to forceful shutdown).
+    if (isForceful)
+    {
+        auto board0Req = getSignal("Board0CpuShutdownRequest");
+        if (board0Req)
+        {
+            setGPIOOutput(board0Req, !board0Req->polarity);
+        }
+    }
+
+    lg2::info(
+        "Asserting Board 0 CPU {SHUTDOWN_ACTION}. Starting CPU Shutdown OK Watchdog Timer. "
+        "Transitioning to PowerState::waitForCPUShutdownOk",
+        "SHUTDOWN_ACTION", shutdownAction);
+
+    setGPIOOutput(shutdownSignal, shutdownSignal->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        const char* board1SignalName =
+            isForceful ? "Board1CpuShutdownForce" : "Board1CpuShutdownRequest";
+
+        auto board1ShutdownSignal = getSignal(board1SignalName);
+        if (!board1ShutdownSignal)
+        {
+            return;
+        }
+
+        lg2::info("De-asserting Board 1 CPU {SHUTDOWN_ACTION}",
+                  "SHUTDOWN_ACTION", shutdownAction);
+
+        setGPIOOutput(board1ShutdownSignal, !board1ShutdownSignal->polarity);
+    }
+
+    startTimer(shutdownOkTimerName, cpuShutdownOkWatchdogTimer,
+               Event::cpuShutdownOkWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUShutdownOk);
+}
+
+void VRPowerControl::handlePowerCycleWhenOff(Event event)
+{
+    bool isForceful = (event == Event::powerCycleRequest);
+    const char* cycleType = isForceful ? "Forceful" : "Graceful";
+    PowerAction cycleAction = isForceful ? PowerAction::POWER_CYCLE
+                                         : PowerAction::GRACEFUL_POWER_CYCLE;
+    Event shutdownEvent =
+        isForceful ? Event::powerOffRequest : Event::gracefulPowerOffRequest;
+
+    lg2::info("{CYCLE_TYPE} Power Cycle Request received while in off state",
+              "CYCLE_TYPE", cycleType);
+
+    auto board0RunPowerPG = getSignal("Board0RunPowerPG");
+    if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
+    {
+        lg2::error(
+            "CRITICAL: Board0RunPowerPG not available - cannot power cycle");
+        return;
+    }
+
+    if (board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity)
+    {
+        lg2::info(
+            "Verified Board 0 Run Power PG is de-asserted. Initiating Host Power On sequence");
+        action = cycleAction;
+        handlePowerOnRequest();
+    }
+    else
+    {
+        lg2::warning(
+            "{CYCLE_TYPE} Power cycle requested but Board 0 Run Power PG is not de-asserted. "
+            "Initiating Host {SHUTDOWN_TYPE} Shutdown first",
+            "CYCLE_TYPE", cycleType, "SHUTDOWN_TYPE", cycleType);
+        action = cycleAction;
+        setPowerState(PowerState::on);
+        handleShutdownRequest(shutdownEvent);
+    }
+}
+
+void VRPowerControl::transitionToOffState()
+{
+    action = PowerAction::NONE;
+    setGPIOsForHostStateOff();
+    setPowerState(PowerState::off);
+}
+
+void VRPowerControl::transitionToPowerCycleDelay()
+{
+    // Keep action (POWER_CYCLE or GRACEFUL_POWER_CYCLE) - don't clear it
+    setGPIOsForHostStateOff();
+    startTimer("PowerCycleDelayMs", powerCycleDelayTimer,
+               Event::powerCycleDelayTimerExpired);
+    setPowerState(PowerState::waitForPowerCycleDelay);
+}
+
+void VRPowerControl::assertHPMBoardPowerSequence()
+{
+    auto board0PreSystemReset = getSignal("Board0PreSystemReset");
+    if (!board0PreSystemReset)
+    {
+        return;
+    }
+
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
+    auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
+    if (!board0RunPowerEnable)
+    {
+        return;
+    }
+
+    // Assert Pre System Reset for Board 0
+    setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
+        {
+            return;
+        }
+        setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
+    }
+
+    setGPIOOutput(usbPowerEnable, usbPowerEnable->polarity);
+    setGPIOOutput(board0RunPowerEnable, board0RunPowerEnable->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1RunPowerEnable = getSignal("Board1RunPowerEnable");
+        if (!board1RunPowerEnable)
+        {
+            return;
+        }
+        setGPIOOutput(board1RunPowerEnable, board1RunPowerEnable->polarity);
+    }
+}
+
+void VRPowerControl::transitionToHPMPowerGoodAssertState()
+{
+    cancelTimer("PDB Main Power OK Watchdog Timer",
+                pdbMainPowerOkWatchdogTimer);
+
+    lg2::info(
+        "PDB Main Power OK Asserted. Conducting HPM Board Power Sequencing. "
+        "Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
+
+    assertHPMBoardPowerSequence();
+    startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+               Event::hpmPowerGoodWatchdogTimerExpired);
+    setPowerState(PowerState::waitForHPMPowerGoodAssert);
+}
+
+void VRPowerControl::deassertHPMPowerAndPeripherals()
+{
+    auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
+    if (!board0RunPowerEnable)
+    {
+        return;
+    }
+
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
+    setGPIOOutput(board0RunPowerEnable, !board0RunPowerEnable->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1RunPowerEnable = getSignal("Board1RunPowerEnable");
+        if (!board1RunPowerEnable)
+        {
+            return;
+        }
+        setGPIOOutput(board1RunPowerEnable, !board1RunPowerEnable->polarity);
+    }
+
+    setGPIOOutput(usbPowerEnable, !usbPowerEnable->polarity);
+}
+
+void VRPowerControl::transitionToHPMPowerGoodDeAssertState()
+{
+    cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
+
+    lg2::info(
+        "CPU Reset Indicator Asserted. CPUs are in reset. De-asserting Run Power Enable and USB Power Enable. "
+        "Starting HPM Power Good Watchdog Timer. Transitioning to PowerState::waitForHPMPowerGoodDeAssert.");
+
+    deassertHPMPowerAndPeripherals();
+    startTimer("HPMPowerGoodWatchdogMs", hpmPowerGoodWatchdogTimer,
+               Event::hpmPowerGoodWatchdogTimerExpired);
+    setPowerState(PowerState::waitForHPMPowerGoodDeAssert);
+}
+
+void VRPowerControl::completeShutdownAndTransitionToOff(bool success)
+{
+    cancelTimer("PDB Main Power OK Watchdog Timer",
+                pdbMainPowerOkWatchdogTimer);
+
+    if (!success)
+    {
+        lg2::error(
+            "PDB Main Power OK watchdog timer expired. PDB Main Power Off Sequence Failed. "
+            "Host Power Off sequence failed. Conducting Cleanup Sequence: Setting GPIO states "
+            "to match Host State OFF. Setting Host Power State to Off.");
+        action = PowerAction::NONE;
+        logResourceEvent(
+            "ResourceErrorsDetected",
+            {"Host0", "PDB Main Power OK watchdog expired (power off)"},
+            "xyz.openbmc_project.Logging.Entry.Level.Error");
+        setPowerState(PowerState::off);
+        setGPIOsForHostStateOff();
+        return;
+    }
+
+    applyShutdownAction();
+}
+
+void VRPowerControl::applyShutdownAction()
+{
+    switch (action)
+    {
+        case PowerAction::FORCE_OFF:
+            lg2::info(
+                "Host Forceful Shutdown Sequence Completed Successfully. "
+                "Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::GRACE_OFF:
+            lg2::info(
+                "Host Graceful Shutdown Sequence Completed Successfully. "
+                "Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::HOST_INITIATED_SHUTDOWN:
+            lg2::info(
+                "Host-Initiated Shutdown Sequence Completed Successfully. "
+                "Transitioning to PowerState::off.");
+            transitionToOffState();
+            break;
+
+        case PowerAction::POWER_CYCLE:
+            lg2::info(
+                "Forceful Power Cycle Shutdown complete. "
+                "Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+            transitionToPowerCycleDelay();
+            break;
+
+        case PowerAction::GRACEFUL_POWER_CYCLE:
+            lg2::info(
+                "Graceful Power Cycle Shutdown complete. "
+                "Starting power cycle delay timer. Transitioning to PowerState::waitForPowerCycleDelay.");
+            transitionToPowerCycleDelay();
+            break;
+
+        default:
+            lg2::warning(
+                "PDB powered down with unknown action. Setting GPIO states to match Host State OFF. "
+                "Transitioning to PowerState::off.");
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "PDB powered down with unknown action"},
+                "xyz.openbmc_project.Logging.Entry.Level.Warning");
+            setPowerState(PowerState::off);
+            setGPIOsForHostStateOff();
+            break;
+    }
 }
 
 // Helper function: Initiate a force warm reboot sequence
@@ -501,16 +1034,118 @@ void VRPowerControl::handleWaitForHPMPowerGoodAssert(Event event)
     }
 }
 
+void VRPowerControl::handleHPMPowerGoodWatchdogExpiredDuringShutdown()
+{
+    lg2::error(
+        "HPM Power Good Watchdog Timer Expired. Host Forceful Shutdown sequence failed! "
+        "Conducting Cleanup Sequence: Setting GPIO states to match Host State ON. "
+        "Setting Host Power State to On.");
+
+    action = PowerAction::NONE;
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0", "HPM Power Good Watchdog expired (shutdown sequence)"},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+    setGPIOsForHostStateOn();
+    setPowerState(PowerState::on);
+}
+
 void VRPowerControl::handleWaitForHPMPowerGoodDeAssert(Event event)
 {
-    (void)event;
-    // TODO: Move powerStateWaitForHPMPowerGoodDeAssert() implementation here
+    switch (event)
+    {
+        case Event::board0RunPowerPGDeAssert:
+            initiatePDBPowerOff();
+            break;
+
+        case Event::hpmPowerGoodWatchdogTimerExpired:
+            handleHPMPowerGoodWatchdogExpiredDuringShutdown();
+            break;
+
+        default:
+            lg2::info("No action taken.");
+            break;
+    }
+}
+
+void VRPowerControl::handleCPUResetIndicatorAsserted()
+{
+    cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
+    lg2::info("CPU Reset Indicator asserted - CPUs entered reset");
+
+    if (action == PowerAction::FORCE_WARM_REBOOT ||
+        action == PowerAction::GRACEFUL_WARM_REBOOT)
+    {
+        const char* warmRebootDelayKey =
+            (action == PowerAction::GRACEFUL_WARM_REBOOT)
+                ? "GracefulWarmRebootDelayMs"
+                : "ForceWarmRebootDelayMs";
+        auto it = TimerMap.find(warmRebootDelayKey);
+        int delayMs = (it != TimerMap.end()) ? it->second : 0;
+        lg2::info("Starting warm reboot delay ({KEY}) of {DELAY}ms",
+                  "KEY", warmRebootDelayKey, "DELAY", delayMs);
+        startTimer(warmRebootDelayKey, warmRebootDelayTimer,
+                   Event::warmRebootDelayTimerExpired);
+        setPowerState(PowerState::waitForRebootDelay);
+    }
+    else
+    {
+        // Shutdown flow: de-assert HPM power and wait for PG de-assert
+        transitionToHPMPowerGoodDeAssertState();
+    }
+}
+
+void VRPowerControl::handleCPUResetWatchdogExpired()
+{
+    if (action == PowerAction::FORCE_WARM_REBOOT ||
+        action == PowerAction::GRACEFUL_WARM_REBOOT)
+    {
+        lg2::error(
+            "Warm reboot fault: CPU_RESET_L did not assert within the timeout period. "
+            "CPUs did not enter reset. Host Power State is still On. Conducting cleanup: "
+            "Setting GPIO states to match Host State On.");
+        abortWarmRebootCpuResetWatchdogFault(
+            "Warm reboot fault: CPU_RESET_L did not assert within "
+            "CpuResetWatchdogMs (CPUs did not enter reset). "
+            "PRE_SYS_RST de-asserted; run power unchanged.");
+        setGPIOsForHostStateOn();
+    }
+    else
+    {
+        lg2::error(
+            "CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence "
+            "failed {recommend checking CPLD status}");
+        logResourceEvent(
+            "ResourceErrorsDetected",
+            {"Host0", "CPU Reset Watchdog expired"},
+            "xyz.openbmc_project.Logging.Entry.Level.Error");
+        lg2::error(
+            "Conducting cleanup: Setting GPIO states to match Host State OFF. "
+            "Checking Board0RunPowerPG state and transitioning appropriately.");
+        action = PowerAction::NONE;
+        transitionToOffStateWithRunPowerCheck();
+    }
 }
 
 void VRPowerControl::handleWaitForCPUResetAssert(Event event)
 {
-    (void)event;
-    // TODO: Move powerStateWaitForCPUResetAssert() implementation here
+    logEvent(__FUNCTION__, event);
+
+    switch (event)
+    {
+        case Event::cpuResetIndicatorAssert:
+            handleCPUResetIndicatorAsserted();
+            break;
+
+        case Event::cpuResetWatchdogTimerExpired:
+            handleCPUResetWatchdogExpired();
+            break;
+
+        default:
+            lg2::info("No action taken for event: {EVENT}", "EVENT",
+                      getEventName(event));
+            break;
+    }
 }
 
 void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
@@ -887,14 +1522,27 @@ void VRPowerControl::handleCPUShutdownOkWatchdogExpiry_GraceOff()
 
 void VRPowerControl::handleForceOffDuringGracefulCpuShutdownOkWait()
 {
-    lg2::warning(
-        "Force power-off during graceful CPU Shutdown OK wait is not handled on this platform");
+    lg2::info(
+        "Forceful shutdown during graceful wait for CPU Shutdown OK; upgrading to forceful shutdown sequence");
+
+    action = PowerAction::FORCE_OFF;
+    handleShutdownRequest(Event::powerOffRequest);
 }
 
 void VRPowerControl::handleForceWarmRebootDuringGracefulCpuShutdownOkWait()
 {
-    lg2::warning(
-        "Force warm reboot during graceful warm reboot SHDN_OK wait is not handled on this platform");
+    lg2::info(
+        "Force warm reboot during graceful warm reboot wait for CPU Shutdown OK; upgrading to force warm reboot sequence");
+
+    cancelTimer("CPU Shutdown OK Watchdog Timer", cpuShutdownOkWatchdogTimer);
+
+    auto board0Req = getSignal("Board0CpuShutdownRequest");
+    if (board0Req)
+    {
+        setGPIOOutput(board0Req, !board0Req->polarity);
+    }
+
+    initiateForceWarmReboot();
 }
 
 void VRPowerControl::handleWaitForCPUShutdownOk(Event event)

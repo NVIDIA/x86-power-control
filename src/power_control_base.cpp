@@ -167,7 +167,17 @@ void PowerControl::logResourceEvent(
     additionalData["REDFISH_MESSAGE_ARGS"] = argsStr;
 
     method.append(eventName, severity, additionalData);
-    conn->call(method);
+    try
+    {
+        conn->call(method);
+    }
+    catch (const sdbusplus::exception::SdBusError& e)
+    {
+        lg2::error(
+            "Failed to create event log entry '{EVENT}' - "
+            "xyz.openbmc_project.Logging may not be available yet: {ERROR}",
+            "EVENT", eventName, "ERROR", e.what());
+    }
 }
 
 void PowerControl::logEvent(std::string_view stateHandler, Event event)
