@@ -577,6 +577,28 @@ void PowerControl::loadConfigValues()
                 throw std::runtime_error(
                     "Missing 'Polarity' for GPIO: " + gpioName);
             }
+
+            // Optional polled-mode fields. Used for GPIOs on chips that don't
+            // support edge events (e.g. CPLD GPIO expanders over I2C).
+            if (gpioConfig.contains("Polled") &&
+                gpioConfig["Polled"].is_boolean())
+            {
+                configPtr->polled = gpioConfig["Polled"].get<bool>();
+            }
+            if (gpioConfig.contains("PollIntervalMs") &&
+                gpioConfig["PollIntervalMs"].is_number_integer())
+            {
+                int interval = gpioConfig["PollIntervalMs"].get<int>();
+                if (interval <= 0)
+                {
+                    lg2::error(
+                        "PollIntervalMs must be > 0 for {GPIO_NAME} (got {VAL})",
+                        "GPIO_NAME", configPtr->lineName, "VAL", interval);
+                    throw std::runtime_error(
+                        "Invalid 'PollIntervalMs' for GPIO: " + gpioName);
+                }
+                configPtr->pollIntervalMs = std::chrono::milliseconds(interval);
+            }
         }
         else // DBUS type
         {
@@ -742,6 +764,13 @@ void PowerControl::loadConfigValues()
 
 bool PowerControl::requestGPIOEvents(ConfigData& config)
 {
+    // If this signal is configured for polled monitoring (chip without edge
+    // event support), use the polling path instead of EVENT_BOTH_EDGES.
+    if (config.polled)
+    {
+        return requestGPIOPolled(config);
+    }
+
     // Migrated from static function in power_control.cpp
 
     // Find the GPIO line
@@ -787,6 +816,112 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
 
     waitForGPIOEvent(config);
     return true;
+}
+
+int PowerControl::readGPIOValue(ConfigData& config)
+{
+    try
+    {
+        return config.gpioLine.get_value();
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to read GPIO '{SIGNAL}' ({GPIO_NAME}): {ERROR}",
+                   "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+                   e);
+        return -1;
+    }
+}
+
+bool PowerControl::requestGPIOPolled(ConfigData& config)
+{
+    config.gpioLine = gpiod::find_line(config.lineName);
+    if (!config.gpioLine)
+    {
+        lg2::error("Failed to find the {GPIO_NAME} line (polled)", "GPIO_NAME",
+                   config.lineName);
+        return false;
+    }
+
+    try
+    {
+        config.gpioLine.request(
+            {appName, gpiod::line_request::DIRECTION_INPUT, {}});
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to request polled input for {GPIO_NAME}: {ERROR}",
+                   "GPIO_NAME", config.lineName, "ERROR", e);
+        return false;
+    }
+
+    int initial = readGPIOValue(config);
+    config.lastPolledValue = initial;
+
+    // Initialize D-Bus GPIO property with current hardware value (if mapped)
+    if (initial >= 0)
+    {
+        auto setterIt = gpioPropertySetters.find(config.name);
+        if (setterIt != gpioPropertySetters.end())
+        {
+            setterIt->second(this, initial);
+            lg2::info(
+                "Initialized D-Bus property '{SIGNAL}' to {VALUE} (polled)",
+                "SIGNAL", config.name, "VALUE", initial);
+        }
+    }
+
+    config.pollTimer = std::make_unique<boost::asio::steady_timer>(ioContext);
+
+    lg2::info(
+        "Starting polled GPIO monitoring for '{SIGNAL}' ({GPIO_NAME}) every {MS}ms",
+        "SIGNAL", config.name, "GPIO_NAME", config.lineName, "MS",
+        config.pollIntervalMs.count());
+
+    schedulePollTimer(config);
+    return true;
+}
+
+void PowerControl::schedulePollTimer(ConfigData& config)
+{
+    if (!config.pollTimer)
+    {
+        return;
+    }
+    config.pollTimer->expires_after(config.pollIntervalMs);
+    config.pollTimer->async_wait(
+        std::bind_front(&PowerControl::pollGPIOTick, this, std::ref(config)));
+}
+
+void PowerControl::pollGPIOTick(ConfigData& config,
+                                const boost::system::error_code& ec)
+{
+    if (ec)
+    {
+        if (ec != boost::asio::error::operation_aborted)
+        {
+            lg2::error("Polled GPIO timer error for '{SIGNAL}': {ERROR}",
+                       "SIGNAL", config.name, "ERROR", ec.message());
+        }
+        return;
+    }
+
+    int value = readGPIOValue(config);
+    if (value >= 0 && value != config.lastPolledValue)
+    {
+        config.lastPolledValue = value;
+        if (config.gpioHandler)
+        {
+            config.gpioHandler(value != 0);
+        }
+        auto setterIt = gpioPropertySetters.find(config.name);
+        if (setterIt != gpioPropertySetters.end())
+        {
+            setterIt->second(this, value);
+        }
+    }
+
+    schedulePollTimer(config);
 }
 
 void PowerControl::waitForGPIOEvent(ConfigData& config)

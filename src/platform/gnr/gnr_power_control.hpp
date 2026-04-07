@@ -90,9 +90,15 @@ class GNRPowerControl : public PowerControl
 
     static constexpr int ap0PollIntervalMs = 100;
 
+    std::chrono::milliseconds getTimeoutWithDefault(
+        const std::string& key, std::chrono::milliseconds default_t);
+
     GNRPowerOnPhase gnrPowerOnPhase{GNRPowerOnPhase::Idle};
     boost::asio::steady_timer gnrPowerOnTimer;
     std::chrono::steady_clock::time_point gnrPowerOnStartTime{};
+    std::chrono::milliseconds g3SoftPowerButtonDelay;
+    std::chrono::milliseconds pexResetPulse;
+    std::chrono::milliseconds g3SoftAp0Timeout;
 };
 
 } // namespace power_control

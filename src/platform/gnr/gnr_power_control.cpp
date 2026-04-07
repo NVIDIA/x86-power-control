@@ -13,6 +13,17 @@ namespace power_control
 {
 using Event = PowerControl::Event;
 
+std::chrono::milliseconds GNRPowerControl::getTimeoutWithDefault(
+    const std::string& key, std::chrono::milliseconds default_t)
+{
+    auto it = TimerMap.find(key);
+    if (it != TimerMap.end())
+    {
+        return std::chrono::milliseconds(it->second);
+    }
+    return default_t;
+}
+
 GNRPowerControl::GNRPowerControl(
     boost::asio::io_context& ioContext,
     std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -21,6 +32,7 @@ GNRPowerControl::GNRPowerControl(
     PowerControl(ioContext, conn, node, appState, configFilePath),
     gnrPowerOnTimer(ioContext)
 {
+    using namespace std::chrono_literals;
     // Only require PowerOk and PowerOut; G3Soft GPIOs are optional in JSON
     addRequiredSignal("PowerOk", 0, GPIODirection::IN,
                       [this](bool state) { powerOKHandler(state); });
@@ -32,6 +44,10 @@ GNRPowerControl::GNRPowerControl(
 
     initializeHostStateInterface();
     initializePowerStateFromHardware({"PowerOk"}, true);
+    g3SoftAp0Timeout = getTimeoutWithDefault("G3SoftAp0TimeoutMs", 15s);
+    g3SoftPowerButtonDelay =
+        getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
+    pexResetPulse = getTimeoutWithDefault("PexResetPulseMs", 10ms);
 }
 
 void GNRPowerControl::validateTimerConfigs() {}
@@ -256,10 +272,9 @@ void GNRPowerControl::startGNRPowerOnSequence()
 
     gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetN;
     gnrPowerOnStartTime = std::chrono::steady_clock::now();
-    gnrPowerOnTimer.expires_after(std::chrono::milliseconds(ap0PollIntervalMs));
-    gnrPowerOnTimer.async_wait([this](const boost::system::error_code& ec) {
-        onGNRPowerOnTimer(ec);
-    });
+    gnrPowerOnTimer.expires_after(g3SoftAp0Timeout);
+    gnrPowerOnTimer.async_wait(
+        std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
 }
 
 void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
@@ -280,29 +295,22 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
         case GNRPowerOnPhase::WaitingAp0ResetN:
         {
             auto ap0ResetN = getSignal("Ap0ResetN");
-            int ap0TimeoutMs = 15000;
-            auto it = TimerMap.find("G3SoftAp0TimeoutMs");
-            if (it != TimerMap.end())
-                ap0TimeoutMs = it->second;
 
-            auto elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - gnrPowerOnStartTime)
-                    .count();
+            auto elapsed = std::chrono::steady_clock::now() -
+                           gnrPowerOnStartTime;
             int val = readGPIOInputValue(ap0ResetN);
-            if (val >= 0 && val == 1)
+            if (val == 1)
             {
                 lg2::info(
                     "GNR G3Soft: step 2 - Ap0ResetN reached HIGH after {MS}ms",
-                    "MS", elapsed);
+                    "MS",
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        elapsed)
+                        .count());
                 auto pexResetN = getSignal("PexResetN");
-                int pexPulseMs = 10;
-                it = TimerMap.find("PexResetPulseMs");
-                if (it != TimerMap.end())
-                    pexPulseMs = it->second;
                 lg2::info(
                     "GNR G3Soft: step 3 - pulsing PexResetN LOW for {MS}ms",
-                    "MS", pexPulseMs);
+                    "MS", pexResetPulse.count());
                 if (!setGPIOOutput(pexResetN, 0))
                 {
                     lg2::error("GNR G3Soft: failed to set PexResetN LOW");
@@ -310,20 +318,18 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
                     return;
                 }
                 gnrPowerOnPhase = GNRPowerOnPhase::WaitingPexResetPulse;
-                gnrPowerOnTimer.expires_after(
-                    std::chrono::milliseconds(pexPulseMs));
+                gnrPowerOnTimer.expires_after(g3SoftPowerButtonDelay);
             }
-            else if (elapsed >= ap0TimeoutMs)
+            else if (elapsed >= g3SoftAp0Timeout)
             {
                 lg2::error("GNR G3Soft: Ap0ResetN did not assert within {MS}ms",
-                           "MS", ap0TimeoutMs);
+                           "MS", g3SoftAp0Timeout.count());
                 gnrPowerOnPhase = GNRPowerOnPhase::Idle;
                 return;
             }
             else
             {
-                gnrPowerOnTimer.expires_after(
-                    std::chrono::milliseconds(ap0PollIntervalMs));
+                gnrPowerOnTimer.expires_after(g3SoftAp0Timeout);
             }
             break;
         }
@@ -336,22 +342,15 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
                 gnrPowerOnPhase = GNRPowerOnPhase::Idle;
                 return;
             }
-            int pexPulseMs = 10;
-            auto it = TimerMap.find("PexResetPulseMs");
-            if (it != TimerMap.end())
-                pexPulseMs = it->second;
-            lg2::info("GNR G3Soft: PexResetN pulsed done ({MS}ms)", "MS",
-                      pexPulseMs);
 
-            int delayMs = 10000;
-            it = TimerMap.find("G3SoftPowerButtonDelayMs");
-            if (it != TimerMap.end())
-                delayMs = it->second;
+            lg2::info("GNR G3Soft: PexResetN pulsed done ({MS}ms)", "MS",
+                      pexResetPulse.count());
+
             lg2::info(
                 "GNR powerOn(): waiting {MS}ms after PEX reset before power button",
-                "MS", delayMs);
+                "MS", g3SoftPowerButtonDelay.count());
             gnrPowerOnPhase = GNRPowerOnPhase::WaitingPowerButtonDelay;
-            gnrPowerOnTimer.expires_after(std::chrono::milliseconds(delayMs));
+            gnrPowerOnTimer.expires_after(g3SoftPowerButtonDelay);
             break;
         }
         case GNRPowerOnPhase::WaitingPowerButtonDelay:
@@ -364,9 +363,8 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
             return;
     }
 
-    gnrPowerOnTimer.async_wait([this](const boost::system::error_code& e) {
-        onGNRPowerOnTimer(e);
-    });
+    gnrPowerOnTimer.async_wait(
+        std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
 }
 
 int GNRPowerControl::readGPIOInputValue(std::shared_ptr<ConfigData> config)

@@ -4,11 +4,13 @@
 #pragma once
 
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -207,6 +209,15 @@ struct ConfigData
     std::optional<InputEventConfig>
         inputEventConfig; // Configuration for input event monitoring
 
+    // Polled GPIO monitoring (for GPIO chips that don't support edge events,
+    // e.g. CPLD GPIO expanders over I2C). When polled is true, the line is
+    // requested as DIRECTION_INPUT and a steady_timer reads the value every
+    // pollIntervalMs, dispatching gpioHandler on level transitions.
+    bool polled;
+    std::chrono::milliseconds pollIntervalMs;
+    std::unique_ptr<boost::asio::steady_timer> pollTimer;
+    int lastPolledValue; // -1 = unknown / not yet sampled
+
     // Default states for output signals in different host states
     DefaultState defaultStateHostStateOn;  // Default state when host is on
     DefaultState defaultStateHostStateOff; // Default state when host is off
@@ -214,6 +225,7 @@ struct ConfigData
     // Constructor to initialize event descriptor with io_context
     ConfigData(boost::asio::io_context& io) :
         eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false),
+        polled(false), pollIntervalMs(100), lastPolledValue(-1),
         defaultStateHostStateOn(DefaultState::NA),
         defaultStateHostStateOff(DefaultState::NA)
     {}
@@ -1398,6 +1410,27 @@ class PowerControl
      * handler
      */
     void waitForGPIOEvent(ConfigData& config);
+
+    /**
+     * @brief Request a polled GPIO input
+     *
+     * Requests the line as DIRECTION_INPUT (no IRQ/edge-event capability
+     * required) and starts a steady_timer that samples the value every
+     * pollIntervalMs, invoking gpioHandler on level transitions. Used for
+     * GPIOs on chips that don't support edge events (e.g. CPLD/I2C
+     * expanders).
+     */
+    bool requestGPIOPolled(ConfigData& config);
+
+    /** Schedule the next polling sample. */
+    void schedulePollTimer(ConfigData& config);
+
+    /** Per-tick poll body: read line, dispatch handler on transition,
+     *  update mapped D-Bus property, then reschedule. */
+    void pollGPIOTick(ConfigData& config, const boost::system::error_code& ec);
+
+    /** Read a requested input line's value. Returns -1 and logs on failure. */
+    int readGPIOValue(ConfigData& config);
 
   protected:
     /**
