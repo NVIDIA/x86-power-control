@@ -105,10 +105,12 @@ std::string PowerControl::getEventName(Event event)
             return "GB300 PDB main power OK assert";
         case Event::gb300pdbMainPowerOkDeAssert:
             return "GB300 PDB main power OK de-assert";
-        case Event::c2pdbPSUPowerOkAssert:
-            return "C2 PDB main power OK assert";
-        case Event::c2pdbPSUPowerOkDeAssert:
-            return "C2 PDB main power OK de-assert";
+        case Event::pdbPSUPowerOkAssert:
+            return "PDB PSU power OK assert";
+        case Event::pdbPSUPowerOkDeAssert:
+            return "PDB PSU power OK de-assert";
+        case Event::pdbPSUPowerOkWatchdogTimerExpired:
+            return "PDB PSU power OK watchdog timer expired";
         case Event::board0RunPowerPGAssert:
             return "Board 0 run power PG assert";
         case Event::board0RunPowerPGDeAssert:
