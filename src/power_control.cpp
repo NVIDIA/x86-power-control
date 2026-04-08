@@ -3,6 +3,7 @@
 
 #include "config.h"
 
+#include "platform/c2/c2_power_control.hpp"
 #include "platform/nvl72/nvl72_power_control.hpp"
 #include "power_control_base.hpp"
 #include "power_restore.hpp"
@@ -215,6 +216,11 @@ static std::unique_ptr<PowerControl> createPowerControl(
     {
         return std::make_unique<NVL72PowerControl>(io, conn, configPath, node,
                                                    appState);
+    }
+    else if (platformType == "c2")
+    {
+        return std::make_unique<C2PowerControl>(io, conn, configPath, node,
+                                                appState);
     }
 
     lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl72",

@@ -67,7 +67,8 @@ VRPowerControl::VRPowerControl(
                       });
     // Note: PDBMainPowerEnable is NOT registered here — each platform registers
     // its own PDB enable signal(s) in its constructor (e.g. NVL72 registers
-    // PDBMainPowerEnable; C2 has no such signal and uses PDBPSUPowerOn instead).
+    // PDBMainPowerEnable; C2 has no such signal and uses PDBPSUPowerOn
+    // instead).
 
     // call validateRequiredSignals() in the platform-specific class constructor
     // validateRequiredSignals();
@@ -106,7 +107,6 @@ bool VRPowerControl::checkIOXPresence(const std::string& ioxPath)
 {
     return std::filesystem::exists(ioxPath);
 }
-
 
 // =============================================================================
 // GPIO EVENT HANDLERS (Member functions)
@@ -837,16 +837,14 @@ void VRPowerControl::applyShutdownAction()
     switch (action)
     {
         case PowerAction::FORCE_OFF:
-            lg2::info(
-                "Host Forceful Shutdown Sequence Completed Successfully. "
-                "Transitioning to PowerState::off.");
+            lg2::info("Host Forceful Shutdown Sequence Completed Successfully. "
+                      "Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
         case PowerAction::GRACE_OFF:
-            lg2::info(
-                "Host Graceful Shutdown Sequence Completed Successfully. "
-                "Transitioning to PowerState::off.");
+            lg2::info("Host Graceful Shutdown Sequence Completed Successfully. "
+                      "Transitioning to PowerState::off.");
             transitionToOffState();
             break;
 
@@ -876,10 +874,9 @@ void VRPowerControl::applyShutdownAction()
                 "PDB powered down with unknown action. Setting GPIO states to match Host State OFF. "
                 "Transitioning to PowerState::off.");
             action = PowerAction::NONE;
-            logResourceEvent(
-                "ResourceErrorsDetected",
-                {"Host0", "PDB powered down with unknown action"},
-                "xyz.openbmc_project.Logging.Entry.Level.Warning");
+            logResourceEvent("ResourceErrorsDetected",
+                             {"Host0", "PDB powered down with unknown action"},
+                             "xyz.openbmc_project.Logging.Entry.Level.Warning");
             setPowerState(PowerState::off);
             setGPIOsForHostStateOff();
             break;
@@ -1082,8 +1079,8 @@ void VRPowerControl::handleCPUResetIndicatorAsserted()
                 : "ForceWarmRebootDelayMs";
         auto it = TimerMap.find(warmRebootDelayKey);
         int delayMs = (it != TimerMap.end()) ? it->second : 0;
-        lg2::info("Starting warm reboot delay ({KEY}) of {DELAY}ms",
-                  "KEY", warmRebootDelayKey, "DELAY", delayMs);
+        lg2::info("Starting warm reboot delay ({KEY}) of {DELAY}ms", "KEY",
+                  warmRebootDelayKey, "DELAY", delayMs);
         startTimer(warmRebootDelayKey, warmRebootDelayTimer,
                    Event::warmRebootDelayTimerExpired);
         setPowerState(PowerState::waitForRebootDelay);
@@ -1115,10 +1112,9 @@ void VRPowerControl::handleCPUResetWatchdogExpired()
         lg2::error(
             "CPU Reset Watchdog expired. CPUs are not in reset. Host Shutdown sequence "
             "failed {recommend checking CPLD status}");
-        logResourceEvent(
-            "ResourceErrorsDetected",
-            {"Host0", "CPU Reset Watchdog expired"},
-            "xyz.openbmc_project.Logging.Entry.Level.Error");
+        logResourceEvent("ResourceErrorsDetected",
+                         {"Host0", "CPU Reset Watchdog expired"},
+                         "xyz.openbmc_project.Logging.Entry.Level.Error");
         lg2::error(
             "Conducting cleanup: Setting GPIO states to match Host State OFF. "
             "Checking Board0RunPowerPG state and transitioning appropriately.");

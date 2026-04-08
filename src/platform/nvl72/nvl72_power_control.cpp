@@ -24,8 +24,9 @@ NVL72PowerControl::NVL72PowerControl(
     std::shared_ptr<sdbusplus::asio::connection> conn,
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
-    VRPowerControl(ioContext, conn, configFilePath, node,
-                   appState) // Call parent constructor (registers VR + PDB GPIOs)
+    VRPowerControl(
+        ioContext, conn, configFilePath, node,
+        appState) // Call parent constructor (registers VR + PDB GPIOs)
 {
     // VRPowerControl constructor already registers:
     //   PDBMainPowerOk (with pdbMainPowerOkHandler),
@@ -83,8 +84,7 @@ bool NVL72PowerControl::isSystemPowerOff()
     }
 
     return (
-        board0RunPowerPG->gpioLine.get_value() ==
-            !board0RunPowerPG->polarity &&
+        board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity &&
         pdbMainPowerOk->gpioLine.get_value() == !pdbMainPowerOk->polarity);
 }
 
