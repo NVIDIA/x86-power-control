@@ -274,6 +274,17 @@ class VRPowerControl : public PowerControl
     virtual void handleHostInitiatedShutdown();
 
     /**
+     * @brief Handle host-initiated reboot
+     *
+     * Called when CPU_BOOT_DONE de-asserts shortly after SHDN_OK, confirming
+     * a reboot rather than a shutdown. Pulses CurrentHostState to Off for 1
+     * second (via PowerState::off + HOST_INITIATED_REBOOT) so boot code
+     * collection services detect the reboot, while keeping CurrentPowerState
+     * On throughout.
+     */
+    virtual void handleHostInitiatedReboot();
+
+    /**
      * @brief Board presence information
      *
      * TODO: Replace with actual implementation from coworker
@@ -341,6 +352,13 @@ class VRPowerControl : public PowerControl
      * power sequencing
      */
     boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
+
+    /**
+     * @brief Timer for the 1-second HostState Off pulse during a host-initiated
+     * reboot. Keeps CurrentHostState Off briefly so boot code collection
+     * services can detect the reboot, while CurrentPowerState stays On.
+     */
+    boost::asio::steady_timer hostInitiatedRebootPulseTimer;
 
   protected:
     // GPIO EVENT HANDLERS (Member functions)
@@ -850,6 +868,16 @@ class VRPowerControl : public PowerControl
      * - Transitions to waitForCPUResetAssert state
      */
     void initiateForceWarmReboot();
+
+    /**
+     * @brief Initiate host-initiated shutdown sequence
+     *
+     * Called when the CPU Boot Done de-assert watchdog expires, confirming
+     * CPU_BOOT_DONE stayed asserted — a valid host-initiated shutdown.
+     * Asserts Pre System Reset lines, starts the CPU Reset watchdog, and
+     * transitions to waitForCPUResetAssert.
+     */
+    void initiateHostInitiatedShutdown();
 
     /**
      * @brief Check for and handle run power faults
