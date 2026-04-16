@@ -12,16 +12,17 @@ namespace power_control
  * @brief NVL72 Power Control class
  *
  * This class represents the NVL72 platform-specific power control.
- * Since VRPowerControl's default implementations already use NVL72 behavior,
- * this class typically does NOT need to override anything unless there are
- * NVL72-specific deviations from the VR defaults.
+ * VRPowerControl provides default implementations for all shared VR
+ * behaviour. NVL72 overrides only where its hardware deviates:
  *
- * Platform characteristics:
- * - Has PDB (Power Distribution Board)
- * - Uses E1S Power Enable
- * - Uses BMC SSD Reset
+ * - PDB power-on: asserts PDBMainPowerEnable, waits for PDBMainPowerOk
+ * - HPM board sequencing: additionally toggles E1SPowerEnable,
+ *   BMCSSDReset, SSDPowerDisable with NVL72-specific ordering/delays
+ * - isSystemPowerOff: checks Board0RunPowerPG AND PDBMainPowerOk
+ * - PDB power-off: inspects PDBMainPowerOk before de-asserting
+ *   PDBMainPowerEnable (NVL72-specific)
+ * - pdbMainPowerOkHandler: applies HSC alert-mask WAR on each assert
  * - Supports Board 0 and optionally Board 1
- * - After PDB powers up, asserts E1S and BMC SSD enables before HPM sequencing
  */
 class NVL72PowerControl : public VRPowerControl
 {
@@ -33,272 +34,113 @@ class NVL72PowerControl : public VRPowerControl
 
     ~NVL72PowerControl() override = default;
 
-    /**
-     * @brief Get the handler function for a given power state
-     *
-     * NVL72 does not add new states, so this delegates to VRPowerControl.
-     *
-     * @param state The power state to get a handler for
-     * @return Function that handles events in the given state
-     */
-    std::function<void(Event)> getPowerStateHandler() override;
-
   protected:
-    /**
-     * @brief Validate that all required timer configurations for NVL72
-     * platform are present in TimerMap
-     *
-     * Checks for NVL72-specific PDB timer, then calls
-     * VRPowerControl::validateTimerConfigs() to check common VR timers.
-     *
-     * @throws std::runtime_error if any required timer config is missing
-     */
-    void validateTimerConfigs() override;
+    // =========================================================================
+    // Pure-virtual overrides required by VRPowerControl
+    // =========================================================================
 
     /**
-     * @brief Add Board 1 GPIO state properties
+     * @brief Check if system power is already fully off (NVL72 override)
      *
-     * Adds Board 1 GPIO state properties to the GPIO state interface.
-     * Board 1 SHDN OK is only present if Board 1 is present.
-     *
-     * @return void
+     * Returns true only when BOTH Board0RunPowerPG AND PDBMainPowerOk are
+     * de-asserted.
      */
-    void addBoard1GpioStateProperties();
-
-    // NVL72 uses the default VR implementations (which are NVL72 behavior)
-    // Override only if NVL72 needs platform-specific variations
+    bool isSystemPowerOff() override;
 
     /**
-     * @brief Handler for PowerState::on (NVL72 Override)
-     * Override if NVL72 needs platform-specific on-state monitoring.
-     */
-    void handlePowerStateOn(Event event) override;
-
-    /**
-     * @brief Handler for PowerState::off (NVL72 Override)
-     * Override if NVL72 needs platform-specific off-state monitoring.
-     */
-    void handlePowerStateOff(Event event) override;
-
-    /**
-     * @brief Handler for PowerState::waitForPDBMainPowerOk (NVL72 Override )
+     * @brief Handle power on request from PowerState::off (NVL72 override)
      *
-     * Override if NVL72 needs platform-specific waitForPDBMainPowerOk
-     * monitoring.
+     * Asserts PDBMainPowerEnable, starts PdbMainPowerOkWatchdogMs timer,
+     * and transitions to waitForPDBMainPowerOk.
      */
-    void handleWaitForPDBMainPowerOk(Event event) override;
+    void handlePowerOnRequest() override;
 
     /**
-     * @brief Handler for PowerState::waitForPDBMainPowerOff (NVL72 Override)
+     * @brief Initiate PDB power-off after HPM boards have powered down
+     * (NVL72 override)
      *
-     * Override if NVL72 needs platform-specific waitForPDBMainPowerOff
-     * monitoring.
+     * Checks PDBMainPowerOk state; if still asserted de-asserts
+     * PDBMainPowerEnable and transitions to waitForPDBMainPowerOff,
+     * otherwise bypasses the wait state.
      */
-    void handleWaitForPDBMainPowerOff(Event event) override;
+    void initiatePDBPowerOff() override;
+
+    // =========================================================================
+    // Virtual overrides — extend or replace VR defaults
+    // =========================================================================
 
     /**
-     * @brief Handler for PowerState::waitForCPUResetAssert (NVL72 Override)
+     * @brief Handler for PDB Main Power OK GPIO events (NVL72 override)
      *
-     * Override if NVL72 needs platform-specific waitForCPUResetAssert
-     * monitoring.
+     * Applies the NVL72 HSC alert-mask WAR on each PDBMainPowerOk assert,
+     * then delegates to VRPowerControl::pdbMainPowerOkHandler().
      */
-    void handleWaitForCPUResetAssert(Event event) override;
+    void pdbMainPowerOkHandler(bool state) override;
 
     /**
-     * @brief Handler for PowerState::waitForHPMPowerGoodDeAssert (NVL72
-     * Override)
+     * @brief Assert HPM board power sequence during power-on (NVL72 override)
      *
-     * Override if NVL72 needs platform-specific waitForHPMPowerGoodDeAssert
-     * monitoring.
+     * NVL72-specific sequence: Board0/1 Pre System Reset, SSD Power Disable
+     * de-assert, BMC SSD Reset de-assert, 1 ms delay, USB + E1S Power Enable,
+     * Board0 Run Power Enable, 10 ms GPU WAR delay, Board1 Run Power Enable.
      */
-    void handleWaitForHPMPowerGoodDeAssert(Event event) override;
+    void assertHPMBoardPowerSequence() override;
+
+    /**
+     * @brief De-assert HPM power and peripherals during shutdown
+     * (NVL72 override)
+     *
+     * Calls VRPowerControl::deassertHPMPowerAndPeripherals() for the common
+     * signals (Board0/1 RunPowerEnable, USB), then additionally de-asserts
+     * E1S Power Enable.
+     */
+    void deassertHPMPowerAndPeripherals() override;
 
     /**
      * @brief Set default values for NVL72 output signals (NVL72 override)
      *
-     * Sets NVL72 specific default values for output signals, then calls
-     * VRPowerControl::setDefaultValues() to set common VR defaults.
+     * Sets NVL72-specific PDB signal defaults, then calls
+     * VRPowerControl::setDefaultValues() for common VR defaults.
      */
     void setDefaultValues() override;
 
     /**
-     * @brief Upgrade graceful CPU Shutdown OK wait to forceful shutdown
+     * @brief Validate that all required timer configurations for NVL72 are
+     * present in TimerMap (NVL72 override)
      *
-     * Reuses handleShutdownRequest(Event::powerOffRequest) so correct GPIOs and
-     * watchdog are used for forceful shutdown behavior.
+     * NVL72 has no platform-specific timers beyond what VRPowerControl
+     * validates (PdbMainPowerOkWatchdogMs is now in vrRequiredTimeoutValues).
+     * Delegates directly to VRPowerControl::validateTimerConfigs().
      */
-    void handleForceOffDuringGracefulCpuShutdownOkWait() override;
+    void validateTimerConfigs() override;
+
+  private:
+    // =========================================================================
+    // NVL72-specific helpers
+    // =========================================================================
 
     /**
-     * @brief Upgrade graceful warm reboot SHDN_OK wait to force warm reboot
+     * @brief Add Board 1 GPIO state D-Bus properties
+     *
+     * Registers the Board1CpuShutdownOk property on the GPIO state interface.
+     * Called only when boardPresence.board1Present is true.
      */
-    void handleForceWarmRebootDuringGracefulCpuShutdownOkWait() override;
+    void addBoard1GpioStateProperties();
 
     /**
-     * @brief Handle shutdown request (forceful or graceful) from PowerState::on
+     * @brief De-assert PDB Main Power Enable during shutdown
      *
-     * Determines whether to assert CPU Shutdown Force or CPU Shutdown Request
-     * based on event type, checks if power is already off, and initiates
-     * shutdown sequence.
-     */
-    void handleShutdownRequest(Event event);
-
-    /**
-     * @brief Check if system power is already off
-     *
-     * @return true if both Board0RunPowerPG and PDBMainPowerOk are
-     * de-asserted
-     */
-    bool isSystemPowerOff();
-
-    /**
-     * @brief Initiate CPU shutdown sequence
-     *
-     * @param isForceful If true, uses force shutdown GPIO and watchdog;
-     * otherwise graceful request line and graceful watchdog.
-     *
-     * Asserts the appropriate Board 0 shutdown signal (and de-asserts Board 1
-     * counterpart when present), starts the CPU Shutdown OK watchdog, and
-     * transitions to waitForCPUShutdownOk state.
-     */
-    void initiateCPUShutdown(bool isForceful);
-
-    /**
-     * @brief Handle power on request from PowerState::off
-     *
-     * Checks if power is already on, and initiates power-on sequence by
-     * asserting PDB Main Power Enable if necessary.
-     */
-    void handlePowerOnRequest();
-
-    /**
-     * @brief Handle power cycle request when in off state
-     *
-     * @param event The power cycle event (powerCycleRequest or
-     * gracefulPowerCycleRequest)
-     *
-     * Verifies power is actually off by checking Board0RunPowerPG, then
-     * initiates power on sequence. If power is not fully off, initiates
-     * appropriate shutdown (forceful or graceful) first based on event type.
-     */
-    void handlePowerCycleWhenOff(Event event);
-
-    /**
-     * @brief Assert HPM board power sequence during power-on
-     *
-     * Asserts Board 0/1 Pre System Reset, E1S/USB Power Enable, de-asserts BMC
-     * SSD Reset, and asserts Board 0/1 Run Power Enable.
-     */
-    void assertHPMBoardPowerSequence();
-
-    /**
-     * @brief Transition to HPM Power Good assert wait state
-     *
-     * Cancels PDB power watchdog, logs transition, asserts HPM board power
-     * sequence, starts HPM power good watchdog, and transitions to
-     * waitForHPMPowerGoodAssert.
-     */
-    void transitionToHPMPowerGoodAssertState();
-
-    /**
-     * @brief Complete shutdown and transition to off state
-     *
-     * Cancels PDB power watchdog, logs success/failure based on event, sets
-     * GPIOs for host state off, and transitions to PowerState::off.
-     *
-     * @param success True if shutdown completed successfully, false if watchdog
-     * expired
-     */
-    void completeShutdownAndTransitionToOff(bool success);
-
-    /**
-     * @brief Transition to off state after successful shutdown
-     *
-     * Clears action, sets GPIOs to off state, transitions to off.
-     */
-    void transitionToOffState();
-
-    /**
-     * @brief Transition to power cycle delay state
-     *
-     * Preserves action, sets GPIOs to off state, starts delay timer,
-     * transitions to waitForPowerCycleDelay.
-     */
-    void transitionToPowerCycleDelay();
-
-    /**
-     * @brief De-assert HPM power and peripheral power during shutdown
-     *
-     * De-asserts Board 0/1 Run Power Enable, E1S Power Enable, USB Power Enable
-     * and asserts BMC SSD Reset when CPUs are in reset during shutdown
-     * sequence.
-     */
-    void deassertHPMPowerAndPeripherals();
-
-    /**
-     * @brief Transition to HPM Power Good de-assert wait state
-     *
-     * Cancels CPU reset watchdog, logs transition, de-asserts HPM
-     * power/peripherals, starts HPM power good watchdog, and transitions to
-     * waitForHPMPowerGoodDeAssert.
-     */
-    void transitionToHPMPowerGoodDeAssertState();
-
-    /**
-     * @brief De-assert Pre System Resets and PDB Main Power during shutdown
-     *
-     * De-asserts Board 0/1 Pre System Reset and PDB Main Power Enable
-     * when HPM power good de-asserts during shutdown sequence.
+     * De-asserts PDBMainPowerEnable when the HPM boards have powered down.
      */
     void deassertPreSystemResetsAndPDBMainPower();
 
     /**
-     * @brief Transition to PDB Main Power Off wait state
+     * @brief Transition to PDB Main Power Off wait state (unconditional)
      *
-     * Cancels HPM power good watchdog, logs transition, de-asserts Pre System
-     * Resets and PDB main power, starts PDB power watchdog, and transitions to
-     * waitForPDBMainPowerOff.
+     * De-asserts PDBMainPowerEnable, starts PdbMainPowerOkWatchdogMs, and
+     * transitions to waitForPDBMainPowerOff without checking current ok state.
      */
     void transitionToPDBMainPowerOffState();
-
-    /**
-     * @brief Transition to PDB Main Power Off state with PDB Main Power OK
-     * check
-     *
-     * Checks current state of PDBMainPowerOk before transitioning:
-     * - If asserted: transitions to waitForPDBMainPowerOff and waits for
-     * de-assertion
-     * - If de-asserted: bypasses wait state and calls
-     * completeShutdownAndTransitionToOff directly
-     */
-    void transitionToPDBMainPowerOffStateWithCheck();
-
-  private:
-    /**
-     * @brief List of required platform-specific timer configurations
-     */
-    const std::vector<std::string> platformRequiredTimeoutValues = {
-        "PdbMainPowerOkWatchdogMs",
-    };
-
-    /**
-     * @brief Power indicator signals used to determine initial hardware power
-     * state
-     *
-     * The host is considered ON only if BOTH Board0RunPowerPG AND
-     * PDBMainPowerOk are asserted. If either is de-asserted, the host is in an
-     * OFF or bad state.
-     */
-    const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
-                                                      "PDBMainPowerOk"};
-
-    /**
-     * @brief Timer for PDB main power OK assertion/de-assertion in PDB
-     * power sequencing
-     */
-    boost::asio::steady_timer pdbMainPowerOkWatchdogTimer;
-
-    // PLATFORM GPIO HANDLERS (Member functions)
 
     /**
      * @brief Mask HSC alerts and clear faults on shared PDB interrupt line
@@ -310,14 +152,14 @@ class NVL72PowerControl : public VRPowerControl
     void maskHscAlertsAndClearFaults();
 
     /**
-     * @brief Handler for PDB Main Power OK GPIO events
+     * @brief Power indicator signals used to determine initial hardware power
+     * state
      *
-     * - If state == true: Send Event::pdbMainPowerOkAssert
-     * - If state == false: Send Event::pdbMainPowerOkDeAssert
-     *
-     * @param state The GPIO state (true = asserted, false = de-asserted)
+     * The host is considered ON only if BOTH Board0RunPowerPG AND
+     * PDBMainPowerOk are asserted.
      */
-    void pdbMainPowerOkHandler(bool state);
+    const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
+                                                      "PDBMainPowerOk"};
 };
 
 } // namespace power_control
