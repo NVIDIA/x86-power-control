@@ -55,6 +55,7 @@ enum class PowerState
     waitForCPUBootDoneDeAssert,
     waitForPowerCycleDelay,
     waitForRebootDelay,
+    waitForHostRebootShutdownOk,
 };
 
 // Configuration type enumeration
@@ -263,6 +264,7 @@ class PowerControl
         board1CpuShutdownOkDeAssert,
         cpuBootDoneAssert,
         cpuBootDoneDeAssert,
+        hostRebootShutdownOkTimerExpired,
     };
 
     /**

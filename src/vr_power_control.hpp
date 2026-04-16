@@ -285,6 +285,25 @@ class VRPowerControl : public PowerControl
     virtual void handleHostInitiatedReboot();
 
     /**
+     * @brief Initiate waiting for SHDN_OK after CPU_BOOT_DONE de-asserts first
+     *
+     * Called from handlePowerStateOn() when CPU_BOOT_DONE de-asserts before
+     * SHDN_OK is seen. Transitions to waitForHostRebootShutdownOk state and
+     * starts the HostRebootShutdownOkDelayMs watchdog timer.
+     */
+    virtual void initiateWaitForHostRebootShutdownOk();
+
+    /**
+     * @brief Log a warning when only one of two boards asserts SHDN_OK
+     *
+     * Called during waitForHostRebootShutdownOk timeout handling when exactly
+     * one board has asserted SHDN_OK on a 2P system. Reads GPIO state for both
+     * boards and emits a warning journal entry identifying which board asserted
+     * and which did not.
+     */
+    virtual void logPartialShutdownOkWarning();
+
+    /**
      * @brief Board presence information
      *
      * TODO: Replace with actual implementation from coworker
@@ -305,6 +324,7 @@ class VRPowerControl : public PowerControl
         "ForceWarmRebootDelayMs",
         "GracefulWarmRebootDelayMs",
         "CpuBootDoneDeAssertDelayMs",
+        "HostRebootShutdownOkDelayMs",
         "PowerOffSaveMs"};
 
   protected:
@@ -359,6 +379,16 @@ class VRPowerControl : public PowerControl
      * services can detect the reboot, while CurrentPowerState stays On.
      */
     boost::asio::steady_timer hostInitiatedRebootPulseTimer;
+
+    /**
+     * @brief Timer for waiting for SHDN_OK assertion after CPU_BOOT_DONE
+     * de-asserts first during a host-initiated reboot.
+     *
+     * When CPU_BOOT_DONE de-asserts before SHDN_OK asserts, we enter
+     * waitForHostRebootShutdownOk and use this timer to wait for the
+     * expected SHDN_OK GPIO assertion(s).
+     */
+    boost::asio::steady_timer hostRebootShutdownOkTimer;
 
   protected:
     // GPIO EVENT HANDLERS (Member functions)
@@ -616,6 +646,21 @@ class VRPowerControl : public PowerControl
      * @param event The event to process
      */
     virtual void handleWaitForCPUBootDoneDeAssert(Event event);
+
+    /**
+     * @brief Handle events in waitForHostRebootShutdownOk state
+     *
+     * Entered when CPU_BOOT_DONE de-asserts before SHDN_OK during a
+     * host-initiated reboot. Waits for SHDN_OK GPIO assertion(s):
+     * - All required boards assert SHDN_OK before timeout: call
+     *   handleHostInitiatedReboot() immediately
+     * - Timeout with 1 SHDN_OK (2P only): log a warning and call
+     *   handleHostInitiatedReboot()
+     * - Timeout with 0 SHDN_OK: transition back to PowerState::on
+     *
+     * @param event The event to process
+     */
+    virtual void handleWaitForHostRebootShutdownOk(Event event);
 
     /**
      * @brief Handle events in waitForPowerCycleDelay state
