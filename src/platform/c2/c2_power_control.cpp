@@ -60,23 +60,20 @@ C2PowerControl::C2PowerControl(
 void C2PowerControl::assert12VRailsAndWaitForPDBMainPowerOk()
 {
     auto pdb12vHPMAICEnable = getSignal("PDB12V_HPM-AICEnable");
-    if (!pdb12vHPMAICEnable || !pdb12vHPMAICEnable->gpioLine)
+    if (!pdb12vHPMAICEnable)
     {
-        lg2::error("CRITICAL: PDB12V_HPM-AICEnable not available");
         return;
     }
 
     auto pdb12vGPU1Enable = getSignal("PDB12V_GPU1Enable");
-    if (!pdb12vGPU1Enable || !pdb12vGPU1Enable->gpioLine)
+    if (!pdb12vGPU1Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU1Enable not available");
         return;
     }
 
     auto pdb12vGPU2Enable = getSignal("PDB12V_GPU2_Enable");
-    if (!pdb12vGPU2Enable || !pdb12vGPU2Enable->gpioLine)
+    if (!pdb12vGPU2Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU2_Enable not available");
         return;
     }
 
@@ -318,23 +315,20 @@ void C2PowerControl::initiatePDBPowerOff()
     }
 
     auto pdb12vHPMAICEnable = getSignal("PDB12V_HPM-AICEnable");
-    if (!pdb12vHPMAICEnable || !pdb12vHPMAICEnable->gpioLine)
+    if (!pdb12vHPMAICEnable)
     {
-        lg2::error("CRITICAL: PDB12V_HPM-AICEnable not available");
         return;
     }
 
     auto pdb12vGPU1Enable = getSignal("PDB12V_GPU1Enable");
-    if (!pdb12vGPU1Enable || !pdb12vGPU1Enable->gpioLine)
+    if (!pdb12vGPU1Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU1Enable not available");
         return;
     }
 
     auto pdb12vGPU2Enable = getSignal("PDB12V_GPU2_Enable");
-    if (!pdb12vGPU2Enable || !pdb12vGPU2Enable->gpioLine)
+    if (!pdb12vGPU2Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU2_Enable not available");
         return;
     }
 
@@ -427,30 +421,26 @@ void C2PowerControl::setDefaultValues()
         "Defining C2 platform GPIOs asserted and de-asserted states based on host state ON and OFF");
 
     auto pdbPSUPowerOn = getSignal("PDBPSUPowerOn");
-    if (!pdbPSUPowerOn || !pdbPSUPowerOn->gpioLine)
+    if (!pdbPSUPowerOn)
     {
-        lg2::error("CRITICAL: PDBPSUPowerOn not available");
         return;
     }
 
     auto pdb12vHPMAICEnable = getSignal("PDB12V_HPM-AICEnable");
-    if (!pdb12vHPMAICEnable || !pdb12vHPMAICEnable->gpioLine)
+    if (!pdb12vHPMAICEnable)
     {
-        lg2::error("CRITICAL: PDB12V_HPM-AICEnable not available");
         return;
     }
 
     auto pdb12vGPU1Enable = getSignal("PDB12V_GPU1Enable");
-    if (!pdb12vGPU1Enable || !pdb12vGPU1Enable->gpioLine)
+    if (!pdb12vGPU1Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU1Enable not available");
         return;
     }
 
     auto pdb12vGPU2Enable = getSignal("PDB12V_GPU2_Enable");
-    if (!pdb12vGPU2Enable || !pdb12vGPU2Enable->gpioLine)
+    if (!pdb12vGPU2Enable)
     {
-        lg2::error("CRITICAL: PDB12V_GPU2_Enable not available");
         return;
     }
 
