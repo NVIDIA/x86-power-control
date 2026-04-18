@@ -23,8 +23,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <vector>
 #include <limits>
+#include <vector>
 
 namespace power_control
 {

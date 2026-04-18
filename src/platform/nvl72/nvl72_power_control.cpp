@@ -9,10 +9,10 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
+#include <format>
 #include <string>
 #include <thread>
 #include <vector>
-#include <format>
 
 namespace power_control
 {
@@ -439,9 +439,9 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
     }
 
     const std::string mfrIdHex = std::format(
-        "0x{:02x} 0x{:02x} 0x{:02x} 0x{:02x}",
-        static_cast<unsigned>(mfrId[0]), static_cast<unsigned>(mfrId[1]),
-        static_cast<unsigned>(mfrId[2]), static_cast<unsigned>(mfrId[3]));
+        "0x{:02x} 0x{:02x} 0x{:02x} 0x{:02x}", static_cast<unsigned>(mfrId[0]),
+        static_cast<unsigned>(mfrId[1]), static_cast<unsigned>(mfrId[2]),
+        static_cast<unsigned>(mfrId[3]));
 
     if (hscVendor == HscVendor::unknown)
     {
@@ -455,8 +455,8 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
 
     lg2::info(
         "HSC WAR: selected {VENDOR} PDB HSC vendor from MFR_ID {MFR_ID} on bus {BUS}, addr {ADDR}",
-        "VENDOR", vendorToString(hscVendor), "MFR_ID", mfrIdHex, "BUS",
-        hscBus, "ADDR", static_cast<int>(hscDetectAddr));
+        "VENDOR", vendorToString(hscVendor), "MFR_ID", mfrIdHex, "BUS", hscBus,
+        "ADDR", static_cast<int>(hscDetectAddr));
 
     if (hscVendor == HscVendor::ti || hscVendor == HscVendor::mps)
     {
@@ -471,24 +471,24 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
         {
             if (PowerControl::i2cWrite(file, addr, maskCmd) < 0)
             {
-                lg2::error("HSC mask alert failed: bus {BUS}, addr {ADDR}", "BUS",
-                           hscBus, "ADDR", static_cast<int>(addr));
+                lg2::error("HSC mask alert failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
             }
             else
             {
-                lg2::info("HSC mask alert success: bus {BUS}, addr {ADDR}", "BUS",
-                          hscBus, "ADDR", static_cast<int>(addr));
+                lg2::info("HSC mask alert success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
             }
 
             if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
             {
-                lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}", "BUS",
-                           hscBus, "ADDR", static_cast<int>(addr));
+                lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
             }
             else
             {
-                lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}", "BUS",
-                          hscBus, "ADDR", static_cast<int>(addr));
+                lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
             }
         }
 
@@ -503,8 +503,10 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
         constexpr uint8_t ifxMaskFaultsRegister = 0xDF;
         constexpr uint8_t ifxGpoCfgRegister = 0xDB;
         constexpr uint8_t ifxSmbAlertDisableMask = 0xCF;
-        const std::vector<uint8_t> maskWarnsCmd = {ifxMaskWarnsRegister, 0x00, 0x00};
-        const std::vector<uint8_t> maskFaultsCmd = {ifxMaskFaultsRegister, 0x00, 0x00};
+        const std::vector<uint8_t> maskWarnsCmd = {ifxMaskWarnsRegister, 0x00,
+                                                   0x00};
+        const std::vector<uint8_t> maskFaultsCmd = {ifxMaskFaultsRegister, 0x00,
+                                                    0x00};
 
         lg2::info(
             "HSC WAR: starting IFX PDB HSC fault mask and clear sequence on bus {BUS}",
@@ -535,7 +537,8 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
             }
 
             std::vector<uint8_t> gpoCfg(2);
-            if (PowerControl::i2cRead(file, addr, ifxGpoCfgRegister, gpoCfg) < 0)
+            if (PowerControl::i2cRead(file, addr, ifxGpoCfgRegister, gpoCfg) <
+                0)
             {
                 lg2::error("HSC GPO_CFG read failed: bus {BUS}, addr {ADDR}",
                            "BUS", hscBus, "ADDR", static_cast<int>(addr));
@@ -543,8 +546,7 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
             else
             {
                 const std::vector<uint8_t> gpoCfgWrite = {
-                    ifxGpoCfgRegister,
-                    gpoCfg[0],
+                    ifxGpoCfgRegister, gpoCfg[0],
                     static_cast<uint8_t>(gpoCfg[1] & ifxSmbAlertDisableMask)};
                 if (PowerControl::i2cWrite(file, addr, gpoCfgWrite) < 0)
                 {
@@ -557,8 +559,8 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
                     lg2::info(
                         "HSC GPO_CFG SMBALERT disable success: bus {BUS}, addr {ADDR}, orig_hi {ORIG_HI}, new_hi {NEW_HI}",
                         "BUS", hscBus, "ADDR", static_cast<int>(addr),
-                        "ORIG_HI", static_cast<int>(gpoCfg[1]),
-                        "NEW_HI", static_cast<int>(gpoCfgWrite[2]));
+                        "ORIG_HI", static_cast<int>(gpoCfg[1]), "NEW_HI",
+                        static_cast<int>(gpoCfgWrite[2]));
                 }
             }
 
@@ -572,7 +574,6 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
                 lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}",
                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
             }
-
         }
 
         lg2::info(
