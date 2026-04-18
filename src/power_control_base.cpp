@@ -24,6 +24,7 @@
 #include <format>
 #include <fstream>
 #include <vector>
+#include <limits>
 
 namespace power_control
 {
@@ -202,10 +203,28 @@ int PowerControl::i2cWrite(int file, uint16_t address,
 int PowerControl::i2cRead(int file, uint16_t address, uint8_t reg,
                           std::vector<uint8_t>& data)
 {
+    constexpr size_t maxI2cTransferSize =
+        static_cast<size_t>(std::numeric_limits<__u16>::max());
+
+    if (file < 0)
+    {
+        lg2::error("i2cRead: invalid file descriptor {FD}", "FD", file);
+        return -1;
+    }
+
     if (data.empty())
     {
         return -1;
     }
+
+    if (data.size() > maxI2cTransferSize)
+    {
+        lg2::error(
+            "i2cRead: payload size {SIZE} exceeds I2C message limit {LIMIT}",
+            "SIZE", data.size(), "LIMIT", maxI2cTransferSize);
+        return -1;
+    }
+
     uint8_t registerAddress = reg;
     struct i2c_msg msgs[2]{};
     struct i2c_rdwr_ioctl_data rdwr{};
