@@ -226,6 +226,7 @@ int PowerControl::i2cRead(int file, uint16_t address, uint8_t reg,
 
     if (data.empty())
     {
+        lg2::error("i2cRead: read buffer is empty");
         return -1;
     }
 
@@ -255,7 +256,28 @@ int PowerControl::i2cRead(int file, uint16_t address, uint8_t reg,
     rdwr.nmsgs = 2;
 
     int ret = ioctl(file, I2C_RDWR, &rdwr);
-    return (ret == 2) ? 0 : -1;
+
+    // I2C_RDWR returns the number of messages completed. This helper expects
+    // both the register-address write and the data read to succeed.
+    if (ret != 2)
+    {
+        if (ret < 0)
+        {
+            lg2::error(
+                "i2cRead: I2C_RDWR failed for addr {ADDR}, reg {REG}: errno {ERRNO} ({ERROR})",
+                "ADDR", static_cast<int>(address), "REG", static_cast<int>(reg),
+                "ERRNO", errno, "ERROR", strerror(errno));
+        }
+        else
+        {
+            lg2::error(
+                "i2cRead: I2C_RDWR completed {COUNT} of {EXPECTED} messages for addr {ADDR}, reg {REG}",
+                "COUNT", ret, "EXPECTED", 2, "ADDR", static_cast<int>(address),
+                "REG", static_cast<int>(reg));
+        }
+        return -1;
+    }
+    return 0;
 }
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
