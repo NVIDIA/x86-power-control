@@ -211,6 +211,34 @@ int PowerControl::i2cWrite(int file, uint16_t address,
     return (ret == 1) ? 0 : -1;
 }
 
+int PowerControl::i2cRead(int file, uint16_t address, uint8_t reg,
+                          std::vector<uint8_t>& data)
+{
+    if (data.empty())
+    {
+        return -1;
+    }
+    uint8_t registerAddress = reg;
+    struct i2c_msg msgs[2]{};
+    struct i2c_rdwr_ioctl_data rdwr{};
+
+    msgs[0].addr = address;
+    msgs[0].flags = 0;
+    msgs[0].len = 1;
+
+    msgs[0].buf = &registerAddress;
+    msgs[1].addr = address;
+    msgs[1].flags = I2C_M_RD;
+    msgs[1].len = static_cast<__u16>(data.size());
+    msgs[1].buf = data.data();
+
+    rdwr.msgs = msgs;
+    rdwr.nmsgs = 2;
+
+    int ret = ioctl(file, I2C_RDWR, &rdwr);
+    return (ret == 2) ? 0 : -1;
+}
+
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& node, PersistentState& appState,
