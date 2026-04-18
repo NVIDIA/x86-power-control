@@ -9,10 +9,10 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
+#include <format>
 #include <string>
 #include <thread>
 #include <vector>
-#include <format>
 
 namespace power_control
 {
@@ -227,9 +227,9 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
         constexpr uint8_t ifxGpoCfgRegister = 0xDB;
         constexpr uint8_t ifxSmbAlertDisableMask = 0xCF;
         const std::vector<uint8_t> maskWarnsCmd = {ifxMaskWarnsRegister, 0x00,
-                                                     0x00};
-        const std::vector<uint8_t> maskFaultsCmd = {
-            ifxMaskFaultsRegister, 0x00, 0x00};
+                                                   0x00};
+        const std::vector<uint8_t> maskFaultsCmd = {ifxMaskFaultsRegister, 0x00,
+                                                    0x00};
 
         lg2::info(
             "HSC WAR: starting IFX PDB HSC fault mask and clear sequence on bus {BUS}",
