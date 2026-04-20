@@ -320,6 +320,21 @@ class PowerControl
                         const std::vector<uint8_t>& data);
 
     /**
+     * @brief Read bytes from an I2C slave register using the I2C_RDWR ioctl
+     *
+     * Issues a combined write/read transaction: first writes the register byte,
+     * then reads back `data.size()` bytes from the same slave.
+     *
+     * @param file Open I2C adapter device (e.g. /dev/i2c-N) file descriptor
+     * @param address 7-bit I2C slave address
+     * @param reg Register byte to read from
+     * @param data Buffer to fill with the read payload
+     * @return 0 on success, -1 on failure
+     */
+    static int i2cRead(int file, uint16_t address, uint8_t reg,
+                       std::vector<uint8_t>& data);
+
+    /**
      * @brief Request all D-Bus bus names for this service
      *
      * This should be called after all initialization is complete,

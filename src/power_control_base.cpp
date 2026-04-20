@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <vector>
 
 namespace power_control
@@ -209,6 +210,74 @@ int PowerControl::i2cWrite(int file, uint16_t address,
 
     int ret = ioctl(file, I2C_RDWR, &rdwr);
     return (ret == 1) ? 0 : -1;
+}
+
+int PowerControl::i2cRead(int file, uint16_t address, uint8_t reg,
+                          std::vector<uint8_t>& data)
+{
+    constexpr size_t maxI2cTransferSize =
+        static_cast<size_t>(std::numeric_limits<__u16>::max());
+
+    if (file < 0)
+    {
+        lg2::error("i2cRead: invalid file descriptor {FD}", "FD", file);
+        return -1;
+    }
+
+    if (data.empty())
+    {
+        lg2::error("i2cRead: read buffer is empty");
+        return -1;
+    }
+
+    if (data.size() > maxI2cTransferSize)
+    {
+        lg2::error(
+            "i2cRead: payload size {SIZE} exceeds I2C message limit {LIMIT}",
+            "SIZE", data.size(), "LIMIT", maxI2cTransferSize);
+        return -1;
+    }
+
+    uint8_t registerAddress = reg;
+    struct i2c_msg msgs[2]{};
+    struct i2c_rdwr_ioctl_data rdwr{};
+
+    msgs[0].addr = address;
+    msgs[0].flags = 0;
+    msgs[0].len = 1;
+
+    msgs[0].buf = &registerAddress;
+    msgs[1].addr = address;
+    msgs[1].flags = I2C_M_RD;
+    msgs[1].len = static_cast<__u16>(data.size());
+    msgs[1].buf = data.data();
+
+    rdwr.msgs = msgs;
+    rdwr.nmsgs = 2;
+
+    int ret = ioctl(file, I2C_RDWR, &rdwr);
+
+    // I2C_RDWR returns the number of messages completed. This helper expects
+    // both the register-address write and the data read to succeed.
+    if (ret != 2)
+    {
+        if (ret < 0)
+        {
+            lg2::error(
+                "i2cRead: I2C_RDWR failed for addr {ADDR}, reg {REG}: errno {ERRNO} ({ERROR})",
+                "ADDR", static_cast<int>(address), "REG", static_cast<int>(reg),
+                "ERRNO", errno, "ERROR", strerror(errno));
+        }
+        else
+        {
+            lg2::error(
+                "i2cRead: I2C_RDWR completed {COUNT} of {EXPECTED} messages for addr {ADDR}, reg {REG}",
+                "COUNT", ret, "EXPECTED", 2, "ADDR", static_cast<int>(address),
+                "REG", static_cast<int>(reg));
+        }
+        return -1;
+    }
+    return 0;
 }
 
 PowerControl::PowerControl(boost::asio::io_context& ioContext,
