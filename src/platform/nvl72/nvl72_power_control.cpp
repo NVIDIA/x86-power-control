@@ -9,6 +9,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
+#include <format>
 #include <string>
 #include <thread>
 #include <vector>
@@ -378,7 +379,31 @@ void NVL72PowerControl::addBoard1GpioStateProperties()
 void NVL72PowerControl::maskHscAlertsAndClearFaults()
 {
     constexpr int hscBus = 9;
-    static const std::vector<uint16_t> hscAddrs = {0x10, 0x12, 0x14, 0x16};
+    constexpr uint16_t hscDetectAddr = 0x10;
+    constexpr uint8_t hscMfrIdRegister = 0x99;
+    const std::vector<uint8_t> clearCmd = {0x03};
+    enum class HscVendor
+    {
+        unknown,
+        ti,
+        mps,
+        ifx,
+    };
+    HscVendor hscVendor = HscVendor::unknown;
+
+    auto vendorToString = [](HscVendor vendor) -> const char* {
+        switch (vendor)
+        {
+            case HscVendor::ti:
+                return "TI";
+            case HscVendor::mps:
+                return "MPS";
+            case HscVendor::ifx:
+                return "IFX";
+            default:
+                return "unknown";
+        }
+    };
 
     const std::string i2cPath = "/dev/i2c-" + std::to_string(hscBus);
     int file = open(i2cPath.c_str(), O_RDWR | O_CLOEXEC);
@@ -388,32 +413,172 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
         return;
     }
 
-    const std::vector<uint8_t> maskCmd = {0xD8, 0xFF, 0xFF};
-    const std::vector<uint8_t> clearCmd = {0x03};
-
-    for (uint16_t addr : hscAddrs)
+    std::vector<uint8_t> mfrId(4);
+    if (PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister, mfrId) < 0)
     {
-        if (PowerControl::i2cWrite(file, addr, maskCmd) < 0)
+        lg2::error("HSC WAR: failed to read MFR_ID: bus {BUS}, addr {ADDR}",
+                   "BUS", hscBus, "ADDR", static_cast<int>(hscDetectAddr));
+        close(file);
+        return;
+    }
+
+    if (mfrId[0] == 0x03 && mfrId[1] == 0x54 && mfrId[2] == 0x49 &&
+        mfrId[3] == 0x00)
+    {
+        hscVendor = HscVendor::ti;
+    }
+    else if (mfrId[0] == 0x03 && mfrId[1] == 0x53 && mfrId[2] == 0x50 &&
+             mfrId[3] == 0x4d)
+    {
+        hscVendor = HscVendor::mps;
+    }
+    else if (mfrId[0] == 0x03 && mfrId[1] == 0x49 && mfrId[2] == 0x46 &&
+             mfrId[3] == 0x00)
+    {
+        hscVendor = HscVendor::ifx;
+    }
+
+    const std::string mfrIdHex = std::format(
+        "0x{:02x} 0x{:02x} 0x{:02x} 0x{:02x}", static_cast<unsigned>(mfrId[0]),
+        static_cast<unsigned>(mfrId[1]), static_cast<unsigned>(mfrId[2]),
+        static_cast<unsigned>(mfrId[3]));
+
+    if (hscVendor == HscVendor::unknown)
+    {
+        lg2::error(
+            "HSC WAR: unknown PDB HSC vendor from MFR_ID {MFR_ID} on bus {BUS}, addr {ADDR}; skipping vendor-specific mask/clear",
+            "MFR_ID", mfrIdHex, "BUS", hscBus, "ADDR",
+            static_cast<int>(hscDetectAddr));
+        close(file);
+        return;
+    }
+
+    lg2::info(
+        "HSC WAR: selected {VENDOR} PDB HSC vendor from MFR_ID {MFR_ID} on bus {BUS}, addr {ADDR}",
+        "VENDOR", vendorToString(hscVendor), "MFR_ID", mfrIdHex, "BUS", hscBus,
+        "ADDR", static_cast<int>(hscDetectAddr));
+
+    if (hscVendor == HscVendor::ti || hscVendor == HscVendor::mps)
+    {
+        static const std::vector<uint16_t> hscAddrs = {0x10, 0x12, 0x14, 0x16};
+        const std::vector<uint8_t> maskCmd = {0xD8, 0xFF, 0xFF};
+
+        lg2::info(
+            "HSC WAR: starting {VENDOR} PDB HSC fault mask and clear sequence on bus {BUS}",
+            "VENDOR", vendorToString(hscVendor), "BUS", hscBus);
+
+        for (uint16_t addr : hscAddrs)
         {
-            lg2::error("HSC mask alert failed: bus {BUS}, addr {ADDR}", "BUS",
-                       hscBus, "ADDR", static_cast<int>(addr));
-        }
-        else
-        {
-            lg2::info("HSC mask alert success: bus {BUS}, addr {ADDR}", "BUS",
-                      hscBus, "ADDR", static_cast<int>(addr));
+            if (PowerControl::i2cWrite(file, addr, maskCmd) < 0)
+            {
+                lg2::error("HSC mask alert failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                lg2::info("HSC mask alert success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+
+            if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
+            {
+                lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
         }
 
-        if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
+        lg2::info(
+            "HSC WAR: completed {VENDOR} PDB HSC fault mask and clear sequence on bus {BUS}",
+            "VENDOR", vendorToString(hscVendor), "BUS", hscBus);
+    }
+    else if (hscVendor == HscVendor::ifx)
+    {
+        static const std::vector<uint16_t> hscAddrs = {0x10, 0x1c, 0x1d, 0x1e};
+        constexpr uint8_t ifxMaskWarnsRegister = 0xE2;
+        constexpr uint8_t ifxMaskFaultsRegister = 0xDF;
+        constexpr uint8_t ifxGpoCfgRegister = 0xDB;
+        constexpr uint8_t ifxSmbAlertDisableMask = 0xCF;
+        const std::vector<uint8_t> maskWarnsCmd = {ifxMaskWarnsRegister, 0x00,
+                                                   0x00};
+        const std::vector<uint8_t> maskFaultsCmd = {ifxMaskFaultsRegister, 0x00,
+                                                    0x00};
+
+        lg2::info(
+            "HSC WAR: starting IFX PDB HSC fault mask and clear sequence on bus {BUS}",
+            "BUS", hscBus);
+
+        for (uint16_t addr : hscAddrs)
         {
-            lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}", "BUS",
-                       hscBus, "ADDR", static_cast<int>(addr));
+            if (PowerControl::i2cWrite(file, addr, maskWarnsCmd) < 0)
+            {
+                lg2::error("HSC MASK_WARNS failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                lg2::info("HSC MASK_WARNS success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+
+            if (PowerControl::i2cWrite(file, addr, maskFaultsCmd) < 0)
+            {
+                lg2::error("HSC MASK_FAULTS failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                lg2::info("HSC MASK_FAULTS success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+
+            std::vector<uint8_t> gpoCfg(2);
+            if (PowerControl::i2cRead(file, addr, ifxGpoCfgRegister, gpoCfg) <
+                0)
+            {
+                lg2::error("HSC GPO_CFG read failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                const std::vector<uint8_t> gpoCfgWrite = {
+                    ifxGpoCfgRegister, gpoCfg[0],
+                    static_cast<uint8_t>(gpoCfg[1] & ifxSmbAlertDisableMask)};
+                if (PowerControl::i2cWrite(file, addr, gpoCfgWrite) < 0)
+                {
+                    lg2::error(
+                        "HSC GPO_CFG SMBALERT disable failed: bus {BUS}, addr {ADDR}",
+                        "BUS", hscBus, "ADDR", static_cast<int>(addr));
+                }
+                else
+                {
+                    lg2::info(
+                        "HSC GPO_CFG SMBALERT disable success: bus {BUS}, addr {ADDR}, orig_hi {ORIG_HI}, new_hi {NEW_HI}",
+                        "BUS", hscBus, "ADDR", static_cast<int>(addr),
+                        "ORIG_HI", static_cast<int>(gpoCfg[1]), "NEW_HI",
+                        static_cast<int>(gpoCfgWrite[2]));
+                }
+            }
+
+            if (PowerControl::i2cWrite(file, addr, clearCmd) < 0)
+            {
+                lg2::error("HSC clear fault failed: bus {BUS}, addr {ADDR}",
+                           "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
+            else
+            {
+                lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}",
+                          "BUS", hscBus, "ADDR", static_cast<int>(addr));
+            }
         }
-        else
-        {
-            lg2::info("HSC clear fault success: bus {BUS}, addr {ADDR}", "BUS",
-                      hscBus, "ADDR", static_cast<int>(addr));
-        }
+
+        lg2::info(
+            "HSC WAR: completed IFX PDB HSC fault mask and clear sequence on bus {BUS}",
+            "BUS", hscBus);
     }
 
     close(file);
