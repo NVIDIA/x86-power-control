@@ -136,6 +136,8 @@ std::string PowerControl::getEventName(Event event)
             return "CPU Boot Done assert";
         case Event::cpuBootDoneDeAssert:
             return "CPU Boot Done de-assert";
+        case Event::hostRebootShutdownOkTimerExpired:
+            return "host reboot shutdown OK timer expired";
         default:
             return "unknown event: " + std::to_string(static_cast<int>(event));
     }

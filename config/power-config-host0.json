@@ -114,6 +114,7 @@
         "GracefulCpuShutdownOkWatchdogMs": 120000,
         "CpuResetWatchdogMs": 2000,
         "CpuBootDoneDeAssertDelayMs": 2000,
+        "HostRebootShutdownOkDelayMs": 5000,
         "HPMPowerGoodWatchdogMs": 10000,
         "PdbMainPowerOkWatchdogMs": 1000,
         "PowerCycleDelayMs": 15000,

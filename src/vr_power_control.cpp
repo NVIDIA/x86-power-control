@@ -25,7 +25,9 @@ VRPowerControl::VRPowerControl(
     cpuShutdownOkWatchdogTimer(ioContext),
     cpuBootDoneDeAssertWatchdogTimer(ioContext),
     powerCycleDelayTimer(ioContext), warmRebootDelayTimer(ioContext),
-    pdbMainPowerOkWatchdogTimer(ioContext)
+    pdbMainPowerOkWatchdogTimer(ioContext),
+    hostInitiatedRebootPulseTimer(ioContext),
+    hostRebootShutdownOkTimer(ioContext)
 {
     // powerSignalMap is now populated by PowerControl::loadConfigValues()
     // Assign handlers and register events for common VR/HPM signals
@@ -267,6 +269,10 @@ std::function<void(Event)> VRPowerControl::getPowerStateHandler()
         case PowerState::waitForRebootDelay:
             return [this](Event e) { this->handleWaitForRebootDelay(e); };
 
+        case PowerState::waitForHostRebootShutdownOk:
+            return
+                [this](Event e) { this->handleWaitForHostRebootShutdownOk(e); };
+
         // Delegate upstream states to base class
         default:
             return PowerControl::getPowerStateHandler();
@@ -361,6 +367,13 @@ void VRPowerControl::handlePowerStateOn(Event event)
 {
     switch (event)
     {
+        case Event::cpuBootDoneDeAssert:
+            // CPU_BOOT_DONE de-asserted before SHDN_OK: possible host-initiated
+            // reboot. Transition first so a close-timed SHDN_OK is handled by
+            // the new state.
+            initiateWaitForHostRebootShutdownOk();
+            break;
+
         case Event::board0CpuShutdownOkAssert:
         case Event::board1CpuShutdownOkAssert:
             // Host-initiated shutdown: CPU has asserted SHDN_OK
@@ -1649,34 +1662,164 @@ void VRPowerControl::handleWaitForCPUShutdownOk(Event event)
 // handleWaitForCPUBootDoneDeAssert state handler
 // ============================================================================
 
+void VRPowerControl::handleHostInitiatedReboot()
+{
+    lg2::info(
+        "Host Initiated Reboot detected. Pulsing HostState to Off for 1 second while keeping ChassisState On.");
+
+    // Set action before transitioning so getChassisState() returns On
+    // even while powerState is off (see VRPowerControl::getChassisState)
+    action = PowerAction::HOST_INITIATED_REBOOT;
+    setPowerState(PowerState::off);
+
+    // After 1 second, restore power state to on
+    hostInitiatedRebootPulseTimer.expires_after(std::chrono::seconds(1));
+    hostInitiatedRebootPulseTimer.async_wait([this](
+                                                 const boost::system::error_code
+                                                     ec) {
+        if (ec)
+        {
+            if (ec != boost::asio::error::operation_aborted)
+            {
+                lg2::error(
+                    "Host initiated reboot pulse timer failed: {ERROR_MSG}",
+                    "ERROR_MSG", ec.message());
+                logResourceEvent(
+                    "ResourceErrorsDetected",
+                    {"Host0", "Host initiated reboot pulse timer failed"},
+                    "xyz.openbmc_project.Logging.Entry.Level.Warning");
+            }
+            return;
+        }
+        lg2::info(
+            "Host initiated reboot pulse complete. Returning to PowerState::on.");
+        action = PowerAction::NONE;
+        setPowerState(PowerState::on);
+    });
+}
+
+void VRPowerControl::initiateHostInitiatedShutdown()
+{
+    lg2::info(
+        "CPU Boot Done remained asserted during observation period. Valid host-initiated shutdown confirmed. Asserting Pre System Reset lines. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
+
+    action = PowerAction::HOST_INITIATED_SHUTDOWN;
+    assertBoardPreSystemResets();
+    startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
+               Event::cpuResetWatchdogTimerExpired);
+    setPowerState(PowerState::waitForCPUResetAssert);
+}
+
 void VRPowerControl::handleWaitForCPUBootDoneDeAssert(Event event)
 {
     switch (event)
     {
         case Event::cpuBootDoneDeAssert:
-            // CPU_BOOT_DONE de-asserted after SHDN_OK - this is a reboot!
             cancelTimer("CPU Boot Done De-Assert Watchdog Timer",
                         cpuBootDoneDeAssertWatchdogTimer);
-
             lg2::info(
-                "CPU Boot Done de-asserted after SHDN_OK assertion. Host Initiated Reboot operation detected. Ignoring SHDN_OK and returning to PowerState::on.");
-
-            action = PowerAction::NONE;
-            setPowerState(PowerState::on);
+                "CPU Boot Done de-asserted after SHDN_OK. Confirmed host-initiated reboot. Initiating host-initiated reboot.");
+            handleHostInitiatedReboot();
             break;
 
         case Event::cpuBootDoneDeAssertWatchdogTimerExpired:
             // Timer expired, CPU_BOOT_DONE stayed asserted - valid shutdown!
-            lg2::info(
-                "CPU Boot Done remained asserted during observation period. Valid host-initiated shutdown confirmed. Asserting Pre System Reset lines. Starting CPU Reset Watchdog Timer. Transitioning to PowerState::waitForCPUResetAssert.");
-
-            // Now proceed with actual shutdown
-            action = PowerAction::HOST_INITIATED_SHUTDOWN;
-            assertBoardPreSystemResets();
-            startTimer("CpuResetWatchdogMs", cpuResetWatchdogTimer,
-                       Event::cpuResetWatchdogTimerExpired);
-            setPowerState(PowerState::waitForCPUResetAssert);
+            initiateHostInitiatedShutdown();
             break;
+
+        default:
+            lg2::info("No action taken for event: {EVENT}", "EVENT",
+                      getEventName(event));
+            break;
+    }
+}
+
+void VRPowerControl::initiateWaitForHostRebootShutdownOk()
+{
+    setPowerState(PowerState::waitForHostRebootShutdownOk);
+    startTimer("HostRebootShutdownOkDelayMs", hostRebootShutdownOkTimer,
+               Event::hostRebootShutdownOkTimerExpired);
+    lg2::info(
+        "CPU Boot Done de-asserted before SHDN_OK. Waiting for SHDN_OK assertion to confirm host-initiated reboot. Transitioning to PowerState::waitForHostRebootShutdownOk.");
+}
+
+void VRPowerControl::logPartialShutdownOkWarning()
+{
+    bool board0Asserted = false;
+    bool board1Asserted = false;
+
+    auto board0CpuShutdownOk = getSignal("Board0CpuShutdownOk");
+    if (board0CpuShutdownOk && board0CpuShutdownOk->gpioLine)
+    {
+        board0Asserted = board0CpuShutdownOk->gpioLine.get_value() ==
+                         board0CpuShutdownOk->polarity;
+    }
+
+    auto board1CpuShutdownOk = getSignal("Board1CpuShutdownOk");
+    if (board1CpuShutdownOk && board1CpuShutdownOk->gpioLine)
+    {
+        board1Asserted = board1CpuShutdownOk->gpioLine.get_value() ==
+                         board1CpuShutdownOk->polarity;
+    }
+
+    lg2::warning(
+        "HostRebootShutdownOkDelayMs timeout: only 1 of 2 boards asserted SHDN_OK. Board 0: {B0}, Board 1: {B1}. Proceeding with host-initiated reboot.",
+        "B0", board0Asserted ? "asserted" : "not asserted", "B1",
+        board1Asserted ? "asserted" : "not asserted");
+}
+
+void VRPowerControl::handleWaitForHostRebootShutdownOk(Event event)
+{
+    switch (event)
+    {
+        case Event::board0CpuShutdownOkAssert:
+        case Event::board1CpuShutdownOkAssert:
+            if (areAllRequiredBoardsShutdownOk())
+            {
+                cancelTimer("Host Reboot Shutdown OK Timer",
+                            hostRebootShutdownOkTimer);
+                lg2::info(
+                    "All required boards have asserted SHDN_OK. Initiating host-initiated reboot.");
+                handleHostInitiatedReboot();
+            }
+            else
+            {
+                // 2P system: one board has asserted, still waiting for the
+                // other
+                if (event == Event::board0CpuShutdownOkAssert)
+                {
+                    lg2::info(
+                        "Board 0 CPU Shutdown OK asserted. Waiting for Board 1 CPU Shutdown OK.");
+                }
+                else
+                {
+                    lg2::info(
+                        "Board 1 CPU Shutdown OK asserted. Waiting for Board 0 CPU Shutdown OK.");
+                }
+            }
+            break;
+
+        case Event::hostRebootShutdownOkTimerExpired:
+        {
+            int assertedCount = getShutdownOkAssertedCount();
+            if (assertedCount == 0)
+            {
+                lg2::info(
+                    "No SHDN_OK received within HostRebootShutdownOkDelayMs window. Not a host-initiated reboot. Returning to PowerState::on.");
+                setPowerState(PowerState::on);
+            }
+            else
+            {
+                // assertedCount == 1: only warn about partial SHDN_OK on 2P
+                // systems; on 1P this is the expected full assertion count
+                if (boardPresence.board1Present)
+                {
+                    logPartialShutdownOkWarning();
+                }
+                handleHostInitiatedReboot();
+            }
+            break;
+        }
 
         default:
             lg2::info("No action taken for event: {EVENT}", "EVENT",
@@ -1768,6 +1911,7 @@ std::string_view VRPowerControl::getHostState() const
             return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
             break;
         case PowerState::waitForCPUBootDoneDeAssert:
+        case PowerState::waitForHostRebootShutdownOk:
             // During observation period, system is still ON
             // We haven't started shutdown yet - just determining if it's reboot
             // or shutdown
@@ -1818,10 +1962,20 @@ std::string_view VRPowerControl::getChassisState() const
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
             break;
         case PowerState::waitForCPUBootDoneDeAssert:
+        case PowerState::waitForHostRebootShutdownOk:
             // During observation period, chassis is still ON
             // We haven't started shutdown yet - just determining if it's reboot
             // or shutdown
             return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            break;
+        case PowerState::off:
+            // During a host-initiated reboot, the chassis never lost power so
+            // CurrentPowerState must stay On while we pulse CurrentHostState
+            // Off for 1 second to signal boot code collection services
+            if (action == PowerAction::HOST_INITIATED_REBOOT)
+            {
+                return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            }
             break;
         case PowerState::waitForCPUResetAssert:
             // For warm reboot, chassis stays On (no power cycle)
@@ -1894,6 +2048,9 @@ std::string VRPowerControl::getPowerStateName()
             break;
         case PowerState::waitForCPUBootDoneDeAssert:
             return "Wait for CPU Boot Done De-Assert";
+            break;
+        case PowerState::waitForHostRebootShutdownOk:
+            return "Wait For Host Reboot Shutdown OK";
             break;
         case PowerState::waitForPowerCycleDelay:
             return "Wait for Power Cycle Delay";

@@ -55,6 +55,7 @@ enum class PowerState
     waitForCPUBootDoneDeAssert,
     waitForPowerCycleDelay,
     waitForRebootDelay,
+    waitForHostRebootShutdownOk,
 };
 
 // Configuration type enumeration
@@ -263,6 +264,7 @@ class PowerControl
         board1CpuShutdownOkDeAssert,
         cpuBootDoneAssert,
         cpuBootDoneDeAssert,
+        hostRebootShutdownOkTimerExpired,
     };
 
     /**
@@ -358,6 +360,7 @@ class PowerControl
         GRACEFUL_POWER_CYCLE,
         SYSTEM_RESET,
         HOST_INITIATED_SHUTDOWN,
+        HOST_INITIATED_REBOOT,
         FORCE_WARM_REBOOT,
         /** Graceful warm reboot: SHDN_REQ / SHDN_OK then same reset tail as
            force */
