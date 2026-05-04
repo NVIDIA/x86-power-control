@@ -56,12 +56,15 @@ NVL72PowerControl::NVL72PowerControl(
     // Set default values for output signals
     setDefaultValues();
 
-    // Initialize all host0 interfaces — makes the path visible to ObjectMapper
-    initializeHostStateInterface();
-
-    // Initialize power state from actual hardware before power restore runs.
+    // Determine power state from hardware before exposing interfaces to D-Bus,
+    // so the initial published values are correct.
     // Host is ON only if BOTH Board0RunPowerPG AND PDBMainPowerOk are asserted.
     initializePowerStateFromHardware(powerIndicators, true);
+
+    // Initialize all host0 interfaces — makes the path visible to ObjectMapper.
+    // Called after initializePowerStateFromHardware so the correct state is
+    // published immediately on InterfacesAdded.
+    initializeHostStateInterface();
 }
 
 // ============================================================================

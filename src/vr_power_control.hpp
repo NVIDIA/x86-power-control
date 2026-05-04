@@ -101,7 +101,7 @@ class VRPowerControl : public PowerControl
      * @param state The power state
      * @return Human-readable state name
      */
-    std::string getPowerStateName() override;
+    std::string getPowerStateName() const override;
 
   protected:
     /**
