@@ -25,9 +25,9 @@ NVL72PowerControl::NVL72PowerControl(
     std::shared_ptr<sdbusplus::asio::connection> conn,
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
-    VRPowerControl(
-        ioContext, conn, configFilePath, node,
-        appState) // Call parent constructor (registers VR + PDB GPIOs)
+    // Call parent constructor (registers VR + PDB GPIOs)
+    VRPowerControl(ioContext, conn, configFilePath, node, appState),
+    hscMfrIdRetryTimer(ioContext)
 {
     // VRPowerControl constructor already registers:
     //   PDBMainPowerOk (with pdbMainPowerOkHandler),
@@ -381,6 +381,30 @@ void NVL72PowerControl::addBoard1GpioStateProperties()
 
 void NVL72PowerControl::maskHscAlertsAndClearFaults()
 {
+    hscMfrIdRetryTimer.cancel();
+    maskHscAlertsAndClearFaultsAttempt(1);
+}
+
+void NVL72PowerControl::scheduleHscMfrIdRetry(int nextAttempt)
+{
+    hscMfrIdRetryTimer.expires_after(std::chrono::milliseconds(100));
+    hscMfrIdRetryTimer.async_wait(
+        [this, nextAttempt](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    lg2::debug("HSC MFR_ID retry timer failed: {ERROR}",
+                               "ERROR", ec.message());
+                }
+                return;
+            }
+            maskHscAlertsAndClearFaultsAttempt(nextAttempt);
+        });
+}
+
+void NVL72PowerControl::maskHscAlertsAndClearFaultsAttempt(int attempt)
+{
     constexpr int hscBus = 9;
     constexpr uint16_t hscDetectAddr = 0x10;
     constexpr uint8_t hscMfrIdRegister = 0x99;
@@ -416,53 +440,45 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
     int file = open(i2cPath.c_str(), O_RDWR | O_CLOEXEC);
     if (file < 0)
     {
+        // open() failure is fatal — bus is unaffected by MPS bug so no need to
+        // retry
         lg2::error("HSC WAR: failed to open I2C bus {PATH}", "PATH", i2cPath);
         return;
     }
 
     std::vector<uint8_t> mfrId(4);
 
-    for (int attempt = 0;
-         hscVendor == HscVendor::unknown && attempt < hscMfrIdReadAttempts;
-         ++attempt)
+    const int readRet =
+        PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister, mfrId);
+    if (readRet < 0)
     {
-        if (PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister,
-                                  mfrId) < 0)
+        if (attempt < hscMfrIdReadAttempts)
         {
-            if (attempt == hscMfrIdReadAttempts - 1)
-            {
-                lg2::error(
-                    "HSC WAR: failed to read MFR_ID after {ATTEMPTS} attempts: bus {BUS}, addr {ADDR}",
-                    "BUS", hscBus, "ADDR", static_cast<int>(hscDetectAddr),
-                    "ATTEMPTS", hscMfrIdReadAttempts);
-                close(file);
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
+            close(file);
+            scheduleHscMfrIdRetry(attempt + 1);
+            return;
         }
-
-        if (mfrId[0] == 0x03 && mfrId[1] == 0x54 && mfrId[2] == 0x49 &&
-            mfrId[3] == 0x00)
-        {
-            hscVendor = HscVendor::ti;
-        }
-        else if (mfrId[0] == 0x03 && mfrId[1] == 0x53 && mfrId[2] == 0x50 &&
-                 mfrId[3] == 0x4d)
-        {
-            hscVendor = HscVendor::mps;
-        }
-        else if (mfrId[0] == 0x03 && mfrId[1] == 0x49 && mfrId[2] == 0x46 &&
-                 mfrId[3] == 0x00)
-        {
-            hscVendor = HscVendor::ifx;
-        }
-
-        if (hscVendor == HscVendor::unknown &&
-            attempt < hscMfrIdReadAttempts - 1)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
+        lg2::error(
+            "HSC WAR: failed to read MFR_ID after {ATTEMPTS} attempts: bus {BUS}, addr {ADDR}",
+            "BUS", hscBus, "ADDR", static_cast<int>(hscDetectAddr), "ATTEMPTS",
+            hscMfrIdReadAttempts);
+        close(file);
+        return;
+    }
+    if (mfrId[0] == 0x03 && mfrId[1] == 0x54 && mfrId[2] == 0x49 &&
+        mfrId[3] == 0x00)
+    {
+        hscVendor = HscVendor::ti;
+    }
+    else if (mfrId[0] == 0x03 && mfrId[1] == 0x53 && mfrId[2] == 0x50 &&
+             mfrId[3] == 0x4d)
+    {
+        hscVendor = HscVendor::mps;
+    }
+    else if (mfrId[0] == 0x03 && mfrId[1] == 0x49 && mfrId[2] == 0x46 &&
+             mfrId[3] == 0x00)
+    {
+        hscVendor = HscVendor::ifx;
     }
 
     const std::string mfrIdHex = std::format(
@@ -472,6 +488,13 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
 
     if (hscVendor == HscVendor::unknown)
     {
+        if (attempt < hscMfrIdReadAttempts)
+        {
+            close(file);
+            scheduleHscMfrIdRetry(attempt + 1);
+            return;
+        }
+
         lg2::error(
             "HSC WAR: unknown PDB HSC vendor from MFR_ID {MFR_ID} after retries on bus {BUS}, addr {ADDR}; skipping vendor-specific mask/clear",
             "MFR_ID", mfrIdHex, "BUS", hscBus, "ADDR",
