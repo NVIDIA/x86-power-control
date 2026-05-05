@@ -74,7 +74,7 @@ class C2PowerControl : public VRPowerControl
      * Adds name mappings for C2-specific power states and falls back to
      * VRPowerControl for all other states.
      */
-    std::string getPowerStateName() override;
+    std::string getPowerStateName() const override;
 
   protected:
     // =========================================================================

@@ -907,7 +907,10 @@ std::string_view PowerControl::getHostState() const
             return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
         default:
-            return "";
+            lg2::error(
+                "getHostState: unhandled PowerState {STATE}, defaulting to Off",
+                "STATE", getPowerStateName());
+            return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
     }
 }
@@ -932,12 +935,15 @@ std::string_view PowerControl::getChassisState() const
             return "xyz.openbmc_project.State.Chassis.PowerState.Off";
             break;
         default:
-            return "";
+            lg2::error(
+                "getChassisState: unhandled PowerState {STATE}, defaulting to Off",
+                "STATE", getPowerStateName());
+            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
             break;
     }
 }
 
-std::string PowerControl::getPowerStateName()
+std::string PowerControl::getPowerStateName() const
 {
     // Upstream implementation - only knows about upstream power states
     switch (powerState)
@@ -1038,12 +1044,10 @@ void PowerControl::setPowerState(const PowerState state)
     logStateTransition();
 
     // Update D-Bus host state (uses virtual dispatch)
-    hostIface->set_property("CurrentHostState",
-                            std::string(this->getHostState()));
+    hostIface->signal_property("CurrentHostState");
 
     // Update D-Bus chassis state (uses virtual dispatch)
-    chassisIface->set_property("CurrentPowerState",
-                               std::string(this->getChassisState()));
+    chassisIface->signal_property("CurrentPowerState");
     chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 
     // Reset boot progress to Unspecified when host powers off
@@ -1276,8 +1280,10 @@ void PowerControl::registerHostInterface()
             return 1;
         });
 
-    hostIface->register_property("CurrentHostState",
-                                 std::string(getHostState()));
+    hostIface->register_property_r(
+        "CurrentHostState", std::string{},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return std::string(getHostState()); });
 
     // RestartCause and RequestedRestartCause on State.Host for parity with
     // PSM/legacy; path is /xyz/openbmc_project/state/host{nodeId}
@@ -1398,13 +1404,17 @@ void PowerControl::initializeChassisInterface()
             return 1;
         });
 
-    chassisIface->register_property("CurrentPowerState",
-                                    std::string(getChassisState()));
+    chassisIface->register_property_r(
+        "CurrentPowerState", std::string{},
+        sdbusplus::vtable::property_::emits_change,
+        [this](const auto&) { return std::string(getChassisState()); });
     chassisIface->register_property("LastStateChangeTime", getCurrentTimeMs());
 
-    chassisIface->initialize();
-
-    lg2::info("Created the chassis interface successfully");
+    // NOTE: Do NOT call chassisIface->initialize() here!
+    // Deferred to initializeHostStateInterface() so the chassis interface is
+    // published only after initializePowerStateFromHardware() has set the
+    // correct state, preventing an invalid initial value on D-Bus.
+    lg2::info("Chassis interface registered (not yet initialized)");
 }
 
 #ifdef CHASSIS_SYSTEM_RESET
@@ -1789,6 +1799,14 @@ void PowerControl::initializeHostStateInterface()
     // This ensures that when the path becomes visible to ObjectMapper,
     // ALL interfaces are ready. This allows "mapper wait /path" to work
     // reliably for dependent services.
+
+    // Initialize chassis interface first — it's on a separate path and must be
+    // ready before the host0 interfaces become visible to other services.
+    if (chassisIface)
+    {
+        chassisIface->initialize();
+        lg2::info("Chassis interface initialized");
+    }
 
     // Initialize in order: Gpio first (since it was registered last in base),
     // then the rest, with Host last (as it's the primary interface)
@@ -3382,8 +3400,7 @@ void PowerControl::setInitialValue(std::shared_ptr<ConfigData> configData,
     {
         // Set power state based on PowerOk signal
         powerState = (initialValue ? PowerState::on : PowerState::off);
-        hostIface->set_property("CurrentHostState",
-                                std::string(getHostState()));
+        hostIface->signal_property("CurrentHostState");
         lg2::info("PowerOk initial value: {VALUE}, power state set to {STATE}",
                   "VALUE", initialValue, "STATE", getHostState());
     }
@@ -3503,9 +3520,8 @@ void PowerControl::initializePowerStateFromHardware(
     }
 
     // Update D-Bus interfaces to reflect actual hardware state
-    hostIface->set_property("CurrentHostState", std::string(getHostState()));
-    chassisIface->set_property("CurrentPowerState",
-                               std::string(getChassisState()));
+    hostIface->signal_property("CurrentHostState");
+    chassisIface->signal_property("CurrentPowerState");
     chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 }
 

@@ -535,7 +535,7 @@ class PowerControl
      *
      * @return Human-readable state name
      */
-    virtual std::string getPowerStateName();
+    virtual std::string getPowerStateName() const;
 
     /**
      * @brief Log a power state transition
@@ -813,7 +813,7 @@ class PowerControl
     /**
      * @brief Current power state
      */
-    PowerState powerState;
+    PowerState powerState{PowerState::off};
 
     /**
      * @brief Set of restart causes for the current restart

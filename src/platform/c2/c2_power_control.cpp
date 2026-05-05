@@ -45,12 +45,15 @@ C2PowerControl::C2PowerControl(
     // Set default values for output signals
     setDefaultValues();
 
-    // Initialize all host0 interfaces — makes the path visible to ObjectMapper
-    initializeHostStateInterface();
-
-    // Initialize power state from actual hardware before power restore runs.
+    // Determine power state from hardware before exposing interfaces to D-Bus,
+    // so the initial published values are correct.
     // Host is ON only if ALL THREE indicators are asserted.
     initializePowerStateFromHardware(powerIndicators, true);
+
+    // Initialize all host0 interfaces — makes the path visible to ObjectMapper.
+    // Called after initializePowerStateFromHardware so the correct state is
+    // published immediately on InterfacesAdded.
+    initializeHostStateInterface();
 }
 
 // ============================================================================
@@ -178,7 +181,7 @@ std::string_view C2PowerControl::getChassisState() const
     return VRPowerControl::getChassisState();
 }
 
-std::string C2PowerControl::getPowerStateName()
+std::string C2PowerControl::getPowerStateName() const
 {
     switch (powerState)
     {

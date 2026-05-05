@@ -1938,7 +1938,12 @@ std::string_view VRPowerControl::getHostState() const
             {
                 return "xyz.openbmc_project.State.Host.HostState.Off";
             }
-            break;
+            else
+            {
+                lg2::error(
+                    "getHostState: waitForPDBMainPowerOff with unexpected action, defaulting to Off");
+                return "xyz.openbmc_project.State.Host.HostState.Off";
+            }
         default:
             break;
     }
@@ -2009,7 +2014,12 @@ std::string_view VRPowerControl::getChassisState() const
             {
                 return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
             }
-            break;
+            else
+            {
+                lg2::error(
+                    "getChassisState: waitForPDBMainPowerOff with unexpected action, defaulting to Off");
+                return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            }
         default:
             break;
     }
@@ -2018,7 +2028,7 @@ std::string_view VRPowerControl::getChassisState() const
     return PowerControl::getChassisState();
 }
 
-std::string VRPowerControl::getPowerStateName()
+std::string VRPowerControl::getPowerStateName() const
 {
     // VR-specific state name mappings
     // TODO: Confirm  VR-specific logic
