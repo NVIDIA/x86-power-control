@@ -165,7 +165,7 @@ class NVL72PowerControl : public VRPowerControl
      * Runs the existing mask/clear sequence when vendor detection succeeds, or
      * schedules another retry when attempts remain.
      *
-     * @param attempt Current 1-based retry attempt number
+     * @param attempt Current zero-based retry attempt number
      */
     void maskHscAlertsAndClearFaultsAttempt(int attempt);
 
@@ -174,7 +174,7 @@ class NVL72PowerControl : public VRPowerControl
      *
      * Uses hscMfrIdRetryTimer to retry later without blocking this thread.
      *
-     * @param nextAttempt Next 1-based retry attempt number
+     * @param nextAttempt Next zero-based retry attempt number
      */
     void scheduleHscMfrIdRetry(int nextAttempt);
 
