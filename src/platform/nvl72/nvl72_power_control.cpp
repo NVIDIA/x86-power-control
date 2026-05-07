@@ -382,7 +382,7 @@ void NVL72PowerControl::addBoard1GpioStateProperties()
 void NVL72PowerControl::maskHscAlertsAndClearFaults()
 {
     hscMfrIdRetryTimer.cancel();
-    maskHscAlertsAndClearFaultsAttempt(1);
+    maskHscAlertsAndClearFaultsAttempt(0);
 }
 
 void NVL72PowerControl::scheduleHscMfrIdRetry(int nextAttempt)
@@ -412,6 +412,7 @@ void NVL72PowerControl::maskHscAlertsAndClearFaultsAttempt(int attempt)
     // data during early boot, so retry before deciding the PDB HSC vendor is
     // unknown.
     constexpr int hscMfrIdReadAttempts = 5;
+    constexpr int hscMfrIdLastReadAttempt = hscMfrIdReadAttempts - 1;
     const std::vector<uint8_t> clearCmd = {0x03};
     enum class HscVendor
     {
@@ -452,7 +453,7 @@ void NVL72PowerControl::maskHscAlertsAndClearFaultsAttempt(int attempt)
         PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister, mfrId);
     if (readRet < 0)
     {
-        if (attempt < hscMfrIdReadAttempts)
+        if (attempt < hscMfrIdLastReadAttempt)
         {
             close(file);
             scheduleHscMfrIdRetry(attempt + 1);
@@ -488,7 +489,7 @@ void NVL72PowerControl::maskHscAlertsAndClearFaultsAttempt(int attempt)
 
     if (hscVendor == HscVendor::unknown)
     {
-        if (attempt < hscMfrIdReadAttempts)
+        if (attempt < hscMfrIdLastReadAttempt)
         {
             close(file);
             scheduleHscMfrIdRetry(attempt + 1);
