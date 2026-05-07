@@ -152,33 +152,6 @@ class NVL72PowerControl : public VRPowerControl
     void maskHscAlertsAndClearFaults();
 
     /**
-     * @brief Timer used to delay PDB HSC MFR_ID retry attempts
-     *
-     * Keeps retry delays non-blocking so the power-control event loop can keep
-     * processing GPIO, D-Bus, and timer events.
-     */
-    boost::asio::steady_timer hscMfrIdRetryTimer;
-
-    /**
-     * @brief Perform one PDB HSC MFR_ID vendor-detection attempt
-     *
-     * Runs the existing mask/clear sequence when vendor detection succeeds, or
-     * schedules another retry when attempts remain.
-     *
-     * @param attempt Current zero-based retry attempt number
-     */
-    void maskHscAlertsAndClearFaultsAttempt(int attempt);
-
-    /**
-     * @brief Schedule the next PDB HSC MFR_ID vendor-detection attempt
-     *
-     * Uses hscMfrIdRetryTimer to retry later without blocking this thread.
-     *
-     * @param nextAttempt Next zero-based retry attempt number
-     */
-    void scheduleHscMfrIdRetry(int nextAttempt);
-
-    /**
      * @brief Power indicator signals used to determine initial hardware power
      * state
      *
