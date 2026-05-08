@@ -462,7 +462,7 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
         {
             lg2::warning(
                 "HSC WAR: failed to read MFR_ID on attempt {ATTEMPT}: bus {BUS}, addr {ADDR}",
-                "ATTEMPT", attempt, "BUS", hscBus, "ADDR",
+                "ATTEMPT", (attempt + 1), "BUS", hscBus, "ADDR",
                 static_cast<int>(hscDetectAddr));
             // Only sleep before retry, not on last attempt
             if (attempt < hscMfrIdReadAttempts - 1)
@@ -481,8 +481,11 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
 
         lg2::warning(
             "HSC WAR: Read successful, but invalid MFR_ID {MFR_ID} on attempt {ATTEMPT}",
-            "MFR_ID", mfrIdToHex(mfrId), "ATTEMPT", attempt);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            "MFR_ID", mfrIdToHex(mfrId), "ATTEMPT", (attempt + 1));
+        if (attempt < hscMfrIdReadAttempts - 1)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
     if (attempt == hscMfrIdReadAttempts)
