@@ -142,6 +142,23 @@ class NVL72PowerControl : public VRPowerControl
      */
     void transitionToPDBMainPowerOffState();
 
+    /** PDB hot-swap controller vendor (from MFR_ID) for HSC mask/clear WAR. */
+    enum class HscVendor
+    {
+        unknown,
+        ti,
+        mps,
+        ifx,
+    };
+
+    /** Map MFR_ID block read (≥4 bytes) to HSC vendor; unknown if unrecognized.
+     */
+    HscVendor getHscVendor(const std::vector<uint8_t>& mfrId);
+
+    /** Format MFR_ID bytes as space-separated hex groups (e.g. "0x03 0x54 …").
+     */
+    static std::string mfrIdToHex(const std::vector<uint8_t>& mfrId);
+
     /**
      * @brief Mask HSC alerts and clear faults on shared PDB interrupt line
      *

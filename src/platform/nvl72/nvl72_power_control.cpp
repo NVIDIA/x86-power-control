@@ -379,19 +379,59 @@ void NVL72PowerControl::addBoard1GpioStateProperties()
     };
 }
 
+std::string NVL72PowerControl::mfrIdToHex(const std::vector<uint8_t>& mfrId)
+{
+    std::string out;
+    bool first = true;
+    for (auto byteVal : mfrId)
+    {
+        if (!first)
+        {
+            out += ' ';
+        }
+        first = false;
+        out += std::format("0x{:02x}", static_cast<unsigned>(byteVal));
+    }
+    return out;
+}
+
+NVL72PowerControl::HscVendor NVL72PowerControl::getHscVendor(
+    const std::vector<uint8_t>& mfrId)
+{
+    if (mfrId.size() < 4)
+    {
+        lg2::error("HSC WAR: MFR_ID is too short: {SIZE}", "SIZE",
+                   mfrId.size());
+        return HscVendor::unknown;
+    }
+    if (mfrId[0] == 0x03)
+    {
+        if (mfrId[1] == 0x54 && mfrId[2] == 0x49 && mfrId[3] == 0x00)
+        {
+            return HscVendor::ti;
+        }
+        if (mfrId[1] == 0x53 && mfrId[2] == 0x50 && mfrId[3] == 0x4d)
+        {
+            return HscVendor::mps;
+        }
+        if (mfrId[1] == 0x49 && mfrId[2] == 0x46 && mfrId[3] == 0x00)
+        {
+            return HscVendor::ifx;
+        }
+    }
+    return HscVendor::unknown;
+}
+
 void NVL72PowerControl::maskHscAlertsAndClearFaults()
 {
     constexpr int hscBus = 9;
     constexpr uint16_t hscDetectAddr = 0x10;
     constexpr uint8_t hscMfrIdRegister = 0x99;
+    // NVBug 6058661: MP5926 MFR_ID block reads can transiently return invalid
+    // data during early boot, so retry before deciding the PDB HSC vendor is
+    // unknown.
+    constexpr int hscMfrIdReadAttempts = 3;
     const std::vector<uint8_t> clearCmd = {0x03};
-    enum class HscVendor
-    {
-        unknown,
-        ti,
-        mps,
-        ifx,
-    };
     HscVendor hscVendor = HscVendor::unknown;
 
     auto vendorToString = [](HscVendor vendor) -> const char* {
@@ -417,44 +457,51 @@ void NVL72PowerControl::maskHscAlertsAndClearFaults()
     }
 
     std::vector<uint8_t> mfrId(4);
-    if (PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister, mfrId) < 0)
+    int attempt = 0;
+    for (; attempt < hscMfrIdReadAttempts; ++attempt)
     {
-        lg2::error("HSC WAR: failed to read MFR_ID: bus {BUS}, addr {ADDR}",
-                   "BUS", hscBus, "ADDR", static_cast<int>(hscDetectAddr));
-        close(file);
-        return;
+        if (PowerControl::i2cRead(file, hscDetectAddr, hscMfrIdRegister,
+                                  mfrId) < 0)
+        {
+            lg2::warning(
+                "HSC WAR: failed to read MFR_ID on attempt {ATTEMPT}: bus {BUS}, addr {ADDR}",
+                "ATTEMPT", (attempt + 1), "BUS", hscBus, "ADDR",
+                static_cast<int>(hscDetectAddr));
+            // Only sleep before retry, not on last attempt
+            if (attempt < hscMfrIdReadAttempts - 1)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            continue;
+        }
+
+        hscVendor = getHscVendor(mfrId);
+
+        if (hscVendor != HscVendor::unknown)
+        {
+            break;
+        }
+
+        lg2::warning(
+            "HSC WAR: Read successful, but invalid MFR_ID {MFR_ID} on attempt {ATTEMPT}",
+            "MFR_ID", mfrIdToHex(mfrId), "ATTEMPT", (attempt + 1));
+        if (attempt < hscMfrIdReadAttempts - 1)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
-    if (mfrId[0] == 0x03 && mfrId[1] == 0x54 && mfrId[2] == 0x49 &&
-        mfrId[3] == 0x00)
-    {
-        hscVendor = HscVendor::ti;
-    }
-    else if (mfrId[0] == 0x03 && mfrId[1] == 0x53 && mfrId[2] == 0x50 &&
-             mfrId[3] == 0x4d)
-    {
-        hscVendor = HscVendor::mps;
-    }
-    else if (mfrId[0] == 0x03 && mfrId[1] == 0x49 && mfrId[2] == 0x46 &&
-             mfrId[3] == 0x00)
-    {
-        hscVendor = HscVendor::ifx;
-    }
-
-    const std::string mfrIdHex = std::format(
-        "0x{:02x} 0x{:02x} 0x{:02x} 0x{:02x}", static_cast<unsigned>(mfrId[0]),
-        static_cast<unsigned>(mfrId[1]), static_cast<unsigned>(mfrId[2]),
-        static_cast<unsigned>(mfrId[3]));
-
-    if (hscVendor == HscVendor::unknown)
+    if (attempt == hscMfrIdReadAttempts)
     {
         lg2::error(
-            "HSC WAR: unknown PDB HSC vendor from MFR_ID {MFR_ID} on bus {BUS}, addr {ADDR}; skipping vendor-specific mask/clear",
-            "MFR_ID", mfrIdHex, "BUS", hscBus, "ADDR",
-            static_cast<int>(hscDetectAddr));
+            "HSC WAR: exhausted all {ATTEMPTS} retry attempts: bus {BUS}, addr {ADDR}",
+            "BUS", hscBus, "ADDR", static_cast<int>(hscDetectAddr), "ATTEMPTS",
+            hscMfrIdReadAttempts);
         close(file);
         return;
     }
+
+    const std::string mfrIdHex = mfrIdToHex(mfrId);
 
     lg2::info(
         "HSC WAR: selected {VENDOR} PDB HSC vendor from MFR_ID {MFR_ID} on bus {BUS}, addr {ADDR}",
