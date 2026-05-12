@@ -51,7 +51,6 @@ VRPowerControl::VRPowerControl(
                       [this](bool state) {
                           this->cpuResetIndicatorHandler(state);
                       });
-    addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
     // Add Board 1 handler if Board 1 is present
     if (boardPresence.board1Present)
@@ -61,16 +60,6 @@ VRPowerControl::VRPowerControl(
                               this->board1CpuShutdownOkHandler(state);
                           });
     }
-
-    // Add PDB signals shared by all VR platforms
-    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
-                      [this](bool state) {
-                          this->pdbMainPowerOkHandler(state);
-                      });
-    // Note: PDBMainPowerEnable is NOT registered here — each platform registers
-    // its own PDB enable signal(s) in its constructor (e.g. NVL72 registers
-    // PDBMainPowerEnable; C2 has no such signal and uses PDBPSUPowerOn
-    // instead).
 
     // call validateRequiredSignals() in the platform-specific class constructor
     // validateRequiredSignals();
@@ -724,19 +713,13 @@ void VRPowerControl::assertHPMBoardPowerSequence()
         return;
     }
 
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-
     auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
     if (!board0RunPowerEnable)
     {
         return;
     }
 
-    // Assert Pre System Reset for Board 0
+    // 1. PRE_SYS_RST_L for all present boards
     setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
 
     if (boardPresence.board1Present)
@@ -749,7 +732,10 @@ void VRPowerControl::assertHPMBoardPowerSequence()
         setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
     }
 
-    setGPIOOutput(usbPowerEnable, usbPowerEnable->polarity);
+    // 2. Platform peripherals (USB, E1S, SSD, ...) — no-op in base
+    assertPlatformPeripherals();
+
+    // 3. RUN_POWER_EN for all present boards
     setGPIOOutput(board0RunPowerEnable, board0RunPowerEnable->polarity);
 
     if (boardPresence.board1Present)
@@ -786,12 +772,7 @@ void VRPowerControl::deassertHPMPowerAndPeripherals()
         return;
     }
 
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-
+    // 1. De-assert RUN_POWER_EN for all present boards
     setGPIOOutput(board0RunPowerEnable, !board0RunPowerEnable->polarity);
 
     if (boardPresence.board1Present)
@@ -804,7 +785,8 @@ void VRPowerControl::deassertHPMPowerAndPeripherals()
         setGPIOOutput(board1RunPowerEnable, !board1RunPowerEnable->polarity);
     }
 
-    setGPIOOutput(usbPowerEnable, !usbPowerEnable->polarity);
+    // 2. Platform peripherals — no-op in base
+    deassertPlatformPeripherals();
 }
 
 void VRPowerControl::transitionToHPMPowerGoodDeAssertState()
@@ -2127,12 +2109,6 @@ void VRPowerControl::setDefaultValues()
         return;
     }
 
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-
     // Board 1 signals (if present)
     std::shared_ptr<ConfigData> board1RunPowerEnable;
     std::shared_ptr<ConfigData> board1PreSystemReset;
@@ -2166,9 +2142,6 @@ void VRPowerControl::setDefaultValues()
         DefaultState::DeAsserted;
     board0CpuShutdownRequest->defaultStateHostStateOff =
         DefaultState::DeAsserted;
-
-    usbPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
-    usbPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     if (boardPresence.board1Present)
     {
