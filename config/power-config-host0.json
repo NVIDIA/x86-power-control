@@ -109,6 +109,23 @@
             "Polarity": "ActiveLow"
         }
     ],
+    "resources": [
+        {
+            "Name": "Board0IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/2-0020"
+        },
+        {
+            "Name": "Board1IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/7-0020"
+        },
+        {
+            "Name": "PdbIoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/9-0020"
+        }
+    ],
     "timing_configs": {
         "ForcefulCpuShutdownOkWatchdogMs": 100,
         "GracefulCpuShutdownOkWatchdogMs": 120000,

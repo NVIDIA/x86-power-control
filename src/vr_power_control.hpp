@@ -12,18 +12,16 @@ namespace power_control
 {
 
 /**
- * @brief Placeholder struct for board presence detection
+ * @brief Board presence detection results
  *
- * TODO: Replace with actual implementation from coworker
- * This struct will be populated by detectBoardPresence() method
+ * Populated by detectBoardPresence() from IOX paths declared in the
+ * platform's JSON resources section. Used by VR base and platform
+ * ctors to gate Board1 signal registration.
  */
 struct BoardPresence
 {
-    bool board0Present;    // HPM Board 0 IOX
-    bool board1Present;    // HPM Board 1 IOX
-    bool nvl72PdbPresent;  // NVL72 PDB IOX
-    bool c2PdbPresent;     // C2 PDB IOX
-    bool parsecPdbPresent; // Parsec/GB300 PDB IOX
+    bool board0Present = false; // HPM Board 0 IOX present at runtime
+    bool board1Present = false; // HPM Board 1 IOX present at runtime
 };
 
 /**

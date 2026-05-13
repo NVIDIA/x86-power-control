@@ -28,8 +28,10 @@ VRNVL8PowerControl::VRNVL8PowerControl(
     //   Board0CpuShutdownOk, CpuResetIndicator.
     // VR NVL8 has no PDB (no PDBMainPowerOk / PDBMainPowerEnable / PSU enable
     // / 12V rails), no USB Power Enable, no E1S, no SSD reset, and no
-    // Board 1 — nothing to register here.
+    // Board 1 — no additional signals to register here.
 
+    // Validate required resources first (IOX paths) then signals on them.
+    PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
     validateTimerConfigs();
     setDefaultValues();
