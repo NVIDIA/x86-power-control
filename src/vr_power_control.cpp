@@ -68,39 +68,42 @@ VRPowerControl::VRPowerControl(
 void VRPowerControl::detectBoardPresence()
 {
     // Resolve IOX paths from the resources section of the platform's JSON
-    // config. Optional lookup — platforms that don't have a Board1 IOX
-    // (e.g. VR NVL8) simply don't declare Board1IoxPath and Board1 is reported
-    // not-present. Direct resourceMap access to avoid the CRITICAL log
-    // that getResource() emits when a name is missing.
-    auto board0It = resourceMap.find("Board0IoxPath");
-    if (board0It != resourceMap.end())
+    // config. getResource() returns nullptr silently for resources that
+    // aren't declared — platforms that don't have a Board 1 IOX
+    // (e.g. VR NVL8) simply don't declare Board1IoxPath and Board1 is
+    // reported not-present.
+    auto board0 = getResource("Board0IoxPath");
+    if (board0)
     {
-        boardPresence.board0Present = checkIOXPresence(board0It->second->path);
+        boardPresence.board0Present = checkIOXPresence(board0->path);
     }
 
-    auto board1It = resourceMap.find("Board1IoxPath");
-    if (board1It != resourceMap.end())
+    auto board1 = getResource("Board1IoxPath");
+    if (board1)
     {
-        boardPresence.board1Present = checkIOXPresence(board1It->second->path);
+        boardPresence.board1Present = checkIOXPresence(board1->path);
     }
 
-    // Log detected board presence
     lg2::info("Board presence detection:");
-    lg2::info("  GB300 PDB ({PATH}): {PRESENT}", "PATH",
-              std::string(GB300_PDB_IOX_PATH), "PRESENT",
-              boardPresence.parsecPdbPresent);
-    lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH",
-              std::string(C2_PDB_IOX_PATH), "PRESENT",
-              boardPresence.c2PdbPresent);
-    lg2::info("  NVL72 PDB ({PATH}): {PRESENT}", "PATH",
-              std::string(NVL72_PDB_IOX_PATH), "PRESENT",
-              boardPresence.nvl72PdbPresent);
-    lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH",
-              std::string(BOARD0_IOX_PATH), "PRESENT",
-              boardPresence.board0Present);
-    lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH",
-              std::string(BOARD1_IOX_PATH), "PRESENT",
-              boardPresence.board1Present);
+    if (board0)
+    {
+        lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH", board0->path,
+                  "PRESENT", boardPresence.board0Present);
+    }
+    else
+    {
+        lg2::error("  Board 0: not declared in resources");
+    }
+    if (board1)
+    {
+        lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH", board1->path,
+                  "PRESENT", boardPresence.board1Present);
+    }
+    else
+    {
+        lg2::info("  Board 1: not declared in resources (expected on 1P "
+                  "platforms)");
+    }
 }
 
 // Board presence detection functions

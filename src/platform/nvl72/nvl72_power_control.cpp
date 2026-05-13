@@ -29,6 +29,13 @@ NVL72PowerControl::NVL72PowerControl(
         ioContext, conn, configFilePath, node,
         appState) // Call parent constructor (registers VR + PDB GPIOs)
 {
+    // Required resources (IOX paths). Declare before signals because the
+    // required GPIO signals live on these IOXs — if the IOX path is missing
+    // from config, no signal on it can be valid.
+    addRequiredResource("Board0IoxPath", ResourceType::IOXPath);
+    addRequiredResource("Board1IoxPath", ResourceType::IOXPath);
+    addRequiredResource("PdbIoxPath", ResourceType::IOXPath);
+
     // VRPowerControl constructor already registers:
     //   Board0 VR signals, and Board1CpuShutdownOk (if board1Present).
     // Add NVL72-specific signals here.
@@ -51,7 +58,9 @@ NVL72PowerControl::NVL72PowerControl(
         addBoard1GpioStateProperties();
     }
 
-    // Validate all required signals (VR + NVL72)
+    // Validate required resources first (IOX paths) then signals on them.
+
+    PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
 
     // Validate all required timers

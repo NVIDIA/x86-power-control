@@ -19,6 +19,12 @@ C2PowerControl::C2PowerControl(
     VRPowerControl(ioContext, conn, configFilePath, node, appState),
     pdbPSUPowerOkWatchdogTimer(ioContext)
 {
+    // Required resources (IOX paths). Declare before signals because the
+    // required GPIO signals live on these IOXs — if the IOX path is missing
+    // from config, no signal on it can be valid.
+    addRequiredResource("Board0IoxPath", ResourceType::IOXPath);
+    addRequiredResource("PdbIoxPath", ResourceType::IOXPath);
+
     // VRPowerControl constructor already registers:
     //   Board0 VR signals (RunPowerEnable, RunPowerPG, PreSystemReset,
     //   CpuShutdownForce/Request/Ok, CpuResetIndicator).
@@ -41,7 +47,8 @@ C2PowerControl::C2PowerControl(
     addRequiredSignal("PDB12V_GPU2_Enable", 0, GPIODirection::OUT);
     addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
-    // Validate all required signals (VR + C2)
+    // Validate required resources first (IOX paths) then signals on them.
+    PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
 
     // Validate all required timers
