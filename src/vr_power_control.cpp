@@ -67,12 +67,22 @@ VRPowerControl::VRPowerControl(
 
 void VRPowerControl::detectBoardPresence()
 {
-    // Check presence and update context using paths from build configuration
-    boardPresence.parsecPdbPresent = checkIOXPresence(GB300_PDB_IOX_PATH);
-    boardPresence.c2PdbPresent = checkIOXPresence(C2_PDB_IOX_PATH);
-    boardPresence.nvl72PdbPresent = checkIOXPresence(NVL72_PDB_IOX_PATH);
-    boardPresence.board0Present = checkIOXPresence(BOARD0_IOX_PATH);
-    boardPresence.board1Present = checkIOXPresence(BOARD1_IOX_PATH);
+    // Resolve IOX paths from the resources section of the platform's JSON
+    // config. Optional lookup — platforms that don't have a Board1 IOX
+    // (e.g. VR NVL8) simply don't declare Board1IoxPath and Board1 is reported
+    // not-present. Direct resourceMap access to avoid the CRITICAL log
+    // that getResource() emits when a name is missing.
+    auto board0It = resourceMap.find("Board0IoxPath");
+    if (board0It != resourceMap.end())
+    {
+        boardPresence.board0Present = checkIOXPresence(board0It->second->path);
+    }
+
+    auto board1It = resourceMap.find("Board1IoxPath");
+    if (board1It != resourceMap.end())
+    {
+        boardPresence.board1Present = checkIOXPresence(board1It->second->path);
+    }
 
     // Log detected board presence
     lg2::info("Board presence detection:");
