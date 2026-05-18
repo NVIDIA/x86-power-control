@@ -22,7 +22,7 @@ namespace power_control
  *   3. pdbMainPowerOkAssert → HPM board sequencing → waitForHPMPowerGoodAssert
  *
  * Power-off PDB sequence (after HPM boards power down):
- *   1. De-assert 12V rails → waitForPDBMainPowerOff
+ *   1. De-assert 12V rails (HPM-AIC, GPU1, GPU2) → waitForPDBMainPowerOff
  *   2. pdbMainPowerOkDeAssert → de-assert PDBPSUPowerOn → waitForPDBPSUPowerOff
  *   3. pdbPSUPowerOkDeAssert → applyShutdownAction() → off or power cycle
  *
@@ -195,10 +195,10 @@ class C2PowerControl : public VRPowerControl
      * @brief Assert all three 12V rail enables and transition to
      * waitForPDBMainPowerOk
      *
-     * Called when PDBPSUPowerOk asserts. Asserts PDB12V_HPM-AICEnable,
-     * PDB12V_GPU1Enable, and PDB12V_GPU2_Enable, starts the
-     * PdbMainPowerOkWatchdogMs timer, then transitions to
-     * PowerState::waitForPDBMainPowerOk.
+     * Called when PDBPSUPowerOk asserts. Asserts the three 12V enables in
+     * order: PDB12V_GPU1Enable, then PDB12V_GPU2_Enable, then
+     * PDB12V_HPM-AICEnable. Starts the PdbMainPowerOkWatchdogMs timer, then
+     * transitions to PowerState::waitForPDBMainPowerOk.
      */
     void assert12VRailsAndWaitForPDBMainPowerOk();
 

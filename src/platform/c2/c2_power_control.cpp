@@ -81,12 +81,12 @@ void C2PowerControl::assert12VRailsAndWaitForPDBMainPowerOk()
     }
 
     lg2::info(
-        "PDB PSU Power OK asserted. Asserting 12V rails (HPM-AIC, GPU1, GPU2). "
+        "PDB PSU Power OK asserted. Asserting 12V rails in order: GPU1, GPU2, HPM-AIC. "
         "Starting PDB Main Power OK Watchdog Timer. "
         "Transitioning to PowerState::waitForPDBMainPowerOk.");
-    setGPIOOutput(pdb12vHPMAICEnable, pdb12vHPMAICEnable->polarity);
     setGPIOOutput(pdb12vGPU1Enable, pdb12vGPU1Enable->polarity);
     setGPIOOutput(pdb12vGPU2Enable, pdb12vGPU2Enable->polarity);
+    setGPIOOutput(pdb12vHPMAICEnable, pdb12vHPMAICEnable->polarity);
     startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
                Event::pdbMainPowerOkWatchdogTimerExpired);
     setPowerState(PowerState::waitForPDBMainPowerOk);
@@ -337,7 +337,7 @@ void C2PowerControl::initiatePDBPowerOff()
 
     // Always de-assert the 12V rail enables first
     lg2::info(
-        "HPM Board 0 Run Power Good de-asserted. De-asserting 12V rails (HPM-AIC, GPU1, GPU2).");
+        "HPM Board 0 Run Power Good de-asserted. De-asserting 12V rails in order: HPM-AIC, GPU1, GPU2.");
     setGPIOOutput(pdb12vHPMAICEnable, !pdb12vHPMAICEnable->polarity);
     setGPIOOutput(pdb12vGPU1Enable, !pdb12vGPU1Enable->polarity);
     setGPIOOutput(pdb12vGPU2Enable, !pdb12vGPU2Enable->polarity);
