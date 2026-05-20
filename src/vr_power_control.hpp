@@ -12,18 +12,16 @@ namespace power_control
 {
 
 /**
- * @brief Placeholder struct for board presence detection
+ * @brief Board presence detection results
  *
- * TODO: Replace with actual implementation from coworker
- * This struct will be populated by detectBoardPresence() method
+ * Populated by detectBoardPresence() from IOX paths declared in the
+ * platform's JSON resources section. Used by VR base and platform
+ * ctors to gate Board1 signal registration.
  */
 struct BoardPresence
 {
-    bool board0Present;    // HPM Board 0 IOX
-    bool board1Present;    // HPM Board 1 IOX
-    bool nvl72PdbPresent;  // NVL72 PDB IOX
-    bool c2PdbPresent;     // C2 PDB IOX
-    bool parsecPdbPresent; // Parsec/GB300 PDB IOX
+    bool board0Present = false; // HPM Board 0 IOX present at runtime
+    bool board1Present = false; // HPM Board 1 IOX present at runtime
 };
 
 /**
@@ -319,7 +317,6 @@ class VRPowerControl : public PowerControl
         "GracefulCpuShutdownOkWatchdogMs",
         "CpuResetWatchdogMs",
         "HPMPowerGoodWatchdogMs",
-        "PdbMainPowerOkWatchdogMs",
         "PowerCycleDelayMs",
         "ForceWarmRebootDelayMs",
         "GracefulWarmRebootDelayMs",
@@ -708,26 +705,49 @@ class VRPowerControl : public PowerControl
     /**
      * @brief Assert HPM board power sequence during power-on
      *
-     * VR default: asserts Board0/1 Pre System Reset, USB Power Enable, and
-     * Board0/1 Run Power Enable.
+     * VR default: asserts Board0/1 Pre System Reset, calls
+     * assertPlatformPeripherals(), then asserts Board0/1 Run Power Enable.
      *
-     * Platform classes override to insert additional peripheral enable
-     * signals (e.g. NVL72 adds E1S Power Enable, BMC SSD Reset de-assert,
-     * SSD Power Disable de-assert, and hardware-workaround sleeps).
+     * Platform classes override only when inter-step ordering needs to
+     * change (e.g. NVL72 inlines a 10 ms GPU_OVERT WAR sleep between
+     * Board0 and Board1 Run Power Enable).
      */
     virtual void assertHPMBoardPowerSequence();
 
     /**
      * @brief De-assert HPM power and peripheral signals during shutdown
      *
-     * VR default: de-asserts Board0/1 Run Power Enable and USB Power Enable.
+     * VR default: de-asserts Board0/1 Run Power Enable, then calls
+     * deassertPlatformPeripherals().
      *
-     * Platform classes override to de-assert additional peripheral signals
-     * (e.g. NVL72 also de-asserts E1S Power Enable).
-     * Overrides should call VRPowerControl::deassertHPMPowerAndPeripherals()
-     * first to handle the common signals.
+     * Platform classes typically override deassertPlatformPeripherals()
+     * rather than this method.
      */
     virtual void deassertHPMPowerAndPeripherals();
+
+    /**
+     * @brief Assert platform-specific peripheral signals during power-on
+     *
+     * Called from assertHPMBoardPowerSequence() between Pre System Reset
+     * assertion and Run Power Enable assertion. Default is a no-op.
+     *
+     * Platform classes override to assert peripherals like USB Power
+     * Enable, E1S Power Enable, SSD Power Disable de-assert, BMC SSD Reset
+     * de-assert, and any inter-step delays specific to those peripherals.
+     */
+    virtual void assertPlatformPeripherals() {}
+
+    /**
+     * @brief De-assert platform-specific peripheral signals during shutdown
+     *
+     * Called from deassertHPMPowerAndPeripherals() after Run Power Enable
+     * de-assertion. Default is a no-op.
+     *
+     * Platform classes override to de-assert peripherals on shutdown.
+     * Note: this need not symmetrically mirror assertPlatformPeripherals();
+     * some signals may be intentionally left in their power-on state.
+     */
+    virtual void deassertPlatformPeripherals() {}
 
     /**
      * @brief Initiate the PDB power-off sequence after HPM boards have

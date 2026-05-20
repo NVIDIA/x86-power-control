@@ -29,14 +29,25 @@ NVL72PowerControl::NVL72PowerControl(
         ioContext, conn, configFilePath, node,
         appState) // Call parent constructor (registers VR + PDB GPIOs)
 {
+    // Required resources (IOX paths). Declare before signals because the
+    // required GPIO signals live on these IOXs — if the IOX path is missing
+    // from config, no signal on it can be valid.
+    addRequiredResource("Board0IoxPath", ResourceType::IOXPath);
+    addRequiredResource("Board1IoxPath", ResourceType::IOXPath);
+    addRequiredResource("PdbIoxPath", ResourceType::IOXPath);
+
     // VRPowerControl constructor already registers:
-    //   PDBMainPowerOk (with pdbMainPowerOkHandler),
     //   Board0 VR signals, and Board1CpuShutdownOk (if board1Present).
     // Add NVL72-specific signals here.
+    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
+                      [this](bool state) {
+                          this->pdbMainPowerOkHandler(state);
+                      });
     addRequiredSignal("PDBMainPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("E1SPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("BMCSSDReset", 0, GPIODirection::OUT);
     addRequiredSignal("SSDPowerDisable", 0, GPIODirection::OUT);
+    addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
     if (boardPresence.board1Present)
     {
@@ -47,7 +58,9 @@ NVL72PowerControl::NVL72PowerControl(
         addBoard1GpioStateProperties();
     }
 
-    // Validate all required signals (VR + NVL72)
+    // Validate required resources first (IOX paths) then signals on them.
+
+    PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
 
     // Validate all required timers
@@ -211,18 +224,56 @@ void NVL72PowerControl::pdbMainPowerOkHandler(bool state)
 
 void NVL72PowerControl::assertHPMBoardPowerSequence()
 {
-    auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
-    if (!board0RunPowerEnable)
-    {
-        return;
-    }
-
     auto board0PreSystemReset = getSignal("Board0PreSystemReset");
     if (!board0PreSystemReset)
     {
         return;
     }
 
+    auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
+    if (!board0RunPowerEnable)
+    {
+        return;
+    }
+
+    // 1. PRE_SYS_RST_L for all present boards
+    setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
+
+    if (boardPresence.board1Present)
+    {
+        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
+        if (!board1PreSystemReset)
+        {
+            return;
+        }
+        setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
+    }
+
+    // 2. NVL72 peripherals (SSD/BMCSSDReset/1ms/USB/E1S)
+    assertPlatformPeripherals();
+
+    // 3. RUN_POWER_EN — Board0
+    setGPIOOutput(board0RunPowerEnable, board0RunPowerEnable->polarity);
+
+    // GPU_OVERT PWR FAULT WAR — non-POR; remove this override when fixed in HW
+    lg2::info(
+        "GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    // 4. RUN_POWER_EN — Board1
+    if (boardPresence.board1Present)
+    {
+        auto board1RunPowerEnable = getSignal("Board1RunPowerEnable");
+        if (!board1RunPowerEnable)
+        {
+            return;
+        }
+        setGPIOOutput(board1RunPowerEnable, board1RunPowerEnable->polarity);
+    }
+}
+
+void NVL72PowerControl::assertPlatformPeripherals()
+{
     auto usbPowerEnable = getSignal("USBPowerEnable");
     if (!usbPowerEnable)
     {
@@ -247,58 +298,30 @@ void NVL72PowerControl::assertHPMBoardPowerSequence()
         return;
     }
 
-    // Assert Pre System Reset for Board 0 and Board 1 (if present)
-    setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
-
-    if (boardPresence.board1Present)
-    {
-        auto board1PreSystemReset = getSignal("Board1PreSystemReset");
-        if (!board1PreSystemReset)
-        {
-            return;
-        }
-        setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
-    }
-
-    // Assert peripheral power and de-assert BMC SSD Reset
     setGPIOOutput(ssdPowerDisable, !ssdPowerDisable->polarity);
     setGPIOOutput(bmcSSDReset, !bmcSSDReset->polarity);
 
-    // sleep for 1 ms
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
 
     setGPIOOutput(usbPowerEnable, usbPowerEnable->polarity);
     setGPIOOutput(e1sPowerEnable, e1sPowerEnable->polarity);
-
-    // Assert Run Power Enable for Board 0 and Board 1 (if present)
-    setGPIOOutput(board0RunPowerEnable, board0RunPowerEnable->polarity);
-
-    lg2::info(
-        "GPU_OVERT PWR FAULT WAR: Sleeping for 10 ms after asserting Board 0 Run Power Enable");
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    if (boardPresence.board1Present)
-    {
-        auto board1RunPowerEnable = getSignal("Board1RunPowerEnable");
-        if (!board1RunPowerEnable)
-        {
-            return;
-        }
-        setGPIOOutput(board1RunPowerEnable, board1RunPowerEnable->polarity);
-    }
 }
 
-void NVL72PowerControl::deassertHPMPowerAndPeripherals()
+void NVL72PowerControl::deassertPlatformPeripherals()
 {
-    // De-assert the common VR signals first (Board0/1 RunPowerEnable + USB)
-    VRPowerControl::deassertHPMPowerAndPeripherals();
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
 
-    // NVL72-specific: also de-assert E1S Power Enable
     auto e1sPowerEnable = getSignal("E1SPowerEnable");
     if (!e1sPowerEnable)
     {
         return;
     }
+
+    setGPIOOutput(usbPowerEnable, !usbPowerEnable->polarity);
     setGPIOOutput(e1sPowerEnable, !e1sPowerEnable->polarity);
 }
 
@@ -331,6 +354,12 @@ void NVL72PowerControl::setDefaultValues()
         return;
     }
 
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
     // PDB Main Power Enable: ON=Asserted, OFF=DeAsserted
     pdbMainPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
     pdbMainPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
@@ -347,6 +376,10 @@ void NVL72PowerControl::setDefaultValues()
     ssdPowerDisable->defaultStateHostStateOn = DefaultState::DeAsserted;
     ssdPowerDisable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
+    // USB Power Enable: ON=Asserted, OFF=DeAsserted
+    usbPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    usbPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
+
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();
 
@@ -356,7 +389,19 @@ void NVL72PowerControl::setDefaultValues()
 
 void NVL72PowerControl::validateTimerConfigs()
 {
-    // PdbMainPowerOkWatchdogMs is now validated by VRPowerControl
+    for (const auto& timerName : nvl72RequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error(
+                "Required NVL72 timer config '{TIMER}' not found in config",
+                "TIMER", timerName);
+            throw std::runtime_error(
+                "NVL72PowerControl: Required timer config missing: " +
+                timerName);
+        }
+    }
+
     VRPowerControl::validateTimerConfigs();
 
     lg2::info(
