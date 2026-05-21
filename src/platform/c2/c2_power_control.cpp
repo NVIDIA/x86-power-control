@@ -19,24 +19,14 @@ C2PowerControl::C2PowerControl(
     VRPowerControl(ioContext, conn, configFilePath, node, appState),
     pdbPSUPowerOkWatchdogTimer(ioContext)
 {
-    // Required resources (IOX paths). Declare before signals because the
-    // required GPIO signals live on these IOXs — if the IOX path is missing
-    // from config, no signal on it can be valid.
-    addRequiredResource("Board0IoxPath", ResourceType::IOXPath);
-    addRequiredResource("PdbIoxPath", ResourceType::IOXPath);
-
     // VRPowerControl constructor already registers:
+    //   PDBMainPowerOk (with pdbMainPowerOkHandler),
     //   Board0 VR signals (RunPowerEnable, RunPowerPG, PreSystemReset,
-    //   CpuShutdownForce/Request/Ok, CpuResetIndicator).
+    //   CpuShutdownForce/Request/Ok, CpuResetIndicator, USBPowerEnable).
     // C2 is 1P — no Board 1 signals needed. C2 has no PDBMainPowerEnable;
     // the PDB PSU enable signal is PDBPSUPowerOn (registered below).
-    // USBPowerEnable is C2-specific, registered here.
     // Add C2-specific PDB signals here.
 
-    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
-                      [this](bool state) {
-                          this->pdbMainPowerOkHandler(state);
-                      });
     addRequiredSignal("PDBPSUPowerOn", 0, GPIODirection::OUT);
     addRequiredSignal("PDBPSUPowerOk", 0, GPIODirection::IN,
                       [this](bool state) {
@@ -45,10 +35,8 @@ C2PowerControl::C2PowerControl(
     addRequiredSignal("PDB12V_HPM-AICEnable", 0, GPIODirection::OUT);
     addRequiredSignal("PDB12V_GPU1Enable", 0, GPIODirection::OUT);
     addRequiredSignal("PDB12V_GPU2_Enable", 0, GPIODirection::OUT);
-    addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
-    // Validate required resources first (IOX paths) then signals on them.
-    PowerControl::validateRequiredResources();
+    // Validate all required signals (VR + C2)
     PowerControl::validateRequiredSignals();
 
     // Validate all required timers
@@ -459,12 +447,6 @@ void C2PowerControl::setDefaultValues()
         return;
     }
 
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-
     // PDB PSU Power On (active_low enable): ON=Asserted, OFF=DeAsserted
     pdbPSUPowerOn->defaultStateHostStateOn = DefaultState::Asserted;
     pdbPSUPowerOn->defaultStateHostStateOff = DefaultState::DeAsserted;
@@ -478,10 +460,6 @@ void C2PowerControl::setDefaultValues()
 
     pdb12vGPU2Enable->defaultStateHostStateOn = DefaultState::Asserted;
     pdb12vGPU2Enable->defaultStateHostStateOff = DefaultState::DeAsserted;
-
-    // USB Power Enable: ON=Asserted, OFF=DeAsserted
-    usbPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
-    usbPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();
@@ -561,30 +539,6 @@ void C2PowerControl::handleWaitForPDBPSUPowerOff(Event event)
                       getEventName(event));
             break;
     }
-}
-
-// ============================================================================
-// Platform peripheral hooks
-// ============================================================================
-
-void C2PowerControl::assertPlatformPeripherals()
-{
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-    setGPIOOutput(usbPowerEnable, usbPowerEnable->polarity);
-}
-
-void C2PowerControl::deassertPlatformPeripherals()
-{
-    auto usbPowerEnable = getSignal("USBPowerEnable");
-    if (!usbPowerEnable)
-    {
-        return;
-    }
-    setGPIOOutput(usbPowerEnable, !usbPowerEnable->polarity);
 }
 
 } // namespace power_control

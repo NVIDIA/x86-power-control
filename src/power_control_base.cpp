@@ -569,77 +569,6 @@ void PowerControl::loadConfigValues()
     lg2::info("Successfully loaded {COUNT} signal configurations from JSON",
               "COUNT", powerSignalMap.size());
 
-    // Load resources (e.g. IOX paths) from JSON config
-    if (jsonData.contains("resources"))
-    {
-        auto resources = jsonData["resources"];
-        if (resources.is_array())
-        {
-            for (nlohmann::json& resourceConfig : resources)
-            {
-                if (!resourceConfig.contains("Name"))
-                {
-                    lg2::error(
-                        "The 'Name' field must be defined for a resource entry");
-                    throw std::runtime_error(
-                        "Missing 'Name' field in JSON resources");
-                }
-                if (!resourceConfig.contains("Type"))
-                {
-                    lg2::error(
-                        "The 'Type' field must be defined for a resource entry");
-                    throw std::runtime_error(
-                        "Missing 'Type' field for resource: " +
-                        resourceConfig["Name"].get<std::string>());
-                }
-                if (!resourceConfig.contains("Path"))
-                {
-                    lg2::error(
-                        "The 'Path' field must be defined for a resource entry");
-                    throw std::runtime_error(
-                        "Missing 'Path' field for resource: " +
-                        resourceConfig["Name"].get<std::string>());
-                }
-
-                auto resourcePtr = std::make_shared<ResourceConfig>();
-                resourcePtr->name = resourceConfig["Name"];
-                resourcePtr->path = resourceConfig["Path"];
-
-                std::string typeStr = resourceConfig["Type"];
-                if (typeStr == "IOXPath")
-                {
-                    resourcePtr->type = ResourceType::IOXPath;
-                }
-                else
-                {
-                    lg2::error(
-                        "{TYPE} is not a recognized resource type for {NAME}",
-                        "TYPE", typeStr, "NAME", resourcePtr->name);
-                    throw std::runtime_error(
-                        "Invalid resource type: " + typeStr);
-                }
-
-                auto [_, inserted] =
-                    resourceMap.emplace(resourcePtr->name, resourcePtr);
-                if (!inserted)
-                {
-                    lg2::error("Duplicate resource '{NAME}' found in config",
-                               "NAME", resourcePtr->name);
-                    throw std::runtime_error(
-                        "Duplicate resource in config: " + resourcePtr->name);
-                }
-            }
-            lg2::info(
-                "Successfully loaded {COUNT} resource configurations from JSON",
-                "COUNT", resourceMap.size());
-        }
-        else
-        {
-            lg2::warning(
-                "'resources' field in JSON is not an array, skipping resource loading");
-        }
-    }
-
     // Load timer values from JSON config
     if (jsonData.contains("timing_configs"))
     {
@@ -2278,49 +2207,6 @@ void PowerControl::validateRequiredSignals()
     }
 
     lg2::info("Signal validation complete - all required signals present");
-}
-
-void PowerControl::addRequiredResource(const std::string& resourceName,
-                                       ResourceType type)
-{
-    requiredResources.emplace_back(resourceName, type);
-}
-
-void PowerControl::validateRequiredResources()
-{
-    lg2::info("Validating required resources");
-    for (const auto& [resourceName, expectedType] : requiredResources)
-    {
-        lg2::info("Required resource: '{RESOURCE}'", "RESOURCE", resourceName);
-        auto it = resourceMap.find(resourceName);
-        if (it == resourceMap.end())
-        {
-            lg2::error("Required resource '{RESOURCE}' not found in config",
-                       "RESOURCE", resourceName);
-            throw std::runtime_error(
-                "Required resource missing from config: " + resourceName);
-        }
-        if (it->second->type != expectedType)
-        {
-            lg2::error("Required resource '{RESOURCE}' has wrong type",
-                       "RESOURCE", resourceName);
-            throw std::runtime_error(
-                "Required resource has wrong type: " + resourceName);
-        }
-        lg2::info("'{RESOURCE}' found in config", "RESOURCE", resourceName);
-    }
-    lg2::info("Resource validation complete - all required resources present");
-}
-
-std::shared_ptr<ResourceConfig> PowerControl::getResource(
-    const std::string& resourceName)
-{
-    auto it = resourceMap.find(resourceName);
-    if (it == resourceMap.end())
-    {
-        return nullptr;
-    }
-    return it->second;
 }
 
 void PowerControl::validateTimerConfigs()
