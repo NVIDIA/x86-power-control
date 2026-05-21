@@ -130,29 +130,10 @@ class C2PowerControl : public VRPowerControl
     /**
      * @brief Set default values for C2 output signals (C2 override)
      *
-     * Sets C2-specific PDB signal defaults (PSU enable, 12V rails) and the
-     * USB Power Enable defaults, then calls VRPowerControl::setDefaultValues()
-     * for common VR defaults.
+     * Sets C2-specific PDB signal defaults (PSU enable, 12V rails), then
+     * calls VRPowerControl::setDefaultValues() for common VR defaults.
      */
     void setDefaultValues() override;
-
-    /**
-     * @brief Assert C2 platform peripherals (C2 override)
-     *
-     * Asserts USB Power Enable. Called from
-     * VRPowerControl::assertHPMBoardPowerSequence() between Pre System Reset
-     * assertion and Run Power Enable assertion.
-     */
-    void assertPlatformPeripherals() override;
-
-    /**
-     * @brief De-assert C2 platform peripherals (C2 override)
-     *
-     * De-asserts USB Power Enable. Called from
-     * VRPowerControl::deassertHPMPowerAndPeripherals() after Run Power Enable
-     * de-assertion.
-     */
-    void deassertPlatformPeripherals() override;
 
     /**
      * @brief Validate required timer configurations for C2 (C2 override)
@@ -246,7 +227,6 @@ class C2PowerControl : public VRPowerControl
      */
     const std::vector<std::string> c2RequiredTimeoutValues = {
         "PdbPSUPowerOkWatchdogMs",
-        "PdbMainPowerOkWatchdogMs",
     };
 
     /**

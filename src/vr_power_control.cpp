@@ -51,6 +51,7 @@ VRPowerControl::VRPowerControl(
                       [this](bool state) {
                           this->cpuResetIndicatorHandler(state);
                       });
+    addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
 
     // Add Board 1 handler if Board 1 is present
     if (boardPresence.board1Present)
@@ -61,49 +62,46 @@ VRPowerControl::VRPowerControl(
                           });
     }
 
+    // Add PDB signals shared by all VR platforms
+    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
+                      [this](bool state) {
+                          this->pdbMainPowerOkHandler(state);
+                      });
+    // Note: PDBMainPowerEnable is NOT registered here — each platform registers
+    // its own PDB enable signal(s) in its constructor (e.g. NVL72 registers
+    // PDBMainPowerEnable; C2 has no such signal and uses PDBPSUPowerOn
+    // instead).
+
     // call validateRequiredSignals() in the platform-specific class constructor
     // validateRequiredSignals();
 }
 
 void VRPowerControl::detectBoardPresence()
 {
-    // Resolve IOX paths from the resources section of the platform's JSON
-    // config. getResource() returns nullptr silently for resources that
-    // aren't declared — platforms that don't have a Board 1 IOX
-    // (e.g. VR NVL8) simply don't declare Board1IoxPath and Board1 is
-    // reported not-present.
-    auto board0 = getResource("Board0IoxPath");
-    if (board0)
-    {
-        boardPresence.board0Present = checkIOXPresence(board0->path);
-    }
+    // Check presence and update context using paths from build configuration
+    boardPresence.parsecPdbPresent = checkIOXPresence(GB300_PDB_IOX_PATH);
+    boardPresence.c2PdbPresent = checkIOXPresence(C2_PDB_IOX_PATH);
+    boardPresence.nvl72PdbPresent = checkIOXPresence(NVL72_PDB_IOX_PATH);
+    boardPresence.board0Present = checkIOXPresence(BOARD0_IOX_PATH);
+    boardPresence.board1Present = checkIOXPresence(BOARD1_IOX_PATH);
 
-    auto board1 = getResource("Board1IoxPath");
-    if (board1)
-    {
-        boardPresence.board1Present = checkIOXPresence(board1->path);
-    }
-
+    // Log detected board presence
     lg2::info("Board presence detection:");
-    if (board0)
-    {
-        lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH", board0->path,
-                  "PRESENT", boardPresence.board0Present);
-    }
-    else
-    {
-        lg2::error("  Board 0: not declared in resources");
-    }
-    if (board1)
-    {
-        lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH", board1->path,
-                  "PRESENT", boardPresence.board1Present);
-    }
-    else
-    {
-        lg2::info("  Board 1: not declared in resources (expected on 1P "
-                  "platforms)");
-    }
+    lg2::info("  GB300 PDB ({PATH}): {PRESENT}", "PATH",
+              std::string(GB300_PDB_IOX_PATH), "PRESENT",
+              boardPresence.parsecPdbPresent);
+    lg2::info("  C2 PDB ({PATH}): {PRESENT}", "PATH",
+              std::string(C2_PDB_IOX_PATH), "PRESENT",
+              boardPresence.c2PdbPresent);
+    lg2::info("  NVL72 PDB ({PATH}): {PRESENT}", "PATH",
+              std::string(NVL72_PDB_IOX_PATH), "PRESENT",
+              boardPresence.nvl72PdbPresent);
+    lg2::info("  Board 0 ({PATH}): {PRESENT}", "PATH",
+              std::string(BOARD0_IOX_PATH), "PRESENT",
+              boardPresence.board0Present);
+    lg2::info("  Board 1 ({PATH}): {PRESENT}", "PATH",
+              std::string(BOARD1_IOX_PATH), "PRESENT",
+              boardPresence.board1Present);
 }
 
 // Board presence detection functions
@@ -726,13 +724,19 @@ void VRPowerControl::assertHPMBoardPowerSequence()
         return;
     }
 
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
     auto board0RunPowerEnable = getSignal("Board0RunPowerEnable");
     if (!board0RunPowerEnable)
     {
         return;
     }
 
-    // 1. PRE_SYS_RST_L for all present boards
+    // Assert Pre System Reset for Board 0
     setGPIOOutput(board0PreSystemReset, board0PreSystemReset->polarity);
 
     if (boardPresence.board1Present)
@@ -745,10 +749,7 @@ void VRPowerControl::assertHPMBoardPowerSequence()
         setGPIOOutput(board1PreSystemReset, board1PreSystemReset->polarity);
     }
 
-    // 2. Platform peripherals (USB, E1S, SSD, ...) — no-op in base
-    assertPlatformPeripherals();
-
-    // 3. RUN_POWER_EN for all present boards
+    setGPIOOutput(usbPowerEnable, usbPowerEnable->polarity);
     setGPIOOutput(board0RunPowerEnable, board0RunPowerEnable->polarity);
 
     if (boardPresence.board1Present)
@@ -785,7 +786,12 @@ void VRPowerControl::deassertHPMPowerAndPeripherals()
         return;
     }
 
-    // 1. De-assert RUN_POWER_EN for all present boards
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
     setGPIOOutput(board0RunPowerEnable, !board0RunPowerEnable->polarity);
 
     if (boardPresence.board1Present)
@@ -798,8 +804,7 @@ void VRPowerControl::deassertHPMPowerAndPeripherals()
         setGPIOOutput(board1RunPowerEnable, !board1RunPowerEnable->polarity);
     }
 
-    // 2. Platform peripherals — no-op in base
-    deassertPlatformPeripherals();
+    setGPIOOutput(usbPowerEnable, !usbPowerEnable->polarity);
 }
 
 void VRPowerControl::transitionToHPMPowerGoodDeAssertState()
@@ -2122,6 +2127,12 @@ void VRPowerControl::setDefaultValues()
         return;
     }
 
+    auto usbPowerEnable = getSignal("USBPowerEnable");
+    if (!usbPowerEnable)
+    {
+        return;
+    }
+
     // Board 1 signals (if present)
     std::shared_ptr<ConfigData> board1RunPowerEnable;
     std::shared_ptr<ConfigData> board1PreSystemReset;
@@ -2155,6 +2166,9 @@ void VRPowerControl::setDefaultValues()
         DefaultState::DeAsserted;
     board0CpuShutdownRequest->defaultStateHostStateOff =
         DefaultState::DeAsserted;
+
+    usbPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    usbPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     if (boardPresence.board1Present)
     {

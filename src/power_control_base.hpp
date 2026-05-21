@@ -73,34 +73,6 @@ enum class GPIODirection
 };
 
 /**
- * @brief Resource type enumeration
- *
- * Categorizes entries in the JSON "resources" section so the loader and
- * consumers can interpret the value field correctly. Add new variants as
- * new categories of declarative resources are needed (e.g. I2CBus,
- * SysfsFile, DBusService).
- */
-enum class ResourceType
-{
-    IOXPath,
-};
-
-/**
- * @brief Resource configuration entry
- *
- * Populated from the JSON "resources" section by loadConfigValues().
- * Stored in resourceMap keyed by name. Consumers look up by name via
- * getResource() and use path for filesystem-style resources (e.g. IOX
- * sysfs paths).
- */
-struct ResourceConfig
-{
-    std::string name;
-    ResourceType type;
-    std::string path;
-};
-
-/**
  * @brief Restart Cause enumeration
  *
  * Tracks the reason for a host restart/reboot.
@@ -817,15 +789,6 @@ class PowerControl
     std::map<std::string, std::shared_ptr<ConfigData>> powerSignalMap;
 
     /**
-     * @brief Resource map - maps resource names to ResourceConfig
-     *
-     * Populated from the JSON "resources" section by loadConfigValues().
-     * Holds declarative resources like IOX sysfs paths. Each platform's
-     * deployed JSON declares only the resources that platform needs.
-     */
-    std::map<std::string, std::shared_ptr<ResourceConfig>> resourceMap;
-
-    /**
      * @brief Reference to the io_context for async operations
      */
     boost::asio::io_context& ioContext;
@@ -889,56 +852,6 @@ class PowerControl
     void addRequiredSignal(const std::string& signalName, int boardIndex,
                            GPIODirection direction,
                            std::function<void(bool)> handler = nullptr);
-
-    /**
-     * @brief Required resources (declared by platform ctors)
-     *
-     * Each entry pairs a resource name (key into resourceMap) with the
-     * expected ResourceType. validateRequiredResources() iterates this list
-     * and throws on missing or wrong-typed entries.
-     */
-    std::vector<std::pair<std::string, ResourceType>> requiredResources;
-
-    /**
-     * @brief Declare a resource as required for the platform
-     *
-     * Mirrors addRequiredSignal: platforms call this in their constructors
-     * to declare resources (e.g. IOX paths) they expect the deployed JSON
-     * config to provide. validateRequiredResources() enforces presence.
-     *
-     * @param resourceName Lookup key (e.g. "Board0IoxPath")
-     * @param type Expected resource type
-     */
-    void addRequiredResource(const std::string& resourceName,
-                             ResourceType type);
-
-    /**
-     * @brief Validate that all required resources are present in resourceMap
-     *
-     * Iterates requiredResources, verifies each name exists in resourceMap
-     * and that its type matches the declared expectation.
-     *
-     * @throws std::runtime_error if any required resource is missing or has
-     * the wrong type
-     */
-    virtual void validateRequiredResources();
-
-    /**
-     * @brief Look up a resource by name
-     *
-     * Silent on miss — returns nullptr without logging. Callers decide
-     * whether absence is an error: required-resource access (e.g. NVL72's
-     * PdbIoxPath) should log/handle nullptr loudly, while optional
-     * lookups (e.g. detectBoardPresence checking Board1IoxPath on a 1P
-     * platform) treat nullptr as "not declared, expected absent." For
-     * declaration-time enforcement, use addRequiredResource() +
-     * validateRequiredResources() instead.
-     *
-     * @param resourceName Name of the resource to look up
-     * @return shared_ptr to the ResourceConfig if found, nullptr otherwise
-     */
-    std::shared_ptr<ResourceConfig> getResource(
-        const std::string& resourceName);
 
     /**
      * @brief Map of GPIO signal names to their handler functions
