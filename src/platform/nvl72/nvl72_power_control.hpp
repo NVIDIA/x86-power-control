@@ -80,27 +80,39 @@ class NVL72PowerControl : public VRPowerControl
     /**
      * @brief Assert HPM board power sequence during power-on (NVL72 override)
      *
-     * NVL72-specific sequence: Board0/1 Pre System Reset, SSD Power Disable
-     * de-assert, BMC SSD Reset de-assert, 1 ms delay, USB + E1S Power Enable,
-     * Board0 Run Power Enable, 10 ms GPU WAR delay, Board1 Run Power Enable.
+     * Mirrors VRPowerControl::assertHPMBoardPowerSequence() but inlines a
+     * 10 ms GPU_OVERT WAR sleep between Board0 and Board1 Run Power Enable.
+     * Calls assertPlatformPeripherals() between Pre System Reset and Run
+     * Power Enable, same as the base sequence. Remove this override when
+     * the WAR is fixed in hardware — NVL72 will then fall back to the base.
      */
     void assertHPMBoardPowerSequence() override;
 
     /**
-     * @brief De-assert HPM power and peripherals during shutdown
-     * (NVL72 override)
+     * @brief Assert NVL72 platform peripherals (NVL72 override)
      *
-     * Calls VRPowerControl::deassertHPMPowerAndPeripherals() for the common
-     * signals (Board0/1 RunPowerEnable, USB), then additionally de-asserts
-     * E1S Power Enable.
+     * SSD Power Disable de-assert, BMC SSD Reset de-assert, 1 ms delay,
+     * then USB Power Enable and E1S Power Enable. Called from
+     * assertHPMBoardPowerSequence() between Pre System Reset assertion and
+     * Run Power Enable assertion.
      */
-    void deassertHPMPowerAndPeripherals() override;
+    void assertPlatformPeripherals() override;
+
+    /**
+     * @brief De-assert NVL72 platform peripherals (NVL72 override)
+     *
+     * De-asserts USB Power Enable and E1S Power Enable. Called from
+     * VRPowerControl::deassertHPMPowerAndPeripherals() after Run Power
+     * Enable de-assertion.
+     */
+    void deassertPlatformPeripherals() override;
 
     /**
      * @brief Set default values for NVL72 output signals (NVL72 override)
      *
-     * Sets NVL72-specific PDB signal defaults, then calls
-     * VRPowerControl::setDefaultValues() for common VR defaults.
+     * Sets NVL72-specific PDB signal defaults and USB Power Enable
+     * defaults, then calls VRPowerControl::setDefaultValues() for common
+     * VR defaults.
      */
     void setDefaultValues() override;
 
@@ -108,9 +120,9 @@ class NVL72PowerControl : public VRPowerControl
      * @brief Validate that all required timer configurations for NVL72 are
      * present in TimerMap (NVL72 override)
      *
-     * NVL72 has no platform-specific timers beyond what VRPowerControl
-     * validates (PdbMainPowerOkWatchdogMs is now in vrRequiredTimeoutValues).
-     * Delegates directly to VRPowerControl::validateTimerConfigs().
+     * Validates NVL72-specific timers (PdbMainPowerOkWatchdogMs) then
+     * delegates to VRPowerControl::validateTimerConfigs() for common
+     * HPM/VR timers.
      */
     void validateTimerConfigs() override;
 
@@ -177,6 +189,13 @@ class NVL72PowerControl : public VRPowerControl
      */
     const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
                                                       "PDBMainPowerOk"};
+
+    /**
+     * @brief NVL72-specific required timer configuration keys
+     */
+    const std::vector<std::string> nvl72RequiredTimeoutValues = {
+        "PdbMainPowerOkWatchdogMs",
+    };
 };
 
 } // namespace power_control
