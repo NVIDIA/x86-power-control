@@ -42,10 +42,13 @@ if get_option('cpu-reset-early-assert-war').allowed()
     cpp_args += '-DCPU_RESET_EARLY_ASSERT_WAR'
 endif
 
-# IOX paths are no longer compile-time options — each platform's deployed
-# power-config-host0.json (shipped by its BSP meta layer) declares its IOX
-# paths in the "resources" section, validated at runtime.
+# Configure IOX paths
 conf_data = configuration_data()
+conf_data.set_quoted('GB300_PDB_IOX_PATH', get_option('gb300-pdb-iox-path'))
+conf_data.set_quoted('C2_PDB_IOX_PATH', get_option('c2-pdb-iox-path'))
+conf_data.set_quoted('NVL72_PDB_IOX_PATH', get_option('nvl72-pdb-iox-path'))
+conf_data.set_quoted('BOARD0_IOX_PATH', get_option('board0-iox-path'))
+conf_data.set_quoted('BOARD1_IOX_PATH', get_option('board1-iox-path'))
 
 conf_data.set_quoted('OBMC_STANDBY_TARGET', get_option('obmc-standby-target'))
 conf_data.set_quoted(
@@ -84,7 +87,6 @@ executable(
     'src/vr_power_control.cpp',
     'src/platform/nvl72/nvl72_power_control.cpp',
     'src/platform/c2/c2_power_control.cpp',
-    'src/platform/vr_nvl8/vr_nvl8_power_control.cpp',
     include_directories: include_directories('src'),
     cpp_args: cpp_args,
     dependencies: deps,

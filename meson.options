@@ -30,6 +30,36 @@ option(
 )
 
 option(
+    'gb300-pdb-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/9-0075',
+    description: 'GB300 PDB IOX PCA953x driver bound path',
+)
+option(
+    'c2-pdb-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/9-0024',
+    description: 'C2 PDB IOX PCA953x driver bound path',
+)
+option(
+    'nvl72-pdb-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/9-0020',
+    description: 'NVL72 PDB IOX PCA953x driver bound path',
+)
+option(
+    'board0-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/2-0020',
+    description: 'Board 0 IOX PCA953x driver bound path',
+)
+option(
+    'board1-iox-path',
+    type: 'string',
+    value: '/sys/bus/i2c/drivers/pca953x/7-0020',
+    description: 'Board 1 IOX PCA953x driver bound path',
+)
+option(
     'obmc-standby-target',
     type: 'string',
     value: 'multi-user.target',
