@@ -70,12 +70,14 @@ class NVL72PowerControl : public VRPowerControl
     // =========================================================================
 
     /**
-     * @brief Handler for PDB Main Power OK GPIO events (NVL72 override)
+     * @brief Handler for PDB Main Power OK GPIO events (NVL72)
      *
      * Applies the NVL72 HSC alert-mask WAR on each PDBMainPowerOk assert,
-     * then delegates to VRPowerControl::pdbMainPowerOkHandler().
+     * then dispatches the assert/de-assert event. An unexpected de-assertion
+     * (outside waitForPDBMainPowerOff) is treated as a power fault and handled
+     * by checkAndHandlePdbMainPowerOkFault().
      */
-    void pdbMainPowerOkHandler(bool state) override;
+    void pdbMainPowerOkHandler(bool state);
 
     /**
      * @brief Assert HPM board power sequence during power-on (NVL72 override)
@@ -138,6 +140,21 @@ class NVL72PowerControl : public VRPowerControl
      * Called only when boardPresence.board1Present is true.
      */
     void addBoard1GpioStateProperties();
+
+    /**
+     * @brief Detect and handle an unexpected PDB Main Power OK de-assertion
+     *
+     * Mirrors checkAndHandleRunPowerFault for PDBMainPowerOk: if PDBMainPowerOk
+     * de-asserts while NOT in waitForPDBMainPowerOff (the only state where a
+     * de-assertion is expected), logs a POWER FAULT, emits a
+     * ResourceErrorsDetected event log, clears the action, and transitions to
+     * off via transitionToOffStateWithRunPowerCheck().
+     *
+     * @param powerControlEvent The assert/de-assert event derived from the GPIO
+     * @return true if a fault was detected and handled (caller should return)
+     * @return false if normal event processing should continue
+     */
+    bool checkAndHandlePdbMainPowerOkFault(Event powerControlEvent);
 
     /**
      * @brief De-assert PDB Main Power Enable during shutdown

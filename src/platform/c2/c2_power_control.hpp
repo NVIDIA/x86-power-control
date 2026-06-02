@@ -197,6 +197,32 @@ class C2PowerControl : public VRPowerControl
     // =========================================================================
 
     /**
+     * @brief Handler for PDB Main Power OK GPIO events (C2)
+     *
+     * Dispatches the assert/de-assert event. An unexpected de-assertion
+     * (outside waitForPDBMainPowerOff) is treated as a power fault and handled
+     * by checkAndHandlePdbMainPowerOkFault().
+     *
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    void pdbMainPowerOkHandler(bool state);
+
+    /**
+     * @brief Detect and handle an unexpected PDB Main Power OK de-assertion
+     *
+     * Mirrors checkAndHandleRunPowerFault for PDBMainPowerOk: if PDBMainPowerOk
+     * de-asserts while NOT in waitForPDBMainPowerOff (the only state where a
+     * de-assertion is expected), logs a POWER FAULT, emits a
+     * ResourceErrorsDetected event log, clears the action, and transitions to
+     * off via transitionToOffStateWithRunPowerCheck().
+     *
+     * @param powerControlEvent The assert/de-assert event derived from the GPIO
+     * @return true if a fault was detected and handled (caller should return)
+     * @return false if normal event processing should continue
+     */
+    bool checkAndHandlePdbMainPowerOkFault(Event powerControlEvent);
+
+    /**
      * @brief Handler for PDBPSUPowerOk GPIO events
      *
      * Sends Event::pdbPSUPowerOkAssert or Event::pdbPSUPowerOkDeAssert
