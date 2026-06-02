@@ -217,6 +217,7 @@ struct ConfigData
     std::chrono::milliseconds pollIntervalMs;
     std::unique_ptr<boost::asio::steady_timer> pollTimer;
     int lastPolledValue; // -1 = unknown / not yet sampled
+    bool gpioUnavailableLogged;
 
     // Default states for output signals in different host states
     DefaultState defaultStateHostStateOn;  // Default state when host is on
@@ -226,7 +227,7 @@ struct ConfigData
     ConfigData(boost::asio::io_context& io) :
         eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false),
         polled(false), pollIntervalMs(100), lastPolledValue(-1),
-        defaultStateHostStateOn(DefaultState::NA),
+        gpioUnavailableLogged(false), defaultStateHostStateOn(DefaultState::NA),
         defaultStateHostStateOff(DefaultState::NA)
     {}
 };
@@ -1421,6 +1422,20 @@ class PowerControl
      * expanders).
      */
     bool requestGPIOPolled(ConfigData& config);
+
+    /**
+     * @brief Request the configured line for polled GPIO input.
+     *
+     * This is used both during initial setup and after a gpiochip disappears
+     * and the cached gpiod line has been cleared.
+     */
+    bool requestPolledGPIOLine(ConfigData& config);
+
+    /** Release and clear the cached GPIO line and event descriptor. */
+    void clearGPIOLine(ConfigData& config);
+
+    /** Log GPIO unavailability once until the line is recovered. */
+    void logGPIOUnavailable(ConfigData& config, const std::string& error);
 
     /** Schedule the next polling sample. */
     void schedulePollTimer(ConfigData& config);

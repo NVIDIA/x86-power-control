@@ -28,6 +28,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -824,34 +825,33 @@ int PowerControl::readGPIOValue(ConfigData& config)
     {
         return config.gpioLine.get_value();
     }
+    catch (const std::system_error& e)
+    {
+        if (e.code().value() == ENODEV)
+        {
+            logGPIOUnavailable(config, e.what());
+            clearGPIOLine(config);
+            return -1;
+        }
+
+        lg2::error("Failed to read GPIO '{SIGNAL}' ({GPIO_NAME}): {ERROR}",
+                   "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+                   e.what());
+        return -1;
+    }
     catch (const std::exception& e)
     {
         lg2::error("Failed to read GPIO '{SIGNAL}' ({GPIO_NAME}): {ERROR}",
                    "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
-                   e);
+                   e.what());
         return -1;
     }
 }
 
 bool PowerControl::requestGPIOPolled(ConfigData& config)
 {
-    config.gpioLine = gpiod::find_line(config.lineName);
-    if (!config.gpioLine)
+    if (!requestPolledGPIOLine(config))
     {
-        lg2::error("Failed to find the {GPIO_NAME} line (polled)", "GPIO_NAME",
-                   config.lineName);
-        return false;
-    }
-
-    try
-    {
-        config.gpioLine.request(
-            {appName, gpiod::line_request::DIRECTION_INPUT, {}});
-    }
-    catch (const std::exception& e)
-    {
-        lg2::error("Failed to request polled input for {GPIO_NAME}: {ERROR}",
-                   "GPIO_NAME", config.lineName, "ERROR", e);
         return false;
     }
 
@@ -906,6 +906,12 @@ void PowerControl::pollGPIOTick(ConfigData& config,
         return;
     }
 
+    if (!config.gpioLine && !requestPolledGPIOLine(config))
+    {
+        schedulePollTimer(config);
+        return;
+    }
+
     int value = readGPIOValue(config);
     if (value >= 0 && value != config.lastPolledValue)
     {
@@ -922,6 +928,86 @@ void PowerControl::pollGPIOTick(ConfigData& config,
     }
 
     schedulePollTimer(config);
+}
+
+void PowerControl::clearGPIOLine(ConfigData& config)
+{
+    if (config.eventDescriptor.is_open())
+    {
+        boost::system::error_code ec;
+        config.eventDescriptor.close(ec);
+        if (ec)
+        {
+            lg2::warning(
+                "Failed to close GPIO event descriptor for '{SIGNAL}': {ERROR}",
+                "SIGNAL", config.name, "ERROR", ec.message());
+        }
+    }
+
+    if (config.gpioLine)
+    {
+        try
+        {
+            if (config.gpioLine.is_requested())
+            {
+                config.gpioLine.release();
+            }
+        }
+        catch (const std::exception& e)
+        {
+            lg2::warning("Failed to release GPIO '{SIGNAL}' ({GPIO_NAME}): "
+                         "{ERROR}",
+                         "SIGNAL", config.name, "GPIO_NAME", config.lineName,
+                         "ERROR", e.what());
+        }
+
+        config.gpioLine = gpiod::line{};
+    }
+}
+
+void PowerControl::logGPIOUnavailable(ConfigData& config,
+                                      const std::string& error)
+{
+    if (config.gpioUnavailableLogged)
+    {
+        return;
+    }
+
+    lg2::error("GPIO '{SIGNAL}' ({GPIO_NAME}) is unavailable: {ERROR}",
+               "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+               error);
+    config.gpioUnavailableLogged = true;
+}
+
+bool PowerControl::requestPolledGPIOLine(ConfigData& config)
+{
+    config.gpioLine = gpiod::find_line(config.lineName);
+    if (!config.gpioLine)
+    {
+        logGPIOUnavailable(config, "line not found");
+        return false;
+    }
+
+    try
+    {
+        config.gpioLine.request(
+            {appName, gpiod::line_request::DIRECTION_INPUT, {}});
+    }
+    catch (const std::exception& e)
+    {
+        logGPIOUnavailable(config, e.what());
+        clearGPIOLine(config);
+        return false;
+    }
+
+    if (config.gpioUnavailableLogged)
+    {
+        lg2::info("GPIO '{SIGNAL}' ({GPIO_NAME}) is available again", "SIGNAL",
+                  config.name, "GPIO_NAME", config.lineName);
+        config.gpioUnavailableLogged = false;
+    }
+
+    return true;
 }
 
 void PowerControl::waitForGPIOEvent(ConfigData& config)
@@ -2746,6 +2832,44 @@ bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config,
         try
         {
             config->gpioLine.set_value(value);
+        }
+        catch (const std::system_error& e)
+        {
+            if (e.code().value() != ENODEV)
+            {
+                lg2::error("Failed to set {GPIO_NAME} value: {ERROR}",
+                           "GPIO_NAME", config->lineName, "ERROR", e);
+                return false;
+            }
+
+            // GPIO core was rebound; release the stale handle and re-request
+            lg2::warning(
+                "Output GPIO '{GPIO_NAME}' lost (ENODEV), re-requesting",
+                "GPIO_NAME", config->lineName);
+            clearGPIOLine(*config);
+
+            config->gpioLine = gpiod::find_line(config->lineName);
+            if (!config->gpioLine)
+            {
+                lg2::error("Failed to re-find {GPIO_NAME} after device loss",
+                           "GPIO_NAME", config->lineName);
+                return false;
+            }
+
+            try
+            {
+                config->gpioLine.request(
+                    {appName, gpiod::line_request::DIRECTION_OUTPUT, {}},
+                    value);
+            }
+            catch (const std::exception& re)
+            {
+                lg2::error(
+                    "Failed to re-request {GPIO_NAME} output after device loss: {ERROR}",
+                    "GPIO_NAME", config->lineName, "ERROR", re);
+                config->gpioLine = gpiod::line{};
+                return false;
+            }
         }
         catch (const std::exception& e)
         {
