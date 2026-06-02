@@ -214,24 +214,6 @@ void VRPowerControl::cpuResetIndicatorHandler(bool state)
     this->sendPowerControlEvent(powerControlEvent);
 }
 
-void VRPowerControl::pdbMainPowerOkHandler(bool state)
-{
-    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
-              static_cast<int>(state));
-
-    auto configPtr = getSignal("PDBMainPowerOk");
-    if (!configPtr)
-    {
-        return;
-    }
-
-    Event powerControlEvent = (state == configPtr->polarity)
-                                  ? Event::pdbMainPowerOkAssert
-                                  : Event::pdbMainPowerOkDeAssert;
-
-    this->sendPowerControlEvent(powerControlEvent);
-}
-
 std::function<void(Event)> VRPowerControl::getPowerStateHandler()
 {
     // Map VR-specific PowerState values to their handler functions

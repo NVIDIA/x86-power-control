@@ -206,20 +206,66 @@ void NVL72PowerControl::initiatePDBPowerOff()
 
 void NVL72PowerControl::pdbMainPowerOkHandler(bool state)
 {
-    // WAR: Mask HSC alerts and clear faults on each PDBMainPowerOk assert
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
+
     auto configPtr = getSignal("PDBMainPowerOk");
     if (!configPtr)
     {
         return;
     }
 
+    // WAR: Mask HSC alerts and clear faults on each PDBMainPowerOk assert
     if (state == configPtr->polarity)
     {
         maskHscAlertsAndClearFaults();
     }
 
-    // Delegate common event dispatch to VRPowerControl
-    VRPowerControl::pdbMainPowerOkHandler(state);
+    Event powerControlEvent = (state == configPtr->polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+
+    // Check for power faults and handle if detected
+    if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
+    {
+        return; // Fault was handled, exit early
+    }
+
+    this->sendPowerControlEvent(powerControlEvent);
+}
+
+// pdbMainPowerOkHandler Helper Function
+bool NVL72PowerControl::checkAndHandlePdbMainPowerOkFault(
+    Event powerControlEvent)
+{
+    // Power fault detection: Check for unexpected de-assertion
+    if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
+    {
+        if (powerState != PowerState::waitForPDBMainPowerOff)
+        {
+            // POWER FAULT: PDB Main Power OK de-asserted unexpectedly
+            lg2::error(
+                "POWER FAULT DETECTED: PDBMainPowerOk de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+
+            // Transition to off, checking if we need to wait for de-assertion
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "PDB Main Power OK de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+
+            return true;
+        }
+        // else: Expected de-assertion in waitForPDBMainPowerOff state
+    }
+
+    // Return false to indicate normal processing should continue
+    return false;
 }
 
 void NVL72PowerControl::assertHPMBoardPowerSequence()
