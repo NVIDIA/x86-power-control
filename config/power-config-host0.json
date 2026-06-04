@@ -13,6 +13,12 @@
             "Polarity": "ActiveHigh"
         },
         {
+            "Name": "StbyPwrOk",
+            "LineName": "STBY_PWR_OK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
             "Name": "E1SPowerEnable",
             "LineName": "E1S_PWR_EN-O",
             "Type": "GPIO",

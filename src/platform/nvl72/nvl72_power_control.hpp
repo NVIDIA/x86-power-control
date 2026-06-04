@@ -80,6 +80,24 @@ class NVL72PowerControl : public VRPowerControl
     void pdbMainPowerOkHandler(bool state);
 
     /**
+     * @brief Reject power-on / power-cycle while standby power is lost
+     *
+     * Returns false (with an explanatory reason) when stbyPowerLost is set,
+     * since the IOXs that host the power-sequencing GPIOs are unpowered and
+     * no power-on attempt could succeed.
+     */
+    bool canAcceptPowerOnRequest(std::string& reason) override;
+
+    /**
+     * @brief Suppress GPIO events from IOXs whose standby rail is down
+     *
+     * Returns true for every signal except StbyPwrOk itself while
+     * stbyPowerLost is set. The StbyPwrOk signal must always be delivered
+     * so we can observe recovery (or further state changes) on the witness.
+     */
+    bool shouldIgnoreEvent(const std::string& signalName) override;
+
+    /**
      * @brief Assert HPM board power sequence during power-on (NVL72 override)
      *
      * Mirrors VRPowerControl::assertHPMBoardPowerSequence() but inlines a
@@ -132,6 +150,34 @@ class NVL72PowerControl : public VRPowerControl
     // =========================================================================
     // NVL72-specific helpers
     // =========================================================================
+
+    /**
+     * @brief Handler for StbyPwrOk GPIO events
+     *
+     * StbyPwrOk witnesses the 12V HPM standby power domain that feeds the
+     * IOXs hosting the power-sequencing GPIOs. The signal itself is on a
+     * BMC-domain IOX that stays powered as long as the BMC has power, so
+     * it remains a reliable witness throughout an outage.
+     *
+     * - On de-assert: calls markStandbyLost(). The event may arrive after
+     *   shouldIgnoreEvent has already detected the loss via the witness
+     *   read, in which case markStandbyLost is idempotent and this is a
+     *   no-op.
+     * - On re-assert: logs recovery. Does NOT clear stbyPowerLost.
+     */
+    void stbyPwrOkHandler(bool state);
+
+    /**
+     * @brief Mark the standby power domain as lost (idempotent)
+     *
+     * Sets stbyPowerLost, emits an Error-severity event log, and forces
+     * PowerState::Off without writing any GPIOs. Called from both the
+     * stbyPwrOkHandler de-assert branch and from shouldIgnoreEvent's
+     * witness lookup — the kernel can deliver the noise events from
+     * dying IOXs before the StbyPwrOk de-assert event, so shouldIgnoreEvent
+     * looks at the witness directly to set the flag eagerly.
+     */
+    void markStandbyLost();
 
     /**
      * @brief Add Board 1 GPIO state D-Bus properties
@@ -213,6 +259,22 @@ class NVL72PowerControl : public VRPowerControl
     const std::vector<std::string> nvl72RequiredTimeoutValues = {
         "PdbMainPowerOkWatchdogMs",
     };
+
+    /**
+     * @brief Tracks whether the 12V HPM standby power domain has been lost
+     *
+     * Set true when StbyPwrOk de-asserts, indicating the IOXs that host
+     * the power-sequencing GPIOs have lost their feed and any read/write
+     * to them will fail. While set:
+     *   - canAcceptPowerOnRequest() rejects power-on / power-cycle requests
+     *   - shouldIgnoreEvent() suppresses dispatch of all GPIO events except
+     *     StbyPwrOk itself
+     *
+     * In this commit the flag is set on de-assert and left set on re-assert
+     * (recovery requires a BMC reboot or AC cycle). A later commit will
+     * add automatic recovery.
+     */
+    bool stbyPowerLost = false;
 };
 
 } // namespace power_control

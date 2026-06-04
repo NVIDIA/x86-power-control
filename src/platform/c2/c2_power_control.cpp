@@ -37,6 +37,8 @@ C2PowerControl::C2PowerControl(
                       [this](bool state) {
                           this->pdbMainPowerOkHandler(state);
                       });
+    addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
+                      [this](bool state) { this->stbyPwrOkHandler(state); });
     addRequiredSignal("PDBPSUPowerOn", 0, GPIODirection::OUT);
     addRequiredSignal("PDBPSUPowerOk", 0, GPIODirection::IN,
                       [this](bool state) {
@@ -197,6 +199,107 @@ void C2PowerControl::pdbPSUPowerOkHandler(bool state)
                                   : Event::pdbPSUPowerOkDeAssert;
 
     this->sendPowerControlEvent(powerControlEvent);
+}
+
+void C2PowerControl::stbyPwrOkHandler(bool state)
+{
+    auto configPtr = getSignal("StbyPwrOk");
+    if (!configPtr)
+    {
+        lg2::error("CRITICAL: StbyPwrOk signal not available");
+        return;
+    }
+
+    const bool asserted = (state == configPtr->polarity);
+
+    if (!asserted)
+    {
+        markStandbyLost();
+        return;
+    }
+
+    // Re-assert. Recovery (re-arming GPIO lines and clearing stbyPowerLost)
+    // is intentionally not handled in this commit — operator intervention
+    // (AC cycle or BMC reboot) is required.
+    lg2::info(
+        "12V HPM standby power domain restored - AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceEvent",
+        {"Host0",
+         "12V HPM standby power domain restored - AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+}
+
+bool C2PowerControl::canAcceptPowerOnRequest(std::string& reason)
+{
+    if (stbyPowerLost)
+    {
+        reason =
+            "System in degraded state due to prior standby power loss - AC cycle required to recover power sequencing";
+        return false;
+    }
+    return true;
+}
+
+bool C2PowerControl::shouldIgnoreEvent(const std::string& signalName)
+{
+    // Always deliver StbyPwrOk so we can observe state changes on the
+    // witness itself.
+    if (signalName == "StbyPwrOk")
+    {
+        return false;
+    }
+
+    // If standby is already known lost, suppress.
+    if (stbyPowerLost)
+    {
+        return true;
+    }
+
+    // Standby flag isn't set yet, but a noise event from a dying IOX may
+    // surface BEFORE the StbyPwrOk de-assert event due to kernel per-chip
+    // event delivery ordering. Look at the witness directly so the flag
+    // is set eagerly, before this event's handler runs on a dead line.
+    auto stby = getSignal("StbyPwrOk");
+    if (stby && stby->gpioLine)
+    {
+        int value = 0;
+        try
+        {
+            value = stby->gpioLine.get_value();
+        }
+        catch (const std::exception&)
+        {
+            return false;
+        }
+
+        if (value != stby->polarity)
+        {
+            markStandbyLost();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void C2PowerControl::markStandbyLost()
+{
+    if (stbyPowerLost)
+    {
+        return;
+    }
+    stbyPowerLost = true;
+
+    lg2::error(
+        "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0",
+         "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    setPowerState(PowerState::off);
 }
 
 // ============================================================================
