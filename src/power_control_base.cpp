@@ -743,8 +743,17 @@ void PowerControl::waitForGPIOEvent(ConfigData& config)
             bool gpioState =
                 (line_event.event_type == gpiod::line_event::RISING_EDGE);
 
-            // Call the handler if it's been assigned
-            if (config.gpioHandler)
+            // Suppress handler dispatch when the platform reports the
+            // underlying hardware as unavailable. The event is still logged
+            // so we have a record of the noise, but no FSM action is taken.
+            if (shouldIgnoreEvent(config.name))
+            {
+                lg2::info(
+                    "{GPIO_NAME} event (value={VALUE}) ignored — signal in degraded mode",
+                    "GPIO_NAME", config.name, "VALUE",
+                    static_cast<int>(gpioState));
+            }
+            else if (config.gpioHandler)
             {
                 config.gpioHandler(gpioState);
             }
@@ -752,6 +761,16 @@ void PowerControl::waitForGPIOEvent(ConfigData& config)
             // Recursively wait for next event
             waitForGPIOEvent(config);
         });
+}
+
+bool PowerControl::canAcceptPowerOnRequest(std::string& /*reason*/)
+{
+    return true;
+}
+
+bool PowerControl::shouldIgnoreEvent(const std::string& /*signalName*/)
+{
+    return false;
 }
 
 void PowerControl::handlePowerStateOn(Event event)

@@ -408,6 +408,21 @@ void VRPowerControl::handlePowerStateOn(Event event)
 
 void VRPowerControl::handlePowerStateOff(Event event)
 {
+    // Reject power-on / power-cycle requests when the platform reports that
+    // an upstream prerequisite is unsatisfied (e.g. standby power lost).
+    if (event == Event::powerOnRequest || event == Event::powerCycleRequest ||
+        event == Event::gracefulPowerCycleRequest)
+    {
+        std::string reason;
+        if (!canAcceptPowerOnRequest(reason))
+        {
+            lg2::error("Power-on request rejected: {REASON}", "REASON", reason);
+            logResourceEvent("ResourceErrorsDetected", {"Host0", reason},
+                             "xyz.openbmc_project.Logging.Entry.Level.Error");
+            return;
+        }
+    }
+
     switch (event)
     {
         case Event::powerOnRequest:
