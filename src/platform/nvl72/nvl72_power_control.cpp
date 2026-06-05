@@ -43,6 +43,8 @@ NVL72PowerControl::NVL72PowerControl(
                       [this](bool state) {
                           this->pdbMainPowerOkHandler(state);
                       });
+    addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
+                      [this](bool state) { this->stbyPwrOkHandler(state); });
     addRequiredSignal("PDBMainPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("E1SPowerEnable", 0, GPIODirection::OUT);
     addRequiredSignal("BMCSSDReset", 0, GPIODirection::OUT);
@@ -206,20 +208,169 @@ void NVL72PowerControl::initiatePDBPowerOff()
 
 void NVL72PowerControl::pdbMainPowerOkHandler(bool state)
 {
-    // WAR: Mask HSC alerts and clear faults on each PDBMainPowerOk assert
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
+
     auto configPtr = getSignal("PDBMainPowerOk");
     if (!configPtr)
     {
         return;
     }
 
+    // WAR: Mask HSC alerts and clear faults on each PDBMainPowerOk assert
     if (state == configPtr->polarity)
     {
         maskHscAlertsAndClearFaults();
     }
 
-    // Delegate common event dispatch to VRPowerControl
-    VRPowerControl::pdbMainPowerOkHandler(state);
+    Event powerControlEvent = (state == configPtr->polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+
+    // Check for power faults and handle if detected
+    if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
+    {
+        return; // Fault was handled, exit early
+    }
+
+    this->sendPowerControlEvent(powerControlEvent);
+}
+
+// pdbMainPowerOkHandler Helper Function
+bool NVL72PowerControl::checkAndHandlePdbMainPowerOkFault(
+    Event powerControlEvent)
+{
+    // Power fault detection: Check for unexpected de-assertion
+    if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
+    {
+        if (powerState != PowerState::waitForPDBMainPowerOff)
+        {
+            // POWER FAULT: PDB Main Power OK de-asserted unexpectedly
+            lg2::error(
+                "POWER FAULT DETECTED: PDBMainPowerOk de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+
+            // Transition to off, checking if we need to wait for de-assertion
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "PDB Main Power OK de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+
+            return true;
+        }
+        // else: Expected de-assertion in waitForPDBMainPowerOff state
+    }
+
+    // Return false to indicate normal processing should continue
+    return false;
+}
+
+void NVL72PowerControl::stbyPwrOkHandler(bool state)
+{
+    auto configPtr = getSignal("StbyPwrOk");
+    if (!configPtr)
+    {
+        lg2::error("CRITICAL: StbyPwrOk signal not available");
+        return;
+    }
+
+    const bool asserted = (state == configPtr->polarity);
+
+    if (!asserted)
+    {
+        markStandbyLost();
+        return;
+    }
+
+    // Re-assert. Recovery (re-arming GPIO lines and clearing stbyPowerLost)
+    // is intentionally not handled in this commit — operator intervention
+    // (AC cycle or BMC reboot) is required.
+    lg2::info(
+        "12V HPM standby power domain restored - AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceEvent",
+        {"Host0",
+         "12V HPM standby power domain restored - AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+}
+
+bool NVL72PowerControl::canAcceptPowerOnRequest(std::string& reason)
+{
+    if (stbyPowerLost)
+    {
+        reason =
+            "System in degraded state due to prior standby power loss - AC cycle required to recover power sequencing";
+        return false;
+    }
+    return true;
+}
+
+bool NVL72PowerControl::shouldIgnoreEvent(const std::string& signalName)
+{
+    // Always deliver StbyPwrOk so we can observe state changes on the
+    // witness itself.
+    if (signalName == "StbyPwrOk")
+    {
+        return false;
+    }
+
+    // If standby is already known lost, suppress.
+    if (stbyPowerLost)
+    {
+        return true;
+    }
+
+    // Standby flag isn't set yet, but a noise event from a dying IOX may
+    // surface BEFORE the StbyPwrOk de-assert event due to kernel per-chip
+    // event delivery ordering. Look at the witness directly so the flag
+    // is set eagerly, before this event's handler runs on a dead line.
+    auto stby = getSignal("StbyPwrOk");
+    if (stby && stby->gpioLine)
+    {
+        int value = 0;
+        try
+        {
+            value = stby->gpioLine.get_value();
+        }
+        catch (const std::exception&)
+        {
+            // Witness unreadable — don't speculate; let the normal handler
+            // path proceed.
+            return false;
+        }
+
+        if (value != stby->polarity)
+        {
+            markStandbyLost();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void NVL72PowerControl::markStandbyLost()
+{
+    if (stbyPowerLost)
+    {
+        return;
+    }
+    stbyPowerLost = true;
+
+    lg2::error(
+        "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0",
+         "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    setPowerState(PowerState::off);
 }
 
 void NVL72PowerControl::assertHPMBoardPowerSequence()

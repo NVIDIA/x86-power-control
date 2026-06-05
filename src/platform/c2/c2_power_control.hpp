@@ -118,6 +118,24 @@ class C2PowerControl : public VRPowerControl
     // =========================================================================
 
     /**
+     * @brief Reject power-on / power-cycle while standby power is lost
+     *
+     * Returns false (with an explanatory reason) when stbyPowerLost is set,
+     * since the IOXs that host the power-sequencing GPIOs are unpowered and
+     * no power-on attempt could succeed.
+     */
+    bool canAcceptPowerOnRequest(std::string& reason) override;
+
+    /**
+     * @brief Suppress GPIO events from IOXs whose standby rail is down
+     *
+     * Returns true for every signal except StbyPwrOk itself while
+     * stbyPowerLost is set. The StbyPwrOk signal must always be delivered
+     * so we can observe recovery (or further state changes) on the witness.
+     */
+    bool shouldIgnoreEvent(const std::string& signalName) override;
+
+    /**
      * @brief Complete shutdown after PDB Main Power OK de-asserts (C2 override)
      *
      * Cancels pdbMainPowerOkWatchdogTimer. On success: de-asserts
@@ -197,6 +215,32 @@ class C2PowerControl : public VRPowerControl
     // =========================================================================
 
     /**
+     * @brief Handler for PDB Main Power OK GPIO events (C2)
+     *
+     * Dispatches the assert/de-assert event. An unexpected de-assertion
+     * (outside waitForPDBMainPowerOff) is treated as a power fault and handled
+     * by checkAndHandlePdbMainPowerOkFault().
+     *
+     * @param state The GPIO state (true = asserted, false = de-asserted)
+     */
+    void pdbMainPowerOkHandler(bool state);
+
+    /**
+     * @brief Detect and handle an unexpected PDB Main Power OK de-assertion
+     *
+     * Mirrors checkAndHandleRunPowerFault for PDBMainPowerOk: if PDBMainPowerOk
+     * de-asserts while NOT in waitForPDBMainPowerOff (the only state where a
+     * de-assertion is expected), logs a POWER FAULT, emits a
+     * ResourceErrorsDetected event log, clears the action, and transitions to
+     * off via transitionToOffStateWithRunPowerCheck().
+     *
+     * @param powerControlEvent The assert/de-assert event derived from the GPIO
+     * @return true if a fault was detected and handled (caller should return)
+     * @return false if normal event processing should continue
+     */
+    bool checkAndHandlePdbMainPowerOkFault(Event powerControlEvent);
+
+    /**
      * @brief Handler for PDBPSUPowerOk GPIO events
      *
      * Sends Event::pdbPSUPowerOkAssert or Event::pdbPSUPowerOkDeAssert
@@ -205,6 +249,28 @@ class C2PowerControl : public VRPowerControl
      * @param state The GPIO state (true = asserted, false = de-asserted)
      */
     void pdbPSUPowerOkHandler(bool state);
+
+    /**
+     * @brief Handler for StbyPwrOk GPIO events
+     *
+     * StbyPwrOk witnesses the 12V HPM standby power domain that feeds the
+     * IOXs hosting the power-sequencing GPIOs. The signal itself is on a
+     * BMC-domain IOX that stays powered as long as the BMC has power.
+     *
+     * - On de-assert: calls markStandbyLost(). The event may arrive after
+     *   shouldIgnoreEvent has already detected the loss via the witness
+     *   read, in which case markStandbyLost is idempotent and this is a
+     *   no-op.
+     * - On re-assert: logs recovery. Does NOT clear stbyPowerLost.
+     */
+    void stbyPwrOkHandler(bool state);
+
+    /**
+     * @brief Mark the standby power domain as lost (idempotent)
+     *
+     * See NVL72PowerControl::markStandbyLost — same contract.
+     */
+    void markStandbyLost();
 
     // =========================================================================
     // C2-specific state transition helpers
@@ -258,6 +324,22 @@ class C2PowerControl : public VRPowerControl
      */
     const std::vector<std::string> powerIndicators = {
         "Board0RunPowerPG", "PDBMainPowerOk", "PDBPSUPowerOk"};
+
+    /**
+     * @brief Tracks whether the 12V HPM standby power domain has been lost
+     *
+     * Set true when StbyPwrOk de-asserts, indicating the IOXs that host
+     * the power-sequencing GPIOs have lost their feed and any read/write
+     * to them will fail. While set:
+     *   - canAcceptPowerOnRequest() rejects power-on / power-cycle requests
+     *   - shouldIgnoreEvent() suppresses dispatch of all GPIO events except
+     *     StbyPwrOk itself
+     *
+     * In this commit the flag is set on de-assert and left set on re-assert
+     * (recovery requires a BMC reboot or AC cycle). A later commit will
+     * add automatic recovery.
+     */
+    bool stbyPowerLost = false;
 };
 
 } // namespace power_control
