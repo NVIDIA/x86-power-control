@@ -1446,6 +1446,39 @@ class PowerControl
         boost::asio::posix::stream_descriptor& eventDescriptor,
         int* stateTracker = nullptr);
 
+    /**
+     * @brief Decide whether a power-on / power-cycle request should be honored
+     *
+     * Called by handlePowerStateOff before dispatching powerOnRequest /
+     * powerCycleRequest / gracefulPowerCycleRequest. The base default returns
+     * true (no gating). Platforms that monitor an upstream prerequisite for
+     * power sequencing (e.g. a standby-power witness) override this to refuse
+     * the request while that prerequisite is not satisfied, since attempting
+     * to power-sequence would fail.
+     *
+     * @param reason Out-parameter populated with a human-readable explanation
+     *               when the function returns false. Logged and emitted into
+     *               the event log so the operator knows what to fix.
+     * @return true if the request should be processed normally; false to
+     *              reject it.
+     */
+    virtual bool canAcceptPowerOnRequest(std::string& reason);
+
+    /**
+     * @brief Decide whether a GPIO event should be delivered to its handler
+     *
+     * Called by waitForGPIOEvent for every edge before dispatching to the
+     * registered handler. The base default returns false (deliver all events).
+     * Platforms override this to suppress noise events while the underlying
+     * hardware is known to be unavailable, when edges during that window are
+     * not real state changes but artifacts of failing hardware.
+     *
+     * @param signalName The signal whose event is about to be dispatched.
+     * @return true to drop the event (still logged); false to dispatch
+     *              normally.
+     */
+    virtual bool shouldIgnoreEvent(const std::string& signalName);
+
     // UPSTREAM STATE HANDLERS
     // These handle upstream power states and should match upstream behavior
 

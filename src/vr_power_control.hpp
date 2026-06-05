@@ -436,17 +436,6 @@ class VRPowerControl : public PowerControl
      */
     void cpuResetIndicatorHandler(bool state);
 
-    /**
-     * @brief Handler for PDB Main Power OK GPIO events
-     *
-     * Sends Event::pdbMainPowerOkAssert or Event::pdbMainPowerOkDeAssert.
-     * Platform classes override to add platform-specific behaviour (e.g. NVL72
-     * adds HSC alert masking) and then call this base implementation.
-     *
-     * @param state The GPIO state (true = asserted, false = de-asserted)
-     */
-    virtual void pdbMainPowerOkHandler(bool state);
-
   protected:
     // =============================================================================
     // OVERRIDDEN UPSTREAM STATE HANDLERS (with VR extensions)

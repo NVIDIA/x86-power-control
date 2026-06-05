@@ -37,6 +37,8 @@ C2PowerControl::C2PowerControl(
                       [this](bool state) {
                           this->pdbMainPowerOkHandler(state);
                       });
+    addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
+                      [this](bool state) { this->stbyPwrOkHandler(state); });
     addRequiredSignal("PDBPSUPowerOn", 0, GPIODirection::OUT);
     addRequiredSignal("PDBPSUPowerOk", 0, GPIODirection::IN,
                       [this](bool state) {
@@ -123,6 +125,63 @@ void C2PowerControl::handlePDBPSUPowerOkWatchdogExpired()
 // C2-specific GPIO handler
 // ============================================================================
 
+void C2PowerControl::pdbMainPowerOkHandler(bool state)
+{
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
+
+    auto configPtr = getSignal("PDBMainPowerOk");
+    if (!configPtr)
+    {
+        return;
+    }
+
+    Event powerControlEvent = (state == configPtr->polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+
+    // Check for power faults and handle if detected
+    if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
+    {
+        return; // Fault was handled, exit early
+    }
+
+    this->sendPowerControlEvent(powerControlEvent);
+}
+
+// pdbMainPowerOkHandler Helper Function
+bool C2PowerControl::checkAndHandlePdbMainPowerOkFault(Event powerControlEvent)
+{
+    // Power fault detection: Check for unexpected de-assertion
+    if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
+    {
+        if (powerState != PowerState::waitForPDBMainPowerOff)
+        {
+            // POWER FAULT: PDB Main Power OK de-asserted unexpectedly
+            lg2::error(
+                "POWER FAULT DETECTED: PDBMainPowerOk de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+
+            // Transition to off, checking if we need to wait for de-assertion
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "PDB Main Power OK de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+
+            return true;
+        }
+        // else: Expected de-assertion in waitForPDBMainPowerOff state
+    }
+
+    // Return false to indicate normal processing should continue
+    return false;
+}
+
 void C2PowerControl::pdbPSUPowerOkHandler(bool state)
 {
     lg2::info("PDBPSUPowerOk GPIO event: value={VALUE}", "VALUE",
@@ -140,6 +199,107 @@ void C2PowerControl::pdbPSUPowerOkHandler(bool state)
                                   : Event::pdbPSUPowerOkDeAssert;
 
     this->sendPowerControlEvent(powerControlEvent);
+}
+
+void C2PowerControl::stbyPwrOkHandler(bool state)
+{
+    auto configPtr = getSignal("StbyPwrOk");
+    if (!configPtr)
+    {
+        lg2::error("CRITICAL: StbyPwrOk signal not available");
+        return;
+    }
+
+    const bool asserted = (state == configPtr->polarity);
+
+    if (!asserted)
+    {
+        markStandbyLost();
+        return;
+    }
+
+    // Re-assert. Recovery (re-arming GPIO lines and clearing stbyPowerLost)
+    // is intentionally not handled in this commit — operator intervention
+    // (AC cycle or BMC reboot) is required.
+    lg2::info(
+        "12V HPM standby power domain restored - AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceEvent",
+        {"Host0",
+         "12V HPM standby power domain restored - AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Informational");
+}
+
+bool C2PowerControl::canAcceptPowerOnRequest(std::string& reason)
+{
+    if (stbyPowerLost)
+    {
+        reason =
+            "System in degraded state due to prior standby power loss - AC cycle required to recover power sequencing";
+        return false;
+    }
+    return true;
+}
+
+bool C2PowerControl::shouldIgnoreEvent(const std::string& signalName)
+{
+    // Always deliver StbyPwrOk so we can observe state changes on the
+    // witness itself.
+    if (signalName == "StbyPwrOk")
+    {
+        return false;
+    }
+
+    // If standby is already known lost, suppress.
+    if (stbyPowerLost)
+    {
+        return true;
+    }
+
+    // Standby flag isn't set yet, but a noise event from a dying IOX may
+    // surface BEFORE the StbyPwrOk de-assert event due to kernel per-chip
+    // event delivery ordering. Look at the witness directly so the flag
+    // is set eagerly, before this event's handler runs on a dead line.
+    auto stby = getSignal("StbyPwrOk");
+    if (stby && stby->gpioLine)
+    {
+        int value = 0;
+        try
+        {
+            value = stby->gpioLine.get_value();
+        }
+        catch (const std::exception&)
+        {
+            return false;
+        }
+
+        if (value != stby->polarity)
+        {
+            markStandbyLost();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void C2PowerControl::markStandbyLost()
+{
+    if (stbyPowerLost)
+    {
+        return;
+    }
+    stbyPowerLost = true;
+
+    lg2::error(
+        "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover.");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0",
+         "12V HPM standby power domain lost - power sequencing hardware unavailable. AC cycle recommended to recover."},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    setPowerState(PowerState::off);
 }
 
 // ============================================================================
@@ -307,28 +467,7 @@ void C2PowerControl::initiatePDBPowerOff()
 {
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
 
-    // Get all required signals upfront
-    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
-    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
-    {
-        lg2::error("CRITICAL: PDBMainPowerOk not available");
-        return;
-    }
-
-    auto pdbPSUPowerOk = getSignal("PDBPSUPowerOk");
-    if (!pdbPSUPowerOk || !pdbPSUPowerOk->gpioLine)
-    {
-        lg2::error("CRITICAL: PDBPSUPowerOk not available");
-        return;
-    }
-
-    auto pdbPSUPowerOn = getSignal("PDBPSUPowerOn");
-    if (!pdbPSUPowerOn || !pdbPSUPowerOn->gpioLine)
-    {
-        lg2::error("CRITICAL: PDBPSUPowerOn not available");
-        return;
-    }
-
+    // Get the 12V rail enable signals
     auto pdb12vHPMAICEnable = getSignal("PDB12V_HPM-AICEnable");
     if (!pdb12vHPMAICEnable)
     {
@@ -347,45 +486,30 @@ void C2PowerControl::initiatePDBPowerOff()
         return;
     }
 
-    // Always de-assert the 12V rail enables first
+    // De-assert the 12V rail enables. On C2, PDBMainPowerOk is downstream of
+    // these rails, so removing them drops PDBMainPowerOk.
     lg2::info(
         "HPM Board 0 Run Power Good de-asserted. De-asserting 12V rails in order: HPM-AIC, GPU1, GPU2.");
     setGPIOOutput(pdb12vHPMAICEnable, !pdb12vHPMAICEnable->polarity);
     setGPIOOutput(pdb12vGPU1Enable, !pdb12vGPU1Enable->polarity);
     setGPIOOutput(pdb12vGPU2Enable, !pdb12vGPU2Enable->polarity);
 
-    // If PDBMainPowerOk is still asserted, wait for it to fall
-    if (pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity)
-    {
-        lg2::info(
-            "PDBMainPowerOk is currently asserted. Starting PDB Main Power OK Watchdog Timer. "
-            "Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
-        setPowerState(PowerState::waitForPDBMainPowerOff);
-        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
-                   Event::pdbMainPowerOkWatchdogTimerExpired);
-        return;
-    }
-
-    // PDBMainPowerOk already de-asserted. If PDBPSUPowerOk still asserted, wait
-    // for it
-    if (pdbPSUPowerOk->gpioLine.get_value() == pdbPSUPowerOk->polarity)
-    {
-        lg2::info(
-            "PDBMainPowerOk already de-asserted. PDBPSUPowerOk is currently asserted. "
-            "De-asserting PDBPSUPowerOn. Starting PDB PSU Power OK Watchdog Timer. "
-            "Transitioning to PowerState::waitForPDBPSUPowerOff to wait for de-assertion.");
-        setGPIOOutput(pdbPSUPowerOn, !pdbPSUPowerOn->polarity);
-        setPowerState(PowerState::waitForPDBPSUPowerOff);
-        startTimer("PdbPSUPowerOkWatchdogMs", pdbPSUPowerOkWatchdogTimer,
-                   Event::pdbPSUPowerOkWatchdogTimerExpired);
-        return;
-    }
-
-    // Both PDB Main Power OK and PDB PSU Power OK already de-asserted
-    lg2::info("PDBMainPowerOk and PDBPSUPowerOk are both already de-asserted. "
-              "De-asserting PDBPSUPowerOn. Bypassing wait states.");
-    setGPIOOutput(pdbPSUPowerOn, !pdbPSUPowerOn->polarity);
-    applyShutdownAction();
+    // Wait for the PDBMainPowerOk de-assertion GPIO event rather than reading
+    // its level here. De-asserting the 12V rails above drops PDBMainPowerOk,
+    // but its edge event is delivered asynchronously after this handler
+    // returns. If we read the level and bypassed waitForPDBMainPowerOff, that
+    // pending de-assert event would arrive in a later state (e.g.
+    // waitForPDBPSUPowerOff) and be misread as an unexpected power fault by
+    // checkAndHandlePdbMainPowerOkFault(). Transitioning here guarantees the
+    // event lands in waitForPDBMainPowerOff, the one state where it is
+    // expected. PSU teardown continues from
+    // completeShutdownAndTransitionToOff() once PDBMainPowerOk de-asserts (or
+    // the watchdog expires).
+    lg2::info("Starting PDB Main Power OK Watchdog Timer. Transitioning to "
+              "PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+    startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+               Event::pdbMainPowerOkWatchdogTimerExpired);
 }
 
 // ============================================================================
