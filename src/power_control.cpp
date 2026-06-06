@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include "platform/c2/c2_power_control.hpp"
+#include "platform/etl256/etl256_power_control.hpp"
 #include "platform/nvl72/nvl72_power_control.hpp"
 #include "platform/vr_nvl8/vr_nvl8_power_control.hpp"
 #include "power_control_base.hpp"
@@ -226,6 +227,11 @@ static std::unique_ptr<PowerControl> createPowerControl(
     else if (platformType == "vr-nvl8")
     {
         return std::make_unique<VRNVL8PowerControl>(io, conn, configPath, node,
+                                                    appState);
+    }
+    else if (platformType == "etl256")
+    {
+        return std::make_unique<ETL256PowerControl>(io, conn, configPath, node,
                                                     appState);
     }
 
