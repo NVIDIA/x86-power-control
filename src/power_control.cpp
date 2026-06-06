@@ -5,6 +5,7 @@
 
 #include "platform/c2/c2_power_control.hpp"
 #include "platform/gnr/gnr_power_control.hpp"
+#include "platform/etl256/etl256_power_control.hpp"
 #include "platform/nvl72/nvl72_power_control.hpp"
 #include "platform/vc256/vc256_power_control.hpp"
 #include "platform/vr_nvl8/vr_nvl8_power_control.hpp"
@@ -232,6 +233,11 @@ static std::unique_ptr<PowerControl> createPowerControl(
     {
         return std::make_unique<GNRPowerControl>(io, conn, configPath, node,
                                                  appState);
+    }
+    else if (platformType == "etl256")
+    {
+        return std::make_unique<ETL256PowerControl>(io, conn, configPath, node,
+                                                    appState);
     }
 
     lg2::error("Unknown platform-type '{PLATFORM}', defaulting to nvl72",
