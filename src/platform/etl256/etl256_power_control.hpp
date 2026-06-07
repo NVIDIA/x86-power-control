@@ -103,6 +103,15 @@ class ETL256PowerControl : public VRPowerControl
     // =========================================================================
 
     /**
+     * @brief Reject power-on / power-cycle while ETL256 standby power is bad.
+     *
+     * Reads the standby-power monitor state file instead of owning the GPIO
+     * directly. Returns false with a clear reason when the file is missing or
+     * does not contain "1".
+     */
+    bool canAcceptPowerOnRequest(std::string& reason) override;
+
+    /**
      * @brief Assert ETL256 platform peripherals during power-on.
      *
      * Called by the inherited HPM power-on sequence after PRE_SYS_RST_L is

@@ -5,6 +5,11 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <string>
+
 namespace power_control
 {
 // Type aliases for convenience
@@ -92,6 +97,36 @@ void ETL256PowerControl::handlePowerOnRequest()
         "Commencing ETL256 HPM run-power sequencing. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
     action = PowerAction::POWER_ON;
     transitionToHPMPowerGoodAssertState();
+}
+
+bool ETL256PowerControl::canAcceptPowerOnRequest(std::string& reason)
+{
+    constexpr const char* standbyPowerGoodPath =
+        "/run/bmc-state/HPM_B0_M0_STANDBY_POWER_PG";
+
+    std::ifstream standbyPowerGoodFile(standbyPowerGoodPath);
+    if (!standbyPowerGoodFile.is_open())
+    {
+        reason =
+            "ETL256 standby power-good state file is missing - cannot safely start run-power sequencing";
+        return false;
+    }
+
+    std::string value;
+    std::getline(standbyPowerGoodFile, value);
+
+    value.erase(std::remove_if(value.begin(), value.end(),
+                               [](unsigned char c) { return std::isspace(c); }),
+                value.end());
+
+    if (value != "1")
+    {
+        reason =
+            "ETL256 standby power is not good - cannot safely start run-power sequencing";
+        return false;
+    }
+
+    return true;
 }
 
 // ============================================================================
