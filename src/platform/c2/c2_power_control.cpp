@@ -645,7 +645,21 @@ void C2PowerControl::handleWaitForPDBPSUPowerOk(Event event)
             break;
 
         case Event::pdbPSUPowerOkWatchdogTimerExpired:
-            handlePDBPSUPowerOkWatchdogExpired();
+            // WAR: https://nvbugspro.nvidia.com/bug/6406745
+            // Missed edge recovery: if PDBPSUPowerOk is already asserted,
+            // continue the power-on sequence (assert 12V rails) instead of
+            // failing.
+            if (gpioAtExpectedLevelOnTimeout("PDBPSUPowerOk", true))
+            {
+                lg2::warning(
+                    "Recovering from suspected missed edge: PDBPSUPowerOk is already asserted. "
+                    "Continuing power-on sequence to assert 12V rails.");
+                assert12VRailsAndWaitForPDBMainPowerOk();
+            }
+            else
+            {
+                handlePDBPSUPowerOkWatchdogExpired();
+            }
             break;
 
         default:
@@ -668,6 +682,19 @@ void C2PowerControl::handleWaitForPDBPSUPowerOff(Event event)
             break;
 
         case Event::pdbPSUPowerOkWatchdogTimerExpired:
+            // WAR: https://nvbugspro.nvidia.com/bug/6406745
+            // Missed edge recovery: if PDBPSUPowerOk is already de-asserted,
+            // treat it as a successful de-assertion and complete the shutdown
+            // action instead of reporting a fault.
+            if (gpioAtExpectedLevelOnTimeout("PDBPSUPowerOk", false))
+            {
+                lg2::warning(
+                    "Recovering from suspected missed edge: PDBPSUPowerOk is already de-asserted. "
+                    "PDB Power Off Sequence complete.");
+                applyShutdownAction();
+                break;
+            }
+
             lg2::error(
                 "PDB PSU Power OK watchdog timer expired. PDB PSU Power Off Sequence Failed. "
                 "Conducting Cleanup Sequence: Setting GPIO states to match Host State OFF.");
@@ -685,6 +712,100 @@ void C2PowerControl::handleWaitForPDBPSUPowerOff(Event event)
                       getEventName(event));
             break;
     }
+}
+
+void C2PowerControl::handleWaitForPDBMainPowerOk(Event event)
+{
+    // WAR: https://nvbugspro.nvidia.com/bug/6406745
+    // C2-only missed-edge workaround: a dropped PDBMainPowerOk assert edge can
+    // leave us waiting even though the line already asserted. If so, continue
+    // the power-on sequence instead of failing. All other events (including a
+    // genuine timeout with the line still de-asserted) defer to the base.
+    if (event == Event::pdbMainPowerOkWatchdogTimerExpired &&
+        gpioAtExpectedLevelOnTimeout("PDBMainPowerOk", true))
+    {
+        lg2::warning(
+            "Recovering from suspected missed edge: PDBMainPowerOk is already asserted. "
+            "Continuing power-on sequence to HPM board sequencing.");
+        transitionToHPMPowerGoodAssertState();
+        return;
+    }
+
+    VRPowerControl::handleWaitForPDBMainPowerOk(event);
+}
+
+void C2PowerControl::handleWaitForPDBMainPowerOff(Event event)
+{
+    // WAR: https://nvbugspro.nvidia.com/bug/6406745
+    // C2-only missed-edge workaround: a dropped PDBMainPowerOk de-assert edge
+    // can leave us waiting even though the line already de-asserted. If so,
+    // complete the shutdown as a success instead of reporting a fault. All
+    // other events defer to the base.
+    if (event == Event::pdbMainPowerOkWatchdogTimerExpired &&
+        gpioAtExpectedLevelOnTimeout("PDBMainPowerOk", false))
+    {
+        lg2::warning(
+            "Recovering from suspected missed edge: PDBMainPowerOk is already de-asserted. "
+            "Continuing power-off sequence.");
+        completeShutdownAndTransitionToOff(true);
+        return;
+    }
+
+    VRPowerControl::handleWaitForPDBMainPowerOff(event);
+}
+
+bool C2PowerControl::gpioAtExpectedLevelOnTimeout(const std::string& signalName,
+                                                  bool expectAsserted)
+{
+    // WAR: https://nvbugspro.nvidia.com/bug/6406745
+    auto configPtr = getSignal(signalName);
+    if (!configPtr || !configPtr->gpioLine)
+    {
+        lg2::error(
+            "GPIO LEVEL CHECK: {SIGNAL} not available - cannot read GPIO level on watchdog timeout.",
+            "SIGNAL", signalName);
+        return false;
+    }
+
+    int value = -1;
+    try
+    {
+        value = configPtr->gpioLine.get_value();
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error(
+            "GPIO LEVEL CHECK: failed to read {SIGNAL} GPIO level on watchdog timeout: {ERROR}",
+            "SIGNAL", signalName, "ERROR", e.what());
+        return false;
+    }
+
+    const bool asserted = (value == configPtr->polarity);
+    const char* actualStr = asserted ? "asserted" : "de-asserted";
+    const char* expectedStr = expectAsserted ? "asserted" : "de-asserted";
+
+    if (asserted == expectAsserted)
+    {
+        // Level is already where we were waiting for it to be, yet the edge
+        // event never arrived - likely a dropped/missed GPIO edge event rather
+        // than a genuine hardware sequencing failure. The caller can safely
+        // continue the sequence as though the edge arrived.
+        lg2::error(
+            "GPIO LEVEL CHECK: {SIGNAL} watchdog expired but the line is already {ACTUAL} "
+            "(expected {EXPECTED}) [raw value={VALUE}, polarity={POLARITY}]. The hardware transition "
+            "appears to have occurred but its GPIO edge event was not delivered.",
+            "SIGNAL", signalName, "ACTUAL", actualStr, "EXPECTED", expectedStr,
+            "VALUE", value, "POLARITY", static_cast<int>(configPtr->polarity));
+        return true;
+    }
+
+    lg2::error(
+        "GPIO LEVEL CHECK: {SIGNAL} watchdog expired and the line is {ACTUAL} "
+        "(expected {EXPECTED}) [raw value={VALUE}, polarity={POLARITY}]. Consistent with a genuine "
+        "hardware sequencing failure (line never reached the expected level).",
+        "SIGNAL", signalName, "ACTUAL", actualStr, "EXPECTED", expectedStr,
+        "VALUE", value, "POLARITY", static_cast<int>(configPtr->polarity));
+    return false;
 }
 
 // ============================================================================
