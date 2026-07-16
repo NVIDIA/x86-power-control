@@ -368,6 +368,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
 #endif
     initializeButtonInterfaces();
     initializeOSInterface();
+    initializeRestartCauseInterface();
     registerGpioStateInterface();
 
     // Initialize GPIO property setters map with common Board0 signals
@@ -1834,6 +1835,7 @@ void PowerControl::requestBusNames()
         conn->request_name(chassisDbusName.c_str());
         conn->request_name(osDbusName.c_str());
         conn->request_name(nmiDbusName.c_str());
+        conn->request_name(rstCauseDbusName.c_str());
     }
 
     // Append the node ID to the dbus names & Request all the dbus names
@@ -1841,6 +1843,7 @@ void PowerControl::requestBusNames()
     conn->request_name((chassisDbusName + nodeId).c_str());
     conn->request_name((osDbusName + nodeId).c_str());
     conn->request_name((nmiDbusName + nodeId).c_str());
+    conn->request_name((rstCauseDbusName + nodeId).c_str());
 
     // Only claim buttons name if we created button interfaces
     // (avoid conflict with separate buttons daemon)
@@ -2659,6 +2662,46 @@ void PowerControl::initializeOSInterface()
     // NOTE: Do NOT call initialize() here - deferred to
     // initializeHostStateInterface()
     lg2::info("OS state interface registered (not yet initialized)");
+}
+
+void PowerControl::initializeRestartCauseInterface()
+{
+    // Legacy xyz.openbmc_project.Control.Host.RestartCause object that IPMI
+    // Get Chassis Status depends on. Published in addition to the State.Host
+    // RestartCause property (kept in sync in setRestartCauseProperty()).
+    restartCauseIface = objServer.add_interface(
+        "/xyz/openbmc_project/control/host" + nodeId + "/restart_cause",
+        "xyz.openbmc_project.Control.Host.RestartCause");
+
+    restartCauseIface->register_property(
+        "RestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"));
+
+    restartCauseIface->register_property(
+        "RequestedRestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"),
+        [this](const std::string& requested, std::string& resp) {
+            if (requested ==
+                "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer")
+            {
+                addRestartCause(RestartCause::watchdog);
+                lg2::info("Restart cause watchdog requested");
+            }
+            else
+            {
+                lg2::error("Unrecognized RestartCause Request");
+                return 0;
+            }
+
+            lg2::info("RestartCause requested: {RESTART_CAUSE}",
+                      "RESTART_CAUSE", requested);
+            resp = requested;
+            return 1;
+        });
+
+    restartCauseIface->initialize();
+
+    lg2::info("Created the restart cause interface successfully");
 }
 
 void PowerControl::registerGpioStateInterface()
@@ -3971,6 +4014,7 @@ void PowerControl::setRestartCauseProperty(const std::string& cause)
 {
     lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
     hostIface->set_property("RestartCause", cause);
+    restartCauseIface->set_property("RestartCause", cause);
 }
 
 void PowerControl::setRestartCause()

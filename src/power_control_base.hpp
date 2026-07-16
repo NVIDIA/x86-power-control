@@ -400,6 +400,8 @@ class PowerControl
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
     std::string buttonDbusName = "xyz.openbmc_project.Chassis.Buttons";
     std::string nmiDbusName = "xyz.openbmc_project.Control.Host.NMI";
+    std::string rstCauseDbusName =
+        "xyz.openbmc_project.Control.Host.RestartCause";
 
     enum class PowerAction
     {
@@ -478,6 +480,7 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> gpioStateIface;
 
     /**
@@ -1348,6 +1351,15 @@ class PowerControl
      * Creates and registers the Operating System Status interface.
      */
     void initializeOSInterface();
+
+    /**
+     * @brief Initialize Restart Cause D-Bus interface
+     *
+     * Creates and registers the legacy Control.Host.RestartCause interface
+     * (in addition to the State.Host RestartCause property) for tracking why
+     * the host was restarted. IPMI Get Chassis Status depends on this object.
+     */
+    void initializeRestartCauseInterface();
 
     /**
      * @brief Register GPIO State D-Bus interface
