@@ -209,6 +209,29 @@ class C2PowerControl : public VRPowerControl
      */
     void handleWaitForPDBPSUPowerOff(Event event);
 
+    /**
+     * @brief Handler for PowerState::waitForPDBMainPowerOk (C2 override)
+     *
+     * C2-only missed-edge workaround: on
+     * Event::pdbMainPowerOkWatchdogTimerExpired, if PDBMainPowerOk is already
+     * asserted the awaited GPIO edge event was dropped, so continue the
+     * power-on sequence (HPM board sequencing) instead of failing. All other
+     * events (including a genuine timeout) defer to
+     * VRPowerControl::handleWaitForPDBMainPowerOk().
+     */
+    void handleWaitForPDBMainPowerOk(Event event) override;
+
+    /**
+     * @brief Handler for PowerState::waitForPDBMainPowerOff (C2 override)
+     *
+     * C2-only missed-edge workaround: on
+     * Event::pdbMainPowerOkWatchdogTimerExpired, if PDBMainPowerOk is already
+     * de-asserted the awaited GPIO edge event was dropped, so complete the
+     * shutdown as a success instead of reporting a fault. All other events
+     * defer to VRPowerControl::handleWaitForPDBMainPowerOff().
+     */
+    void handleWaitForPDBMainPowerOff(Event event) override;
+
   private:
     // =========================================================================
     // C2-specific GPIO handler
@@ -239,6 +262,31 @@ class C2PowerControl : public VRPowerControl
      * @return false if normal event processing should continue
      */
     bool checkAndHandlePdbMainPowerOkFault(Event powerControlEvent);
+
+    /**
+     * @brief C2 workaround: on a watchdog timeout, check whether the awaited
+     * input GPIO is already at the expected level
+     *
+     * When a PDB *_OK watchdog fires, the C2 state machine never received the
+     * GPIO edge it was waiting for. Reading the line level directly
+     * distinguishes a likely dropped/missed edge event (level is ALREADY at the
+     * expected polarity — the hardware transition happened but the edge event
+     * was never delivered) from a genuine hardware sequencing failure (level is
+     * NOT at the expected polarity).
+     *
+     * Read-only: logs to the journal and reads the line but does not change
+     * state or GPIO outputs. When it returns true the caller may continue the
+     * sequence as though the awaited edge had arrived.
+     *
+     * @param signalName     Config name of the awaited input signal
+     *                       (e.g. "PDBMainPowerOk", "PDBPSUPowerOk").
+     * @param expectAsserted true if the sequence was waiting for the signal to
+     *                       assert, false if waiting for it to de-assert.
+     * @return true if the line is already at the expected level (safe to
+     *         continue), false otherwise (genuine failure).
+     */
+    bool gpioAtExpectedLevelOnTimeout(const std::string& signalName,
+                                      bool expectAsserted);
 
     /**
      * @brief Handler for PDBPSUPowerOk GPIO events
