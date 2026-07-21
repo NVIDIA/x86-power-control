@@ -660,6 +660,20 @@ void VRPowerControl::initiateCPUShutdown(bool isForceful)
     setPowerState(PowerState::waitForCPUShutdownOk);
 }
 
+void VRPowerControl::initiateGracefulShutdown()
+{
+    // Atomic graceful shutdown: SHDN_REQ, settles at PowerState::on or ::off.
+    action = PowerAction::GRACE_OFF;
+    initiateCPUShutdown(/*isForceful=*/false);
+}
+
+void VRPowerControl::initiateForcefulShutdown()
+{
+    // Atomic forceful shutdown: SHDN_FORCE, settles at PowerState::on or ::off.
+    action = PowerAction::FORCE_OFF;
+    initiateCPUShutdown(/*isForceful=*/true);
+}
+
 void VRPowerControl::handlePowerCycleWhenOff(Event event)
 {
     bool isForceful = (event == Event::powerCycleRequest);
