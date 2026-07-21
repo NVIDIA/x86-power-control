@@ -798,6 +798,16 @@ class VRPowerControl : public PowerControl
     void initiateCPUShutdown(bool isForceful);
 
     /**
+     * @brief Aux power cycle shutdown primitives (see PowerControl)
+     *
+     * Kick the VR graceful/forceful shutdown FSM, which is atomic and settles
+     * at PowerState::on or ::off. The base aux orchestration drives these and
+     * reacts to the settled state via the setPowerState() completion hook.
+     */
+    void initiateGracefulShutdown() override;
+    void initiateForcefulShutdown() override;
+
+    /**
      * @brief Handle power cycle request when in off state
      *
      * Reads Board0RunPowerPG to verify power is off: if de-asserted, calls
