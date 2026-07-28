@@ -1811,6 +1811,11 @@ void PowerControl::initializeOSInterface()
     osIface = objServer.add_interface(
         "/xyz/openbmc_project/state/host" + nodeId,
         "xyz.openbmc_project.State.OperatingSystem.Status");
+    if (!osIface)
+    {
+        lg2::error("Failed to add OperatingSystem.Status interface");
+        return;
+    }
 
     // Default to Inactive state
     osIface->register_property(
@@ -2060,26 +2065,28 @@ int PowerControl::setMaskedGPIOOutputForMs(
               "GPIO_VALUE", value);
 
     gpioAssertTimer.expires_after(std::chrono::milliseconds(durationMs));
-    gpioAssertTimer.async_wait([config, value](
-                                   const boost::system::error_code ec) mutable {
-        // Set the masked GPIO line back to the opposite value
-        if (config && config->gpioLine)
-        {
+    gpioAssertTimer.async_wait(
+        [config, value](const boost::system::error_code& ec) mutable {
+            if (ec)
+            {
+                // operation_aborted is expected if timer is canceled before
+                // completion (e.g. a shared gpioAssertTimer was re-armed for
+                // a different pulse). In that case the original deassert is
+                // no longer wanted — do NOT release the GPIO, just log if
+                // the error is anything other than the expected abort.
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
+                               "GPIO_NAME", config->lineName, "ERROR_MSG",
+                               ec.message());
+                }
+                return;
+            }
+            // config and config->gpioLine were validated above before the timer
+            // was scheduled; the captured shared_ptr keeps both alive here.
             config->gpioLine.set_value(!value);
             lg2::info("{GPIO_NAME} released", "GPIO_NAME", config->lineName);
-        }
-        if (ec)
-        {
-            // operation_aborted is expected if timer is canceled before
-            // completion.
-            if (ec != boost::asio::error::operation_aborted)
-            {
-                lg2::error("{GPIO_NAME} async_wait failed: {ERROR_MSG}",
-                           "GPIO_NAME", config->lineName, "ERROR_MSG",
-                           ec.message());
-            }
-        }
-    });
+        });
     return 0;
 }
 

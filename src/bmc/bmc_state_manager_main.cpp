@@ -5,11 +5,16 @@
 
 #include "bmc_state_manager.hpp"
 
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/bus.hpp>
+
+#include <cstdlib>
+#include <exception>
 
 using BMCState = sdbusplus::server::xyz::openbmc_project::state::BMC;
 
 int main()
+try
 {
     auto bus = sdbusplus::bus::new_default();
 
@@ -32,6 +37,15 @@ int main()
         bus.process_discard();
         bus.wait();
     }
-
-    exit(EXIT_SUCCESS);
+}
+catch (const std::exception& e)
+{
+    lg2::error("bmc-state-manager: unhandled exception in main: {ERR}", "ERR",
+               e.what());
+    return EXIT_FAILURE;
+}
+catch (...)
+{
+    lg2::error("bmc-state-manager: unknown unhandled exception in main");
+    return EXIT_FAILURE;
 }

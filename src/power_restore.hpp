@@ -112,7 +112,18 @@ class PersistentState
      */
     ~PersistentState()
     {
-        saveState();
+        try
+        {
+            saveState();
+        }
+        catch (const std::exception& ex)
+        {
+            // Destructors must not throw. Log and swallow.
+            lg2::error("PersistentState dtor: saveState failed: {ERR}", "ERR",
+                       ex.what());
+        }
+        catch (...)
+        {}
     }
 
     PersistentState(const PersistentState&) = delete;

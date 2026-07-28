@@ -186,15 +186,16 @@ struct ConfigData
     std::string path;
     std::string interface;
     std::optional<std::regex> matchRegex;
-    bool polarity;
-    ConfigType type;
-    gpiod::line gpioLine;    // GPIO line handle
-    GPIODirection direction; // GPIO direction (input or output)
+    bool polarity = false;
+    ConfigType type = ConfigType::GPIO;
+    gpiod::line gpioLine;  // GPIO line handle
+    GPIODirection direction =
+        GPIODirection::IN; // GPIO direction (input/output)
     boost::asio::posix::stream_descriptor
-        eventDescriptor;     // Event descriptor for async monitoring
+        eventDescriptor;   // Event descriptor for async monitoring
     std::function<void(bool)>
-        gpioHandler; // Handler function for GPIO events (initially null,
-                     // populated after loadConfigValues)
+        gpioHandler;       // Handler function for GPIO events (initially null,
+                           // populated after loadConfigValues)
 
     // Input event monitoring (for gpio_keys_polled driver)
     bool useInputEvents;  // Use input event monitoring instead of direct GPIO
