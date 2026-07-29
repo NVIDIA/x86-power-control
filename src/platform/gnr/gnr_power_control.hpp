@@ -80,6 +80,12 @@ class GNRPowerControl : public PowerControl
     void handleCycleOff(Event event) override;
 
   private:
+    void sendPowerOnVdm();
+    void sendPowerOffVdm();
+    /** Notify the erot, assert G3SoftEn and drive PexResetN low. */
+    void completePowerDown();
+    /** PexResetN released; settle for G3SoftPowerButtonDelayMs, then pulse. */
+    void startPowerButtonDelay();
     int readGPIOInputValue(std::shared_ptr<ConfigData> config);
     /** Start the async G3Soft sequence (no blocking). */
     void startGNRPowerOnSequence();
