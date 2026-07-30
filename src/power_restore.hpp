@@ -411,7 +411,7 @@ class PowerRestoreController
 
         if (std::string(message.get_member()) == "InterfacesAdded")
         {
-            sdbusplus::message::object_path path;
+            sdbusplus::object_path path;
             boost::container::flat_map<std::string, dbusPropertiesList> data;
 
             message.read(path, data);
