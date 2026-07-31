@@ -76,7 +76,7 @@ void BMC::bmcIsQuiesced()
 std::string BMC::getUnitState(const std::string& unitToCheck)
 {
     std::variant<std::string> currentState;
-    sdbusplus::message::object_path unitTargetPath;
+    sdbusplus::object_path unitTargetPath;
 
     auto method = this->bus.new_method_call(SYSTEMD_SERVICE, SYSTEMD_OBJ_PATH,
                                             SYSTEMD_INTERFACE, "GetUnit");
@@ -230,7 +230,7 @@ bool BMC::executeTransition(const Transition tranReq)
 int BMC::bmcStateChange(sdbusplus::message_t& msg)
 {
     uint32_t newStateID{};
-    sdbusplus::message::object_path newStateObjPath;
+    sdbusplus::object_path newStateObjPath;
     std::string newStateUnit{};
     std::string newStateResult{};
 
