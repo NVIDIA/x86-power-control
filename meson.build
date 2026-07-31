@@ -85,6 +85,7 @@ executable(
     'src/platform/nvl72/nvl72_power_control.cpp',
     'src/platform/c2/c2_power_control.cpp',
     'src/platform/vr_nvl8/vr_nvl8_power_control.cpp',
+    'src/platform/vc256/vc256_power_control.cpp',
     include_directories: include_directories('src'),
     cpp_args: cpp_args,
     dependencies: deps,
