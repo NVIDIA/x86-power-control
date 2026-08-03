@@ -379,13 +379,6 @@ void GNRPowerControl::startPowerButtonDelay()
         std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
 }
 
-void GNRPowerControl::sendPowerOnVdm()
-{
-    static constexpr std::array<uint8_t, 9> powerOnNotification = {
-        0x00, 0x00, 0x16, 0x47, 0x80, 0x01, 0x0a, 0x02, 0x01};
-    sendVdm(powerOnNotification, "power-on");
-}
-
 void GNRPowerControl::powerOn()
 {
     lg2::info("GNR powerOn() entered");
@@ -560,7 +553,6 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
         case GNRPowerOnPhase::WaitingPowerButtonDelay:
             lg2::info("GNR power-on: step 5 - pulsing power button");
             gnrPowerOnPhase = GNRPowerOnPhase::Idle;
-            sendPowerOnVdm();
             PowerControl::powerOn();
             return;
         default:

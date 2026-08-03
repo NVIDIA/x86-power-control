@@ -84,7 +84,6 @@ class GNRPowerControl : public PowerControl
     void handleCycleOff(Event event) override;
 
   private:
-    void sendPowerOnVdm();
     void sendPowerOffVdm();
     /** Notify the erot, assert G3SoftEn and drive PexResetN low. */
     void completePowerDown();
