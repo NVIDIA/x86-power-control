@@ -113,6 +113,13 @@
             "LineName": "B1_M0_CPU_SHDN_OK_L-I",
             "Type": "GPIO",
             "Polarity": "ActiveLow"
+        },
+        {
+            "Type": "DBUS",
+            "DbusName": "xyz.openbmc_project.Host.Misc.Manager",
+            "Path": "/xyz/openbmc_project/misc/platform_state",
+            "Interface": "xyz.openbmc_project.State.Host.Misc",
+            "Property": "ESpiPlatformReset"
         }
     ],
     "resources": [

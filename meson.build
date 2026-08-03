@@ -56,6 +56,9 @@ conf_data.set_quoted(
 
 configure_file(output: 'config.h', configuration: conf_data)
 
+# Set config file
+config_file = get_option('config-file')
+
 # Include directory for generated config.h (available to subdirectories)
 root_build_inc = include_directories('.')
 
@@ -67,7 +70,7 @@ phosphordbusinterfaces = dependency('phosphor-dbus-interfaces')
 phosphorlogging = dependency('phosphor-logging')
 sdbusplus = dependency('sdbusplus')
 sdeventplus = dependency('sdeventplus')
-boost = dependency('boost')
+boost = dependency('boost', include_type: 'system')
 deps = [
     libgpiodcxx,
     libsystemd,
@@ -105,8 +108,9 @@ if systemd.found()
 endif
 
 install_data(
-    'config/power-config-host0.json',
+    'config/' + config_file + '.json',
     install_dir: '/usr/share/x86-power-control/',
+    rename: 'power-config-host0.json',
 )
 
 subdir('src/bmc')
