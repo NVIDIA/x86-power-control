@@ -18,6 +18,7 @@
 
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
+#include <xyz/openbmc_project/Common/error.hpp>
 
 #include <cerrno>
 #include <chrono>
@@ -1640,6 +1641,92 @@ void PowerControl::registerHostInterface()
     hostIface =
         objServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                 "xyz.openbmc_project.State.Host");
+
+    // com.nvidia.PreSystemReset — allows fw-status to assert/release the
+    // Board0PreSystemReset GPIO for USB-RCM strap programming. Only created
+    // when the platform declares that signal. While asserted the FSM parks in
+    // PowerState::waitForCpuRecovery which ignores GPIO chatter (SHDN_OK,
+    // CpuResetIndicator) but exits cleanly if power actually drops.
+    auto preSysResetIt = powerSignalMap.find("Board0PreSystemReset");
+    if (preSysResetIt != powerSignalMap.end())
+    {
+        auto preSysResetSignal = preSysResetIt->second;
+        preSysResetIface = objServer.add_interface(
+            "/xyz/openbmc_project/control/host" + nodeId + "/pre_system_reset",
+            "com.nvidia.PreSystemReset");
+
+        preSysResetIface->register_method(
+            "SetPreSystemReset",
+            [this, preSysResetSignal](bool assertReset) {
+                // Allow release (false) from waitForCpuRecovery — that is the
+                // normal exit path. Only reject new assert (true) requests
+                // from transitional states to prevent racing a power sequence.
+                bool inRecovery =
+                    (powerState == PowerState::waitForCpuRecovery);
+                if (!assertReset && !inRecovery && !inStablePowerState())
+                {
+                    lg2::error(
+                        "SetPreSystemReset rejected: power state is transitional");
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        Unavailable();
+                }
+                if (assertReset && !inStablePowerState())
+                {
+                    lg2::error(
+                        "SetPreSystemReset rejected: power state is transitional");
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        Unavailable();
+                }
+                // assert: polarity value; de-assert: !polarity
+                int gpioValue = assertReset
+                                    ? static_cast<int>(preSysResetSignal->polarity)
+                                    : static_cast<int>(!preSysResetSignal->polarity);
+                if (!setGPIOOutput(preSysResetSignal, gpioValue))
+                {
+                    lg2::error("SetPreSystemReset({A}) failed", "A",
+                               assertReset);
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        InternalFailure();
+                }
+                if (assertReset)
+                {
+                    preSysResetSavedValue = gpioValue;
+                    preSysResetReturnState = powerState;
+                    setPowerState(PowerState::waitForCpuRecovery);
+                    lg2::info("CPU held in reset for USB-RCM recovery; "
+                              "FSM parked in waitForCpuRecovery");
+                }
+                else
+                {
+                    setPowerState(preSysResetReturnState);
+                    preSysResetSavedValue = 1;
+                    lg2::info("CPU reset released; FSM back to {STATE}",
+                              "STATE", static_cast<int>(preSysResetReturnState));
+                }
+            });
+        preSysResetIface->initialize();
+
+        // Watch for fw-status disappearing while the CPU is held in reset.
+        // Restore the GPIO and exit waitForCpuRecovery so the system is not
+        // stranded with blockPowerActions set indefinitely.
+        fwStatusNameWatch = std::make_unique<sdbusplus::bus::match_t>(
+            *conn,
+            "type='signal',interface='org.freedesktop.DBus',"
+            "member='NameOwnerChanged',arg0='com.Nvidia.FWStatus',arg2=''",
+            [this, preSysResetSignal](sdbusplus::message_t& /*msg*/) {
+                if (powerState != PowerState::waitForCpuRecovery)
+                {
+                    return;
+                }
+                lg2::warning(
+                    "com.Nvidia.FWStatus disappeared during CPU recovery — "
+                    "releasing PreSystemReset and returning to {STATE}",
+                    "STATE", static_cast<int>(preSysResetReturnState));
+                setGPIOOutput(preSysResetSignal,
+                              static_cast<int>(!preSysResetSignal->polarity));
+                setPowerState(preSysResetReturnState);
+            });
+    }
 
     // Interface for IPMI/Redfish initiated host state transitions
     hostIface->register_property(

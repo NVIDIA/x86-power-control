@@ -45,6 +45,9 @@ enum class PowerState
     // Aux power cycle: aux-cycle GPIO asserted, waiting for tray standby power
     // to drop (i.e. for the BMC to lose power and restart)
     waitForAuxPowerCycle,
+    // CPU held in reset for USB-RCM recovery; FSM parked here until
+    // SetPreSystemReset(false) is called or a hardware abort event fires.
+    waitForCpuRecovery,
     // VR-specific states
     waitForPDBMainPowerOk,
     waitForPDBMainPowerOff,
@@ -442,6 +445,14 @@ class PowerControl
     std::string target_state = "HostOff";
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> preSysResetIface;
+    std::unique_ptr<sdbusplus::bus::match_t> fwStatusNameWatch;
+    // GPIO value that was active on Board0PreSystemReset when
+    // SetPreSystemReset was last called; used to restore on abort.
+    int preSysResetSavedValue{1};
+    // Power state captured just before entering waitForCpuRecovery; restored
+    // when recovery ends so a session entered from off returns to off.
+    PowerState preSysResetReturnState{PowerState::off};
     std::shared_ptr<sdbusplus::asio::dbus_interface> bootProgressIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
 #ifdef CHASSIS_SYSTEM_RESET
