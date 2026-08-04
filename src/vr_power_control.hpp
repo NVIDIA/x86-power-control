@@ -649,6 +649,17 @@ class VRPowerControl : public PowerControl
     virtual void handleWaitForHostRebootShutdownOk(Event event);
 
     /**
+     * @brief Handler for PowerState::waitForCpuRecovery
+     *
+     * FSM is parked here while Board0PreSystemReset is held low for USB-RCM
+     * strap programming. Ignores GPIO chatter from the CPU entering reset
+     * (SHDN_OK, CpuResetIndicator). Exits and restores the reset GPIO if
+     * power actually drops (PDBMainPowerOkDeAssert, Board0RunPowerPGDeAssert)
+     * or if an explicit power-off / aux-cycle is requested over D-Bus.
+     */
+    virtual void handleWaitForCpuRecovery(Event event);
+
+    /**
      * @brief Handle events in waitForPowerCycleDelay state
      *
      * Waits for the power cycle delay timer to expire before initiating
