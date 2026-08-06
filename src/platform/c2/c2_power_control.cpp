@@ -67,6 +67,7 @@ C2PowerControl::C2PowerControl(
     // Initialize all host0 interfaces — makes the path visible to ObjectMapper.
     // Called after initializePowerStateFromHardware so the correct state is
     // published immediately on InterfacesAdded.
+    registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
 }
 
