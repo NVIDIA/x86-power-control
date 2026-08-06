@@ -517,13 +517,13 @@ void VRPowerControl::handleShutdownRequest(Event event)
         if (bootDoneState < 0)
         {
             lg2::error(
-                "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! "
-                "Host Graceful Operations cannot proceed.");
+                "CPU Boot Done signal value has not been initialized. "
+                "Host graceful operations cannot proceed.");
             logResourceEvent(
                 "ResourceErrorsDetected",
                 {"Host0",
-                 "CPU Boot Done signal value not yet initialized by Phosphor GPIO Monitor! "
-                 "Host Graceful Operations cannot proceed."},
+                 "CPU Boot Done signal value has not been initialized. "
+                 "Host graceful operations cannot proceed."},
                 "xyz.openbmc_project.Logging.Entry.Level.Error");
             return;
         }

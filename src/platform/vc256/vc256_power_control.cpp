@@ -36,6 +36,7 @@ VC256PowerControl::VC256PowerControl(
     setDefaultValues();
 
     initializePowerStateFromHardware(powerIndicators, true);
+    registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
 }
 
