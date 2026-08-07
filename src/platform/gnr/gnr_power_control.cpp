@@ -41,46 +41,49 @@ GNRPowerControl::GNRPowerControl(
                       [this](bool state) { powerOKHandler(state); });
     addRequiredSignal("PowerOut", 0, GPIODirection::OUT);
 
-    // PostComplete is optional — not all GNR boards have this GPIO
+    // PostComplete is optional — not all GNR boards have this GPIO.
+    // Registration failure must not take down power control (PowerOk/PowerOut).
     if (powerSignalMap.count("PostComplete"))
     {
-        addRequiredSignal("PostComplete", 0, GPIODirection::IN,
-                          [this](bool state) {
-                              auto it = powerSignalMap.find("PostComplete");
-                              if (it == powerSignalMap.end())
-                                  return;
-                              bool asserted = (state == it->second->polarity);
-                              setOperatingSystemState(
-                                  asserted ? OperatingSystemStateStage::Standby
-                                           : OperatingSystemStateStage::Inactive);
-                              // Deliberately not sending postComplete*Assert
-                              // events: the base handlePowerStateOn() treats a
-                              // POST Complete de-assert as a platform reset and
-                              // moves to checkForWarmReset, which is an empty
-                              // stub and therefore a dead-end state. On GNR this
-                              // signal only reports OS state and gates the erot
-                              // boot-complete notification.
-                              if (asserted)
-                              {
-                                  static constexpr std::array<uint8_t, 11> bootCompletePacket = {
-                                      0x00, 0x00, 0x16, 0x47,
-                                      0x80, 0x01, 0x02, 0x02, 0x03, 0x00, 0x00};
-                                  lg2::info("GNR: sending boot-complete VDM to eid {EID} ({LEN} bytes)",
-                                            "EID", MCTP_DEST_EID,
-                                            "LEN", bootCompletePacket.size());
-                                  // this-> because the ctor parameter of the
-                                  // same name shadows the member here.
-                                  mctpSendAsync(this->ioContext, 0x7f, bootCompletePacket,
-                                      [](MctpResult result) {
-                                          if (!result)
-                                              lg2::error("GNR: boot-complete VDM failed: {ERR}",
-                                                         "ERR", result.error().message());
-                                          else
-                                              lg2::info("GNR: boot-complete VDM acknowledged ({LEN} bytes)",
-                                                        "LEN", result->size());
-                                      });
-                              }
-                          });
+        addRequiredSignal(
+            "PostComplete", 0, GPIODirection::IN,
+            [this](bool state) {
+                auto it = powerSignalMap.find("PostComplete");
+                if (it == powerSignalMap.end())
+                    return;
+                bool asserted = (state == it->second->polarity);
+                setOperatingSystemState(
+                    asserted ? OperatingSystemStateStage::Standby
+                             : OperatingSystemStateStage::Inactive);
+                // Deliberately not sending postComplete*Assert
+                // events: the base handlePowerStateOn() treats a
+                // POST Complete de-assert as a platform reset and
+                // moves to checkForWarmReset, which is an empty
+                // stub and therefore a dead-end state. On GNR this
+                // signal only reports OS state and gates the erot
+                // boot-complete notification.
+                if (asserted)
+                {
+                    static constexpr std::array<uint8_t, 11> bootCompletePacket = {
+                        0x00, 0x00, 0x16, 0x47,
+                        0x80, 0x01, 0x02, 0x02, 0x03, 0x00, 0x00};
+                    lg2::info("GNR: sending boot-complete VDM to eid {EID} ({LEN} bytes)",
+                              "EID", MCTP_DEST_EID,
+                              "LEN", bootCompletePacket.size());
+                    // this-> because the ctor parameter of the
+                    // same name shadows the member here.
+                    mctpSendAsync(this->ioContext, 0x7f, bootCompletePacket,
+                        [](MctpResult result) {
+                            if (!result)
+                                lg2::error("GNR: boot-complete VDM failed: {ERR}",
+                                           "ERR", result.error().message());
+                            else
+                                lg2::info("GNR: boot-complete VDM acknowledged ({LEN} bytes)",
+                                          "LEN", result->size());
+                        });
+                }
+            },
+            /*optional=*/true);
     }
 
     validateRequiredSignals();

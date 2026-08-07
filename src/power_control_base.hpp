@@ -1098,17 +1098,23 @@ class PowerControl
      *
      * Checks if the signal is present in powerSignalMap and optionally assigns
      * a handler to its ConfigData. If a handler is provided and the signal
-     * exists in powerSignalMap, the handler is assigned directly to the
-     * ConfigData's gpioHandler field.
+     * exists in powerSignalMap, the handler is assigned and GPIO/input events
+     * are requested.
      *
      * @param signalName The name of the GPIO signal to add
      * @param boardIndex The board index (0 or 1)
+     * @param direction GPIO direction for the signal
      * @param handler Optional handler function to assign to the signal's
      *                ConfigData
+     * @param optional If true, registration failure is logged and ignored
+     *                 instead of throwing (signal is also omitted from the
+     *                 required-signal lists). Use for side-channel GPIOs that
+     *                 must not take down power control.
      */
     void addRequiredSignal(const std::string& signalName, int boardIndex,
                            GPIODirection direction,
-                           std::function<void(bool)> handler = nullptr);
+                           std::function<void(bool)> handler = nullptr,
+                           bool optional = false);
 
     /**
      * @brief Required resources (declared by platform ctors)
@@ -1161,15 +1167,18 @@ class PowerControl
         const std::string& resourceName);
 
     /**
-     * @brief Map of GPIO signal names to their handler functions
+     * @brief Assign a GPIO handler and request events for a signal
      *
      * This map is built up by each class in the hierarchy (PowerControl,
      * VRPowerControl, and platform-specific classes) in their constructors. The
      * registerGPIOHandler() method then assigns these handlers to the
      * corresponding ConfigData objects in the powerSignalMap and calls
      * requestGPIOEvents() for each.
+     *
+     * @return true if the handler was registered successfully, false if the
+     *         signal is missing from config or event registration failed
      */
-    void registerGPIOHandler(const std::string& signalName,
+    bool registerGPIOHandler(const std::string& signalName,
                              GPIODirection direction,
                              std::function<void(bool)> handler);
 
