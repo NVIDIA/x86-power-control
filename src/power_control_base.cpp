@@ -10,11 +10,15 @@
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
 #include <systemd/sd-journal.h>
 #include <unistd.h>
 
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
+#include <xyz/openbmc_project/Common/error.hpp>
 
 #include <cerrno>
 #include <chrono>
@@ -24,6 +28,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <variant>
 #include <vector>
 
 namespace power_control
@@ -84,6 +89,14 @@ std::string PowerControl::getEventName(Event event)
             return "power-off request";
         case Event::powerCycleRequest:
             return "power-cycle request";
+        case Event::auxPowerCycleRequest:
+            return "aux power-cycle request";
+        case Event::auxPowerCycleForceRequest:
+            return "aux power-cycle (force) request";
+        case Event::fullPowerCycleRequest:
+            return "full power-cycle request";
+        case Event::auxPowerCycleWatchdogTimerExpired:
+            return "aux power cycle watchdog timer expired";
         case Event::resetRequest:
             return "reset request";
         case Event::gracefulResetRequest:
@@ -296,11 +309,29 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     gpioAssertTimer(ioContext), powerCycleTimer(ioContext),
     gracefulPowerOffTimer(ioContext), warmResetCheckTimer(ioContext),
     powerOKWatchdogTimer(ioContext), sioPowerGoodWatchdogTimer(ioContext),
-    powerStateSaveTimer(ioContext), pohCounterTimer(ioContext),
-    restartCauseTimer(ioContext), slotPowerCycleTimer(ioContext)
+    powerStateSaveTimer(ioContext), auxPowerCycleWatchdogTimer(ioContext),
+    pohCounterTimer(ioContext), restartCauseTimer(ioContext),
+    slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
+
+    // Aux power cycle is a core power action inherited by every platform:
+    // require the aux-cycle output GPIO and its timer configs so the feature
+    // fails fast if a platform's config omits them. Each derived platform
+    // defines its own AuxPowerCycle GPIO line/polarity in config.
+    addRequiredSignal("AuxPowerCycle", 0, GPIODirection::OUT);
+    for (const char* timerName :
+         {"AuxPowerCycleWatchdogMs", "AuxPowerCycleJournalSyncTimeoutMs"})
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error("Required timer '{TIMER}' not found in config", "TIMER",
+                       timerName);
+            throw std::runtime_error(
+                std::string("Missing required timer config: ") + timerName);
+        }
+    }
 
     // Register base class GPIO handlers
     // These handlers are available in all platforms and can be overridden by
@@ -386,6 +417,9 @@ std::function<void(Event)> PowerControl::getPowerStateHandler()
         case PowerState::checkForWarmReset:
             return [this](Event e) { this->handleCheckForWarmReset(e); };
 
+        case PowerState::waitForAuxPowerCycle:
+            return [this](Event e) { this->handleWaitForAuxPowerCycle(e); };
+
         // Unknown state - not an upstream state
         // check for nul pointer return
         default:
@@ -395,6 +429,36 @@ std::function<void(Event)> PowerControl::getPowerStateHandler()
 
 void PowerControl::sendPowerControlEvent(Event event)
 {
+    // Start an aux cycle from a stable state (no per-platform handler wiring).
+    // External power requests are rejected at their input points while a cycle
+    // runs (see blockPowerActions), so during a cycle only internally-driven
+    // transitions reach here; the isAuxPowerCycleActive() guard is defensive
+    // against a re-entrant start. AuxPowerCycleForce cuts standby even if the
+    // host can't power off; FullPowerCycle skips the graceful attempt.
+    if (isAuxPowerCycleRequest(event))
+    {
+        if (!isAuxPowerCycleActive() && inStablePowerState())
+        {
+            // The D-Bus setter reserved blockPowerActions before ACKing; start
+            // the cycle (beginAuxPowerCycle keeps it set, endAuxPowerCycle
+            // clears it).
+            beginAuxPowerCycle(
+                /*force=*/event == Event::auxPowerCycleForceRequest,
+                /*skipGraceful=*/event == Event::fullPowerCycleRequest);
+        }
+        else if (!isAuxPowerCycleActive())
+        {
+            // Reserved and ACKed in the setter, but the host left the stable
+            // state before this handler ran, so the cycle can't start. Release
+            // the reservation so power actions aren't blocked indefinitely.
+            lg2::warning(
+                "Aux power cycle request dropped after reservation (host no longer stable); releasing power-action lock.");
+            blockPowerActions = false;
+        }
+        // else: a cycle is already active and owns the lock; ignore duplicate.
+        return;
+    }
+
     // Use the virtual getPowerStateHandler to get the correct handler
     std::function<void(Event)> handler = this->getPowerStateHandler();
 
@@ -996,6 +1060,14 @@ std::string_view PowerControl::getHostState() const
         case PowerState::checkForWarmReset:
             return "xyz.openbmc_project.State.Host.HostState.Off";
             break;
+        case PowerState::waitForAuxPowerCycle:
+            // Report the captured pre-assert host state. For AuxPowerCycleForce
+            // the host may still be running; returning Off here would produce a
+            // spurious Off->Running edge if the watchdog recovers the cycle.
+            return auxPowerCycleReturnState == PowerState::on
+                       ? "xyz.openbmc_project.State.Host.HostState.Running"
+                       : "xyz.openbmc_project.State.Host.HostState.Off";
+            break;
         default:
             lg2::error(
                 "getHostState: unhandled PowerState {STATE}, defaulting to Off",
@@ -1023,6 +1095,10 @@ std::string_view PowerControl::getChassisState() const
         case PowerState::off:
         case PowerState::cycleOff:
             return "xyz.openbmc_project.State.Chassis.PowerState.Off";
+            break;
+        case PowerState::waitForAuxPowerCycle:
+            // Aux-cycle GPIO asserted; tray power is being cut.
+            return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
             break;
         default:
             lg2::error(
@@ -1067,6 +1143,9 @@ std::string PowerControl::getPowerStateName() const
             break;
         case PowerState::checkForWarmReset:
             return "Check for Warm Reset";
+            break;
+        case PowerState::waitForAuxPowerCycle:
+            return "Wait for Aux Power Cycle";
             break;
         default:
             return "unknown state: " +
@@ -1140,28 +1219,57 @@ void PowerControl::setPowerState(const PowerState state)
     chassisIface->signal_property("CurrentPowerState");
     chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 
+    // While an aux power cycle is running, the transient on/off states between
+    // shutdown attempts are not real power events, so suppress the
+    // ResourceEvent logs (the aux-specific logs describe what is happening).
+    const bool auxActive = isAuxPowerCycleActive();
+
     // Reset boot progress to Unspecified when host powers off
     if (state == PowerState::off)
     {
         setBootProgress(
             "xyz.openbmc_project.State.Boot.Progress.ProgressStages.Unspecified");
-        logResourceEvent(
-            "ResourcePoweredOff", {"Host0"},
-            "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        if (!auxActive)
+        {
+            logResourceEvent(
+                "ResourcePoweredOff", {"Host0"},
+                "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        }
     }
     else if (state == PowerState::on)
     {
-        logResourceEvent(
-            "ResourcePoweredOn", {"Host0"},
-            "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        if (!auxActive)
+        {
+            logResourceEvent(
+                "ResourcePoweredOn", {"Host0"},
+                "xyz.openbmc_project.Logging.Entry.Level.Informational");
+        }
     }
 
     // Save the power state for the restore policy
     savePowerState(state);
+
+    // Aux power cycle: a shutdown attempt has settled at a stable state.
+    // Advance the orchestration, deferred so the completed action is fully
+    // recorded before it is inspected. The orchestrator never emits events, so
+    // this is not re-entrant.
+    if (auxActive && (state == PowerState::on || state == PowerState::off))
+    {
+        boost::asio::post(ioContext, [this]() { advanceAuxPowerCycle(); });
+    }
 }
 
 void PowerControl::savePowerState(const PowerState state)
 {
+    if (suppressPowerStateSave)
+    {
+        // Aux power cycle in progress: cancel any pending save and skip, so the
+        // internal shutdown does not overwrite the persisted host state used by
+        // the power-restore policy. Also cancels a save armed before the cycle.
+        powerStateSaveTimer.cancel();
+        return;
+    }
+
     auto it = TimerMap.find("PowerOffSaveMs");
     if (it == TimerMap.end())
     {
@@ -1185,6 +1293,286 @@ void PowerControl::savePowerState(const PowerState state)
         appState.set(PersistentState::Params::PowerState,
                      std::string{getChassisState()});
     });
+}
+
+// ---- Aux power cycle -------------------------------------------------------
+
+bool PowerControl::isAuxPowerCycleActive() const
+{
+    return auxPowerCycleState != AuxPowerCycleState::inactive ||
+           powerState == PowerState::waitForAuxPowerCycle;
+}
+
+bool PowerControl::isAuxPowerCycleRequest(Event event) const
+{
+    return event == Event::auxPowerCycleRequest ||
+           event == Event::auxPowerCycleForceRequest ||
+           event == Event::fullPowerCycleRequest;
+}
+
+void PowerControl::endAuxPowerCycle()
+{
+    auxPowerCycleState = AuxPowerCycleState::inactive;
+    auxPowerCycleForce = false;
+    suppressPowerStateSave = false;
+    blockPowerActions = false;
+}
+
+void PowerControl::beginAuxPowerCycle(bool force, bool skipGraceful)
+{
+    lg2::info("Aux power cycle starting (force={FORCE}, skipGraceful={SKIP}).",
+              "FORCE", force, "SKIP", skipGraceful);
+
+    auxPowerCycleForce = force;
+    // Keep the internal shutdown out of the power-restore persistent state.
+    suppressPowerStateSave = true;
+    // Reject external power actions at their input points for the duration of
+    // the atomic cycle; internal FSM transitions are unaffected.
+    blockPowerActions = true;
+
+    if (powerState == PowerState::off)
+    {
+        // Host already off == the success condition: cut standby immediately.
+        assertAuxPowerCycle();
+        return;
+    }
+
+    // Host on: run an atomic shutdown. It always settles back at on/off, and
+    // the setPowerState() completion hook then calls advanceAuxPowerCycle().
+    // FullPowerCycle starts forceful (no graceful attempt); the others start
+    // graceful and escalate to forceful on failure.
+    if (skipGraceful)
+    {
+        auxPowerCycleState = AuxPowerCycleState::forceful;
+        initiateForcefulShutdown();
+    }
+    else
+    {
+        auxPowerCycleState = AuxPowerCycleState::graceful;
+        initiateGracefulShutdown();
+    }
+}
+
+void PowerControl::advanceAuxPowerCycle()
+{
+    // Runs (deferred) after a shutdown attempt settles at a stable state.
+    if (auxPowerCycleState == AuxPowerCycleState::inactive)
+    {
+        return; // nothing pending
+    }
+    if (powerState != PowerState::on && powerState != PowerState::off)
+    {
+        return; // not settled (defensive against a stale post)
+    }
+
+    if (powerState == PowerState::off)
+    {
+        // Shutdown succeeded (graceful or forceful): cut standby for both
+        // variants.
+        lg2::info(
+            "Aux power cycle: host powered off; asserting aux-cycle GPIO.");
+        assertAuxPowerCycle();
+        return;
+    }
+
+    // Host still on.
+    if (auxPowerCycleState == AuxPowerCycleState::graceful)
+    {
+        // Graceful shutdown left the host on: one forceful attempt.
+        lg2::warning(
+            "Aux power cycle: graceful shutdown left host on; escalating to forceful shutdown.");
+        auxPowerCycleState = AuxPowerCycleState::forceful;
+        initiateForcefulShutdown();
+        return;
+    }
+
+    // Forceful shutdown also left the host on. The variant decides:
+    if (auxPowerCycleForce)
+    {
+        lg2::warning(
+            "Aux power cycle (force): host could not be powered off; asserting aux-cycle GPIO regardless.");
+        assertAuxPowerCycle();
+    }
+    else
+    {
+        lg2::error(
+            "Aux power cycle: host could not be powered off; aborting without cycling standby power. Host remains on.");
+        logResourceEvent(
+            "ResourceErrorsDetected",
+            {"Host0", "Aux power cycle aborted: host could not be powered off"},
+            "xyz.openbmc_project.Logging.Entry.Level.Warning");
+        endAuxPowerCycle();
+    }
+}
+
+void PowerControl::assertAuxPowerCycle()
+{
+    auto auxCycle = getSignal("AuxPowerCycle");
+    if (!auxCycle)
+    {
+        lg2::error(
+            "CRITICAL: AuxPowerCycle signal not configured — cannot perform aux power cycle");
+        logResourceEvent("ResourceErrorsDetected",
+                         {"Host0", "AuxPowerCycle GPIO not configured"},
+                         "xyz.openbmc_project.Logging.Entry.Level.Error");
+        // Defensive (config is validated at startup): give up cleanly, leaving
+        // the host in its already-settled state.
+        endAuxPowerCycle();
+        return;
+    }
+
+    // Where to return if standby never cycles: the host's settled state. Off
+    // for AuxPowerCycle (only asserted after a successful power-off); On or Off
+    // for a forced cycle.
+    auxPowerCycleReturnState = powerState;
+
+    // Covers the host-already-off entry path, which reaches here without
+    // beginAuxPowerCycle() having set the flag on a shutdown transition.
+    suppressPowerStateSave = true;
+
+    lg2::info(
+        "Aux power cycle: asserting AuxPowerCycle GPIO; starting watchdog. "
+        "Standby power should now cycle (BMC will restart).");
+
+    // Persist the shutdown/assertion log before standby power drops, otherwise
+    // the tail of the journal (buffered in RAM) is lost when the BMC dies.
+    // Bounded so a wedged journald never delays the power cycle.
+    auto it = TimerMap.find("AuxPowerCycleJournalSyncTimeoutMs");
+    int journalSyncTimeoutMs = (it != TimerMap.end()) ? it->second : 2000;
+    flushAndSyncJournal(journalSyncTimeoutMs);
+
+    // Assert the aux-cycle GPIO (this cuts tray standby power). If it fails,
+    // roll back cleanly instead of advertising a cycle that never started.
+    if (!setGPIOOutput(auxCycle, auxCycle->polarity))
+    {
+        lg2::error(
+            "Failed to assert AuxPowerCycle GPIO; aborting aux power cycle.");
+        logResourceEvent("ResourceErrorsDetected",
+                         {"Host0", "AuxPowerCycle GPIO assertion failed"},
+                         "xyz.openbmc_project.Logging.Entry.Level.Error");
+        endAuxPowerCycle();
+        setPowerState(auxPowerCycleReturnState);
+        return;
+    }
+
+    // Arm the watchdog only after the GPIO is actually driven, so its window
+    // measures the standby-power drop — not the journal sync.
+    startTimer("AuxPowerCycleWatchdogMs", auxPowerCycleWatchdogTimer,
+               Event::auxPowerCycleWatchdogTimerExpired);
+    setPowerState(PowerState::waitForAuxPowerCycle);
+}
+
+// Call one journald varlink method, blocking until its reply (or the socket
+// timeout). Best-effort: logs and returns on any error so the aux power cycle
+// proceeds regardless.
+static void journaldVarlinkCall(int fd, const char* method)
+{
+    // Varlink framing: NUL-terminated JSON request, NUL-terminated JSON reply.
+    std::string req =
+        std::string("{\"method\":\"") + method + "\",\"parameters\":{}}";
+    req.push_back('\0');
+    if (write(fd, req.data(), req.size()) != static_cast<ssize_t>(req.size()))
+    {
+        lg2::warning("journald varlink {METHOD} write failed ({ERR})", "METHOD",
+                     method, "ERR", std::strerror(errno));
+        return;
+    }
+
+    // The method returns only when the operation is complete, so receiving the
+    // reply is the completion signal we block on.
+    char buf[512];
+    std::string reply;
+    while (reply.find('\0') == std::string::npos)
+    {
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n <= 0) // timeout or error
+        {
+            lg2::warning("journald varlink {METHOD} reply not received",
+                         "METHOD", method);
+            return;
+        }
+        reply.append(buf, static_cast<size_t>(n));
+    }
+}
+
+void PowerControl::flushAndSyncJournal(int timeoutMs)
+{
+    // Make the shutdown/assertion log durable on disk before the aux GPIO cuts
+    // standby power (which kills the BMC before the RAM-buffered journal tail
+    // is written). Uses journald's varlink interface — FlushToVar migrates any
+    // volatile logs to /var, Synchronize fsyncs to disk — fully in-process (no
+    // child, no PID lookup). Bounded by the socket timeout so a wedged journald
+    // cannot delay the power cycle. All best-effort: any failure just proceeds.
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0)
+    {
+        lg2::warning("socket() failed ({ERR}); skipping journal sync", "ERR",
+                     std::strerror(errno));
+        return;
+    }
+
+    sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    std::strncpy(addr.sun_path, "/run/systemd/journal/io.systemd.journal",
+                 sizeof(addr.sun_path) - 1);
+
+    // Bound both the send and the reply wait with the configured timeout.
+    timeval tv = {timeoutMs / 1000, (timeoutMs % 1000) * 1000};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
+    {
+        lg2::warning(
+            "connect to journald varlink failed ({ERR}); skipping journal sync",
+            "ERR", std::strerror(errno));
+        close(fd);
+        return;
+    }
+
+    journaldVarlinkCall(fd, "io.systemd.Journal.FlushToVar");
+    journaldVarlinkCall(fd, "io.systemd.Journal.Synchronize");
+    close(fd);
+}
+
+void PowerControl::handleWaitForAuxPowerCycle(Event event)
+{
+    logEvent(__FUNCTION__, event);
+    if (event != Event::auxPowerCycleWatchdogTimerExpired)
+    {
+        // Atomic: ignore everything else while waiting for standby to drop.
+        lg2::info("No action taken for event: {EVENT}", "EVENT",
+                  getEventName(event));
+        return;
+    }
+
+    const PowerState returnState = auxPowerCycleReturnState;
+    lg2::error(
+        "Aux power cycle watchdog expired: tray standby power did not cycle. "
+        "De-asserting aux-cycle GPIO and returning to {STATE}.",
+        "STATE", returnState == PowerState::on ? "On" : "Off");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0", "Aux power cycle failed: standby power did not cycle"},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    // Un-latch the aux-cycle GPIO so the line is not left asserted.
+    auto auxCycle = getSignal("AuxPowerCycle");
+    if (auxCycle)
+    {
+        setGPIOOutput(auxCycle, !auxCycle->polarity);
+    }
+
+    endAuxPowerCycle();
+    if (returnState == PowerState::on)
+    {
+        setGPIOsForHostStateOn();
+    }
+    else
+    {
+        setGPIOsForHostStateOff();
+    }
+    setPowerState(returnState);
 }
 
 void PowerControl::initializeObjectManager()
@@ -1254,6 +1642,92 @@ void PowerControl::registerHostInterface()
         objServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                 "xyz.openbmc_project.State.Host");
 
+    // com.nvidia.PreSystemReset — allows fw-status to assert/release the
+    // Board0PreSystemReset GPIO for USB-RCM strap programming. Only created
+    // when the platform declares that signal. While asserted the FSM parks in
+    // PowerState::waitForCpuRecovery which ignores GPIO chatter (SHDN_OK,
+    // CpuResetIndicator) but exits cleanly if power actually drops.
+    auto preSysResetIt = powerSignalMap.find("Board0PreSystemReset");
+    if (preSysResetIt != powerSignalMap.end())
+    {
+        auto preSysResetSignal = preSysResetIt->second;
+        preSysResetIface = objServer.add_interface(
+            "/xyz/openbmc_project/control/host" + nodeId + "/pre_system_reset",
+            "com.nvidia.PreSystemReset");
+
+        preSysResetIface->register_method(
+            "SetPreSystemReset",
+            [this, preSysResetSignal](bool assertReset) {
+                // Allow release (false) from waitForCpuRecovery — that is the
+                // normal exit path. Only reject new assert (true) requests
+                // from transitional states to prevent racing a power sequence.
+                bool inRecovery =
+                    (powerState == PowerState::waitForCpuRecovery);
+                if (!assertReset && !inRecovery && !inStablePowerState())
+                {
+                    lg2::error(
+                        "SetPreSystemReset rejected: power state is transitional");
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        Unavailable();
+                }
+                if (assertReset && !inStablePowerState())
+                {
+                    lg2::error(
+                        "SetPreSystemReset rejected: power state is transitional");
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        Unavailable();
+                }
+                // assert: polarity value; de-assert: !polarity
+                int gpioValue = assertReset
+                                    ? static_cast<int>(preSysResetSignal->polarity)
+                                    : static_cast<int>(!preSysResetSignal->polarity);
+                if (!setGPIOOutput(preSysResetSignal, gpioValue))
+                {
+                    lg2::error("SetPreSystemReset({A}) failed", "A",
+                               assertReset);
+                    throw sdbusplus::xyz::openbmc_project::Common::Error::
+                        InternalFailure();
+                }
+                if (assertReset)
+                {
+                    preSysResetSavedValue = gpioValue;
+                    preSysResetReturnState = powerState;
+                    setPowerState(PowerState::waitForCpuRecovery);
+                    lg2::info("CPU held in reset for USB-RCM recovery; "
+                              "FSM parked in waitForCpuRecovery");
+                }
+                else
+                {
+                    setPowerState(preSysResetReturnState);
+                    preSysResetSavedValue = 1;
+                    lg2::info("CPU reset released; FSM back to {STATE}",
+                              "STATE", static_cast<int>(preSysResetReturnState));
+                }
+            });
+        preSysResetIface->initialize();
+
+        // Watch for fw-status disappearing while the CPU is held in reset.
+        // Restore the GPIO and exit waitForCpuRecovery so the system is not
+        // stranded with blockPowerActions set indefinitely.
+        fwStatusNameWatch = std::make_unique<sdbusplus::bus::match_t>(
+            *conn,
+            "type='signal',interface='org.freedesktop.DBus',"
+            "member='NameOwnerChanged',arg0='com.Nvidia.FWStatus',arg2=''",
+            [this, preSysResetSignal](sdbusplus::message_t& /*msg*/) {
+                if (powerState != PowerState::waitForCpuRecovery)
+                {
+                    return;
+                }
+                lg2::warning(
+                    "com.Nvidia.FWStatus disappeared during CPU recovery — "
+                    "releasing PreSystemReset and returning to {STATE}",
+                    "STATE", static_cast<int>(preSysResetReturnState));
+                setGPIOOutput(preSysResetSignal,
+                              static_cast<int>(!preSysResetSignal->polarity));
+                setPowerState(preSysResetReturnState);
+            });
+    }
+
     // Interface for IPMI/Redfish initiated host state transitions
     hostIface->register_property(
         "RequestedHostTransition",
@@ -1263,6 +1737,14 @@ void PowerControl::registerHostInterface()
             // implemented
             // TODO: Uncomment when powerButtonMask, resetButtonMask, and
             // addRestartCause are moved
+
+            // Reject external requests while an aux power cycle is atomic.
+            if (powerActionsBlocked())
+            {
+                lg2::warning(
+                    "RequestedHostTransition rejected: aux power cycle in progress.");
+                return 0;
+            }
 
             if (requested == "xyz.openbmc_project.State.Host.Transition.Off")
             {
@@ -1361,6 +1843,30 @@ void PowerControl::registerHostInterface()
                     return 0;
                 }
             }
+            else if (requested ==
+                     "xyz.openbmc_project.State.Host.Transition.FullPowerCycle")
+            {
+                // Aux cycles can only start from a stable state; reject (rather
+                // than silently drop) a request that arrives mid-transition.
+                if (!inStablePowerState())
+                {
+                    lg2::warning(
+                        "FullPowerCycle rejected: host not in a stable power state.");
+                    return 0;
+                }
+                // Full power cycle (DMTF): forceful shutdown, then cut standby
+                // only if the host actually powered off.
+                lg2::info("Host Full Power Cycle requested");
+                addRestartCause(RestartCause::command);
+                // Reserve the aux-cycle lock before ACKing so a later request
+                // can't race into the gap (released by endAuxPowerCycle() or
+                // the start hook if the cycle can't begin).
+                blockPowerActions = true;
+                // Defer event processing to avoid D-Bus reentrancy
+                boost::asio::post(ioContext, [this]() {
+                    sendPowerControlEvent(Event::fullPowerCycleRequest);
+                });
+            }
             else
             {
                 lg2::error("Unrecognized host state transition request.");
@@ -1429,6 +1935,14 @@ void PowerControl::initializeChassisInterface()
             // TODO: Uncomment when powerButtonMask and addRestartCause are
             // moved
 
+            // Reject external requests while an aux power cycle is atomic.
+            if (powerActionsBlocked())
+            {
+                lg2::warning(
+                    "RequestedPowerTransition rejected: aux power cycle in progress.");
+                return 0;
+            }
+
             if (requested == "xyz.openbmc_project.State.Chassis.Transition.Off")
             {
                 // TODO: Check power button mask when implemented
@@ -1485,9 +1999,98 @@ void PowerControl::initializeChassisInterface()
                     return 0;
                 }
             }
+            else if (
+                requested ==
+                "xyz.openbmc_project.State.Chassis.Transition.FullPowerCycle")
+            {
+                // Aux cycles can only start from a stable state; reject (rather
+                // than silently drop) a request that arrives mid-transition.
+                if (!inStablePowerState())
+                {
+                    lg2::warning(
+                        "FullPowerCycle rejected: host not in a stable power state.");
+                    return 0;
+                }
+                // Full power cycle (DMTF): forceful shutdown, then cut standby
+                // only if the host actually powered off. Also reachable via the
+                // host RequestedHostTransition; both post the same event.
+                lg2::info("Chassis Full Power Cycle requested");
+                addRestartCause(RestartCause::command);
+                // Reserve the aux-cycle lock before ACKing so a later request
+                // can't race into the gap (released by endAuxPowerCycle() or
+                // the start hook if the cycle can't begin).
+                blockPowerActions = true;
+                // Defer event processing to avoid D-Bus reentrancy
+                boost::asio::post(ioContext, [this]() {
+                    sendPowerControlEvent(Event::fullPowerCycleRequest);
+                });
+            }
             else
             {
                 lg2::error("Unrecognized chassis state transition request.");
+                return 0;
+            }
+            resp = requested;
+            return 1;
+        });
+
+    // Aux power transitions use a dedicated property, distinct from the
+    // standard chassis power transitions. (Provisional strings pending bmcweb
+    // contract.)
+    chassisIface->register_property(
+        "RequestedAuxPowerTransition", std::string{},
+        [this](const std::string& requested, std::string& resp) {
+            // Reject a second aux request once a cycle is running; the first
+            // request (flag still clear) falls through and starts the cycle.
+            if (powerActionsBlocked())
+            {
+                lg2::warning(
+                    "RequestedAuxPowerTransition rejected: aux power cycle in progress.");
+                return 0;
+            }
+
+            // Aux cycles can only start from a stable state; reject (rather
+            // than silently drop) a request that arrives mid-transition.
+            if (!inStablePowerState())
+            {
+                lg2::warning(
+                    "RequestedAuxPowerTransition rejected: host not in a stable power state.");
+                return 0;
+            }
+
+            if (requested ==
+                "xyz.openbmc_project.State.Chassis.Transition.AuxPowerCycle")
+            {
+                lg2::info("Chassis Aux Power Cycle requested");
+                addRestartCause(RestartCause::command);
+                // Reserve the aux-cycle lock before ACKing so a later request
+                // can't race into the gap (released by endAuxPowerCycle() or
+                // the start hook if the cycle can't begin).
+                blockPowerActions = true;
+                // Defer event processing to avoid D-Bus reentrancy
+                boost::asio::post(ioContext, [this]() {
+                    sendPowerControlEvent(Event::auxPowerCycleRequest);
+                });
+            }
+            else if (
+                requested ==
+                "xyz.openbmc_project.State.Chassis.Transition.AuxPowerCycleForce")
+            {
+                lg2::info("Chassis Aux Power Cycle (Force) requested");
+                addRestartCause(RestartCause::command);
+                // Reserve the aux-cycle lock before ACKing so a later request
+                // can't race into the gap (released by endAuxPowerCycle() or
+                // the start hook if the cycle can't begin).
+                blockPowerActions = true;
+                // Defer event processing to avoid D-Bus reentrancy
+                boost::asio::post(ioContext, [this]() {
+                    sendPowerControlEvent(Event::auxPowerCycleForceRequest);
+                });
+            }
+            else
+            {
+                lg2::error(
+                    "Unrecognized chassis aux power transition request.");
                 return 0;
             }
             resp = requested;
@@ -1519,6 +2122,14 @@ void PowerControl::initializeChassisSystemInterface()
         "RequestedPowerTransition",
         std::string("xyz.openbmc_project.State.Chassis.Transition.On"),
         [this](const std::string& requested, std::string& resp) {
+            // Reject external requests while an aux power cycle is atomic.
+            if (powerActionsBlocked())
+            {
+                lg2::warning(
+                    "Chassis system RequestedPowerTransition rejected: aux power cycle in progress.");
+                return 0;
+            }
+
             if (requested ==
                 "xyz.openbmc_project.State.Chassis.Transition.PowerCycle")
             {
@@ -2226,6 +2837,17 @@ void PowerControl::addRequiredSignal(const std::string& signalName,
         return;
     }
 
+    // Record the declared direction on the config entry so validation and GPIO
+    // setup see it even when no handler is registered (e.g. required output
+    // signals like AuxPowerCycle). Without this the entry keeps its default
+    // (IN) and validateRequiredSignals() logs a spurious "input signal without
+    // handler" error.
+    auto it = powerSignalMap.find(signalName);
+    if (it != powerSignalMap.end())
+    {
+        it->second->direction = direction;
+    }
+
     if (handler)
     {
         registerGPIOHandler(signalName, direction, handler);
@@ -2495,7 +3117,8 @@ void PowerControl::powerButtonHandler(bool state)
     if (asserted)
     {
         powerButtonPressLog();
-        if (!powerButtonMask)
+        // Suppress if the button is masked or an aux power cycle is running.
+        if (!powerButtonMask && !powerActionsBlocked())
         {
             sendPowerControlEvent(Event::powerButtonPressed);
             addRestartCause(RestartCause::powerButton);
@@ -2531,7 +3154,8 @@ void PowerControl::resetButtonHandler(bool state)
     if (asserted)
     {
         resetButtonPressLog();
-        if (!resetButtonMask)
+        // Suppress if the button is masked or an aux power cycle is running.
+        if (!resetButtonMask && !powerActionsBlocked())
         {
             sendPowerControlEvent(Event::resetButtonPressed);
             addRestartCause(RestartCause::resetButton);
