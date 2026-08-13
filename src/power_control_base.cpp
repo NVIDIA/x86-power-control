@@ -317,20 +317,25 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
 
-    // Aux power cycle is a core power action inherited by every platform:
-    // require the aux-cycle output GPIO and its timer configs so the feature
-    // fails fast if a platform's config omits them. Each derived platform
-    // defines its own AuxPowerCycle GPIO line/polarity in config.
-    addRequiredSignal("AuxPowerCycle", 0, GPIODirection::OUT);
-    for (const char* timerName :
-         {"AuxPowerCycleWatchdogMs", "AuxPowerCycleJournalSyncTimeoutMs"})
+    // Aux power cycle is optional: platforms that wire an AuxPowerCycle GPIO
+    // (e.g. tray standby reset) must also supply the watchdog/journal timers
+    // and fail fast if either is missing. Platforms without that hardware
+    // (e.g. GNR/LP30, which cycles aux via an external script) omit the
+    // signal and skip the requirement. assertAuxPowerCycle() already handles
+    // a missing signal at runtime.
+    if (powerSignalMap.find("AuxPowerCycle") != powerSignalMap.end())
     {
-        if (TimerMap.find(timerName) == TimerMap.end())
+        addRequiredSignal("AuxPowerCycle", 0, GPIODirection::OUT);
+        for (const char* timerName :
+             {"AuxPowerCycleWatchdogMs", "AuxPowerCycleJournalSyncTimeoutMs"})
         {
-            lg2::error("Required timer '{TIMER}' not found in config", "TIMER",
-                       timerName);
-            throw std::runtime_error(
-                std::string("Missing required timer config: ") + timerName);
+            if (TimerMap.find(timerName) == TimerMap.end())
+            {
+                lg2::error("Required timer '{TIMER}' not found in config",
+                           "TIMER", timerName);
+                throw std::runtime_error(
+                    std::string("Missing required timer config: ") + timerName);
+            }
         }
     }
 
