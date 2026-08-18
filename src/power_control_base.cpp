@@ -2441,34 +2441,6 @@ void PowerControl::registerGpioStateInterface()
         objServer.add_interface("/xyz/openbmc_project/state/host" + nodeId,
                                 "xyz.openbmc_project.State.Gpio");
 
-    // Register method: SetCpuBootDone(i state)
-    gpioStateIface->register_method("SetCpuBootDone", [this](const int& state) {
-        // Validate input: only accept 0 or 1
-        if (state != 0 && state != 1)
-        {
-            lg2::error("SetCpuBootDone rejected: Invalid state value {STATE}. "
-                       "Only 0 (de-asserted) or 1 (asserted) are allowed.",
-                       "STATE", state);
-            return 0;
-        }
-
-        // Update member variable
-        cpuBootDone = state;
-
-        // Log state change
-        const char* stateStr = (state == 1) ? "ASSERTED" : "DE-ASSERTED";
-        lg2::info("CPU Boot Done state changed to: {STATE}", "STATE", stateStr);
-
-        // Update property value
-        gpioStateIface->set_property("CpuBootDone", state);
-
-        // Send power control event based on state
-        Event cpuBootDoneEvent = (state == 1) ? Event::cpuBootDoneAssert
-                                              : Event::cpuBootDoneDeAssert;
-        sendPowerControlEvent(cpuBootDoneEvent);
-        return 1;
-    });
-
     // Register property: CpuBootDone (read-only, int type, initialized to -1)
     gpioStateIface->register_property_r(
         "CpuBootDone", int{-1}, sdbusplus::vtable::property_::emits_change,
@@ -2492,6 +2464,13 @@ void PowerControl::registerGpioStateInterface()
     // Note: Does NOT call initialize() - derived classes may register
     // additional GPIO properties before calling initializeHostStateInterface()
     // which initializes ALL host0 interfaces at once.
+}
+
+void PowerControl::registerCpuBootDoneSetterMethod()
+{
+    gpioStateIface->register_method("SetCpuBootDone", [this](const int& state) {
+        return updateCpuBootDoneState(state, true) ? 1 : 0;
+    });
 }
 
 void PowerControl::initializeHostStateInterface()
@@ -4057,6 +4036,50 @@ void PowerControl::setOperatingSystemState(OperatingSystemStateStage stage)
 
     lg2::info("Moving os state to {STATE} stage", "STATE",
               getOperatingSystemStateStage(stage));
+}
+
+bool PowerControl::updateCpuBootDoneState(int state, bool notifyStateMachine)
+{
+    if (state != 0 && state != 1)
+    {
+        lg2::error("CPU Boot Done update rejected: invalid state {STATE}; "
+                   "expected 0 (de-asserted) or 1 (asserted)",
+                   "STATE", state);
+        return false;
+    }
+
+    const bool stateChanged = (cpuBootDone != state);
+    cpuBootDone = state;
+    const char* stateStr = (state == 1) ? "ASSERTED" : "DE-ASSERTED";
+    lg2::info("CPU Boot Done state changed to: {STATE}", "STATE", stateStr);
+
+    if (gpioStateIface)
+    {
+        gpioStateIface->set_property("CpuBootDone", state);
+    }
+
+    if (notifyStateMachine && stateChanged)
+    {
+        sendPowerControlEvent(
+            state == 1 ? Event::cpuBootDoneAssert : Event::cpuBootDoneDeAssert);
+    }
+
+    return true;
+}
+
+void PowerControl::startSystemdUnit(const std::string& unitName)
+{
+    conn->async_method_call(
+        [unitName](const boost::system::error_code& ec,
+                   const sdbusplus::message::object_path& /* job */) {
+            if (ec)
+            {
+                lg2::error("Failed to start systemd unit {UNIT}: {ERROR}",
+                           "UNIT", unitName, "ERROR", ec.message());
+            }
+        },
+        "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager", "StartUnit", unitName, "replace");
 }
 
 // D-Bus Property Management

@@ -151,6 +151,20 @@ class NVL72PowerControl : public VRPowerControl
     // NVL72-specific helpers
     // =========================================================================
 
+    /** Handle a CPU Boot Done GPIO edge. */
+    void cpuBootDoneHandler(bool state);
+
+    /**
+     * Update CPU Boot Done state from a raw GPIO value.
+     *
+     * Initial state discovery uses notifyStateMachine=false; real edges use
+     * true so reboot/shutdown classification happens immediately.
+     */
+    void updateCpuBootDoneFromGpio(bool state, bool notifyStateMachine);
+
+    /** Maintain the legacy IPMI restriction-mode marker file. */
+    void updateCpuBootDoneMarker(bool asserted);
+
     /**
      * @brief Handler for StbyPwrOk GPIO events
      *

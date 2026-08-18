@@ -73,6 +73,12 @@
             "Polarity": "ActiveLow"
         },
         {
+            "Name": "CpuBootDone",
+            "LineName": "B0_M0_CPU_BOOT_COMPLETE_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
             "Name": "CpuResetIndicator",
             "LineName": "CPU_RST_L-I",
             "Type": "GPIO",
