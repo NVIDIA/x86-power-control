@@ -856,9 +856,24 @@ int PowerControl::readGPIOValue(ConfigData& config)
 
 bool PowerControl::requestGPIOPolled(ConfigData& config)
 {
+    if (!config.pollTimer)
+    {
+        config.pollTimer =
+            std::make_unique<boost::asio::steady_timer>(ioContext);
+    }
+
     if (!requestPolledGPIOLine(config))
     {
-        return false;
+        // Line/chip may appear later (e.g. I2C expander). Keep the poll
+        // timer running so registration succeeds and pollGPIOTick can
+        // acquire the line when it becomes available.
+        config.lastPolledValue = -1;
+        lg2::warning("Polled GPIO '{SIGNAL}' ({GPIO_NAME}) not available yet; "
+                     "retrying every {MS}ms",
+                     "SIGNAL", config.name, "GPIO_NAME", config.lineName, "MS",
+                     config.pollIntervalMs.count());
+        schedulePollTimer(config);
+        return true;
     }
 
     int initial = readGPIOValue(config);
@@ -876,8 +891,6 @@ bool PowerControl::requestGPIOPolled(ConfigData& config)
                 "SIGNAL", config.name, "VALUE", initial);
         }
     }
-
-    config.pollTimer = std::make_unique<boost::asio::steady_timer>(ioContext);
 
     lg2::info(
         "Starting polled GPIO monitoring for '{SIGNAL}' ({GPIO_NAME}) every {MS}ms",
