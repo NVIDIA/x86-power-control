@@ -49,6 +49,7 @@ ETL256PowerControl::ETL256PowerControl(
 
     // Publish the host/chassis/GPIO D-Bus interfaces after initial state is
     // derived from hardware, so clients see the correct state immediately.
+    registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
 }
 
