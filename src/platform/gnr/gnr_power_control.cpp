@@ -7,6 +7,7 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <algorithm>
 #include <chrono>
 
 namespace power_control
@@ -272,7 +273,8 @@ void GNRPowerControl::startGNRPowerOnSequence()
 
     gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetN;
     gnrPowerOnStartTime = std::chrono::steady_clock::now();
-    gnrPowerOnTimer.expires_after(g3SoftAp0Timeout);
+    gnrPowerOnTimer.expires_after(std::min(
+        std::chrono::milliseconds(ap0PollIntervalMs), g3SoftAp0Timeout));
     gnrPowerOnTimer.async_wait(
         std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
 }
@@ -329,7 +331,12 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
             }
             else
             {
-                gnrPowerOnTimer.expires_after(g3SoftAp0Timeout);
+                const auto remaining =
+                    g3SoftAp0Timeout -
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        elapsed);
+                gnrPowerOnTimer.expires_after(std::min(
+                    std::chrono::milliseconds(ap0PollIntervalMs), remaining));
             }
             break;
         }
