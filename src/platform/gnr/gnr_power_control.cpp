@@ -43,8 +43,10 @@ GNRPowerControl::GNRPowerControl(
     validateTimerConfigs();
     setDefaultValues();
 
-    initializeHostStateInterface();
+    // Determine power state from hardware before exposing interfaces to D-Bus,
+    // so the initial published values are correct.
     initializePowerStateFromHardware({"PowerOk"}, true);
+    initializeHostStateInterface();
     g3SoftAp0Timeout = getTimeoutWithDefault("G3SoftAp0TimeoutMs", 15s);
     g3SoftPowerButtonDelay =
         getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
