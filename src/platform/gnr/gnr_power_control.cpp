@@ -318,7 +318,7 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
                     return;
                 }
                 gnrPowerOnPhase = GNRPowerOnPhase::WaitingPexResetPulse;
-                gnrPowerOnTimer.expires_after(g3SoftPowerButtonDelay);
+                gnrPowerOnTimer.expires_after(pexResetPulse);
             }
             else if (elapsed >= g3SoftAp0Timeout)
             {
