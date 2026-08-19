@@ -442,7 +442,15 @@ void PowerControl::sendPowerControlEvent(Event event)
     // transitions reach here; the isAuxPowerCycleActive() guard is defensive
     // against a re-entrant start. AuxPowerCycleForce cuts standby even if the
     // host can't power off; FullPowerCycle skips the graceful attempt.
-    if (isAuxPowerCycleRequest(event))
+    //
+    // Exception: while parked in waitForCpuRecovery, a request can be ACKed
+    // (host was stable) and then deferred via boost::asio::post, racing a
+    // SetPreSystemReset(true) that parks the FSM before the post runs. Let
+    // the event fall through to the per-state handler instead of dropping it
+    // here — VRPowerControl::handleWaitForCpuRecovery aborts recovery and
+    // starts the requested cycle.
+    if (isAuxPowerCycleRequest(event) &&
+        powerState != PowerState::waitForCpuRecovery)
     {
         if (!isAuxPowerCycleActive() && inStablePowerState())
         {
