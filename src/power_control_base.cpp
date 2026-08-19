@@ -28,6 +28,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -316,20 +317,25 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
 
-    // Aux power cycle is a core power action inherited by every platform:
-    // require the aux-cycle output GPIO and its timer configs so the feature
-    // fails fast if a platform's config omits them. Each derived platform
-    // defines its own AuxPowerCycle GPIO line/polarity in config.
-    addRequiredSignal("AuxPowerCycle", 0, GPIODirection::OUT);
-    for (const char* timerName :
-         {"AuxPowerCycleWatchdogMs", "AuxPowerCycleJournalSyncTimeoutMs"})
+    // Aux power cycle is optional: platforms that wire an AuxPowerCycle GPIO
+    // (e.g. tray standby reset) must also supply the watchdog/journal timers
+    // and fail fast if either is missing. Platforms without that hardware
+    // (e.g. GNR/LP30, which cycles aux via an external script) omit the
+    // signal and skip the requirement. assertAuxPowerCycle() already handles
+    // a missing signal at runtime.
+    if (powerSignalMap.find("AuxPowerCycle") != powerSignalMap.end())
     {
-        if (TimerMap.find(timerName) == TimerMap.end())
+        addRequiredSignal("AuxPowerCycle", 0, GPIODirection::OUT);
+        for (const char* timerName :
+             {"AuxPowerCycleWatchdogMs", "AuxPowerCycleJournalSyncTimeoutMs"})
         {
-            lg2::error("Required timer '{TIMER}' not found in config", "TIMER",
-                       timerName);
-            throw std::runtime_error(
-                std::string("Missing required timer config: ") + timerName);
+            if (TimerMap.find(timerName) == TimerMap.end())
+            {
+                lg2::error("Required timer '{TIMER}' not found in config",
+                           "TIMER", timerName);
+                throw std::runtime_error(
+                    std::string("Missing required timer config: ") + timerName);
+            }
         }
     }
 
@@ -362,6 +368,7 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
 #endif
     initializeButtonInterfaces();
     initializeOSInterface();
+    initializeRestartCauseInterface();
     registerGpioStateInterface();
 
     // Initialize GPIO property setters map with common Board0 signals
@@ -577,6 +584,28 @@ void PowerControl::loadConfigValues()
                 throw std::runtime_error(
                     "Missing 'Polarity' for GPIO: " + gpioName);
             }
+
+            // Optional polled-mode fields. Used for GPIOs on chips that don't
+            // support edge events (e.g. CPLD GPIO expanders over I2C).
+            if (gpioConfig.contains("Polled") &&
+                gpioConfig["Polled"].is_boolean())
+            {
+                configPtr->polled = gpioConfig["Polled"].get<bool>();
+            }
+            if (gpioConfig.contains("PollIntervalMs") &&
+                gpioConfig["PollIntervalMs"].is_number_integer())
+            {
+                int interval = gpioConfig["PollIntervalMs"].get<int>();
+                if (interval <= 0)
+                {
+                    lg2::error(
+                        "PollIntervalMs must be > 0 for {GPIO_NAME} (got {VAL})",
+                        "GPIO_NAME", configPtr->lineName, "VAL", interval);
+                    throw std::runtime_error(
+                        "Invalid 'PollIntervalMs' for GPIO: " + gpioName);
+                }
+                configPtr->pollIntervalMs = std::chrono::milliseconds(interval);
+            }
         }
         else // DBUS type
         {
@@ -742,6 +771,13 @@ void PowerControl::loadConfigValues()
 
 bool PowerControl::requestGPIOEvents(ConfigData& config)
 {
+    // If this signal is configured for polled monitoring (chip without edge
+    // event support), use the polling path instead of EVENT_BOTH_EDGES.
+    if (config.polled)
+    {
+        return requestGPIOPolled(config);
+    }
+
     // Migrated from static function in power_control.cpp
 
     // Find the GPIO line
@@ -786,6 +822,210 @@ bool PowerControl::requestGPIOEvents(ConfigData& config)
     }
 
     waitForGPIOEvent(config);
+    return true;
+}
+
+int PowerControl::readGPIOValue(ConfigData& config)
+{
+    try
+    {
+        return config.gpioLine.get_value();
+    }
+    catch (const std::system_error& e)
+    {
+        if (e.code().value() == ENODEV)
+        {
+            logGPIOUnavailable(config, e.what());
+            clearGPIOLine(config);
+            return -1;
+        }
+
+        lg2::error("Failed to read GPIO '{SIGNAL}' ({GPIO_NAME}): {ERROR}",
+                   "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+                   e.what());
+        return -1;
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to read GPIO '{SIGNAL}' ({GPIO_NAME}): {ERROR}",
+                   "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+                   e.what());
+        return -1;
+    }
+}
+
+bool PowerControl::requestGPIOPolled(ConfigData& config)
+{
+    if (!config.pollTimer)
+    {
+        config.pollTimer =
+            std::make_unique<boost::asio::steady_timer>(ioContext);
+    }
+
+    if (!requestPolledGPIOLine(config))
+    {
+        // Line/chip may appear later (e.g. I2C expander). Keep the poll
+        // timer running so registration succeeds and pollGPIOTick can
+        // acquire the line when it becomes available.
+        config.lastPolledValue = -1;
+        lg2::warning("Polled GPIO '{SIGNAL}' ({GPIO_NAME}) not available yet; "
+                     "retrying every {MS}ms",
+                     "SIGNAL", config.name, "GPIO_NAME", config.lineName, "MS",
+                     config.pollIntervalMs.count());
+        schedulePollTimer(config);
+        return true;
+    }
+
+    int initial = readGPIOValue(config);
+    config.lastPolledValue = initial;
+
+    // Initialize D-Bus GPIO property with current hardware value (if mapped)
+    if (initial >= 0)
+    {
+        auto setterIt = gpioPropertySetters.find(config.name);
+        if (setterIt != gpioPropertySetters.end())
+        {
+            setterIt->second(this, initial);
+            lg2::info(
+                "Initialized D-Bus property '{SIGNAL}' to {VALUE} (polled)",
+                "SIGNAL", config.name, "VALUE", initial);
+        }
+    }
+
+    lg2::info(
+        "Starting polled GPIO monitoring for '{SIGNAL}' ({GPIO_NAME}) every {MS}ms",
+        "SIGNAL", config.name, "GPIO_NAME", config.lineName, "MS",
+        config.pollIntervalMs.count());
+
+    schedulePollTimer(config);
+    return true;
+}
+
+void PowerControl::schedulePollTimer(ConfigData& config)
+{
+    if (!config.pollTimer)
+    {
+        return;
+    }
+    config.pollTimer->expires_after(config.pollIntervalMs);
+    config.pollTimer->async_wait(
+        std::bind_front(&PowerControl::pollGPIOTick, this, std::ref(config)));
+}
+
+void PowerControl::pollGPIOTick(ConfigData& config,
+                                const boost::system::error_code& ec)
+{
+    if (ec)
+    {
+        if (ec != boost::asio::error::operation_aborted)
+        {
+            lg2::error("Polled GPIO timer error for '{SIGNAL}': {ERROR}",
+                       "SIGNAL", config.name, "ERROR", ec.message());
+        }
+        return;
+    }
+
+    if (!config.gpioLine && !requestPolledGPIOLine(config))
+    {
+        schedulePollTimer(config);
+        return;
+    }
+
+    int value = readGPIOValue(config);
+    if (value >= 0 && value != config.lastPolledValue)
+    {
+        config.lastPolledValue = value;
+        if (config.gpioHandler)
+        {
+            config.gpioHandler(value != 0);
+        }
+        auto setterIt = gpioPropertySetters.find(config.name);
+        if (setterIt != gpioPropertySetters.end())
+        {
+            setterIt->second(this, value);
+        }
+    }
+
+    schedulePollTimer(config);
+}
+
+void PowerControl::clearGPIOLine(ConfigData& config)
+{
+    if (config.eventDescriptor.is_open())
+    {
+        boost::system::error_code ec;
+        config.eventDescriptor.close(ec);
+        if (ec)
+        {
+            lg2::warning(
+                "Failed to close GPIO event descriptor for '{SIGNAL}': {ERROR}",
+                "SIGNAL", config.name, "ERROR", ec.message());
+        }
+    }
+
+    if (config.gpioLine)
+    {
+        try
+        {
+            if (config.gpioLine.is_requested())
+            {
+                config.gpioLine.release();
+            }
+        }
+        catch (const std::exception& e)
+        {
+            lg2::warning("Failed to release GPIO '{SIGNAL}' ({GPIO_NAME}): "
+                         "{ERROR}",
+                         "SIGNAL", config.name, "GPIO_NAME", config.lineName,
+                         "ERROR", e.what());
+        }
+
+        config.gpioLine = gpiod::line{};
+    }
+}
+
+void PowerControl::logGPIOUnavailable(ConfigData& config,
+                                      const std::string& error)
+{
+    if (config.gpioUnavailableLogged)
+    {
+        return;
+    }
+
+    lg2::error("GPIO '{SIGNAL}' ({GPIO_NAME}) is unavailable: {ERROR}",
+               "SIGNAL", config.name, "GPIO_NAME", config.lineName, "ERROR",
+               error);
+    config.gpioUnavailableLogged = true;
+}
+
+bool PowerControl::requestPolledGPIOLine(ConfigData& config)
+{
+    config.gpioLine = gpiod::find_line(config.lineName);
+    if (!config.gpioLine)
+    {
+        logGPIOUnavailable(config, "line not found");
+        return false;
+    }
+
+    try
+    {
+        config.gpioLine.request(
+            {appName, gpiod::line_request::DIRECTION_INPUT, {}});
+    }
+    catch (const std::exception& e)
+    {
+        logGPIOUnavailable(config, e.what());
+        clearGPIOLine(config);
+        return false;
+    }
+
+    if (config.gpioUnavailableLogged)
+    {
+        lg2::info("GPIO '{SIGNAL}' ({GPIO_NAME}) is available again", "SIGNAL",
+                  config.name, "GPIO_NAME", config.lineName);
+        config.gpioUnavailableLogged = false;
+    }
+
     return true;
 }
 
@@ -1608,6 +1848,7 @@ void PowerControl::requestBusNames()
         conn->request_name(chassisDbusName.c_str());
         conn->request_name(osDbusName.c_str());
         conn->request_name(nmiDbusName.c_str());
+        conn->request_name(rstCauseDbusName.c_str());
     }
 
     // Append the node ID to the dbus names & Request all the dbus names
@@ -1615,6 +1856,7 @@ void PowerControl::requestBusNames()
     conn->request_name((chassisDbusName + nodeId).c_str());
     conn->request_name((osDbusName + nodeId).c_str());
     conn->request_name((nmiDbusName + nodeId).c_str());
+    conn->request_name((rstCauseDbusName + nodeId).c_str());
 
     // Only claim buttons name if we created button interfaces
     // (avoid conflict with separate buttons daemon)
@@ -1656,8 +1898,7 @@ void PowerControl::registerHostInterface()
             "com.nvidia.PreSystemReset");
 
         preSysResetIface->register_method(
-            "SetPreSystemReset",
-            [this, preSysResetSignal](bool assertReset) {
+            "SetPreSystemReset", [this, preSysResetSignal](bool assertReset) {
                 // Allow release (false) from waitForCpuRecovery — that is the
                 // normal exit path. Only reject new assert (true) requests
                 // from transitional states to prevent racing a power sequence.
@@ -1678,9 +1919,10 @@ void PowerControl::registerHostInterface()
                         Unavailable();
                 }
                 // assert: polarity value; de-assert: !polarity
-                int gpioValue = assertReset
-                                    ? static_cast<int>(preSysResetSignal->polarity)
-                                    : static_cast<int>(!preSysResetSignal->polarity);
+                int gpioValue =
+                    assertReset
+                        ? static_cast<int>(preSysResetSignal->polarity)
+                        : static_cast<int>(!preSysResetSignal->polarity);
                 if (!setGPIOOutput(preSysResetSignal, gpioValue))
                 {
                     lg2::error("SetPreSystemReset({A}) failed", "A",
@@ -1701,7 +1943,8 @@ void PowerControl::registerHostInterface()
                     setPowerState(preSysResetReturnState);
                     preSysResetSavedValue = 1;
                     lg2::info("CPU reset released; FSM back to {STATE}",
-                              "STATE", static_cast<int>(preSysResetReturnState));
+                              "STATE",
+                              static_cast<int>(preSysResetReturnState));
                 }
             });
         preSysResetIface->initialize();
@@ -2434,6 +2677,46 @@ void PowerControl::initializeOSInterface()
     lg2::info("OS state interface registered (not yet initialized)");
 }
 
+void PowerControl::initializeRestartCauseInterface()
+{
+    // Legacy xyz.openbmc_project.Control.Host.RestartCause object that IPMI
+    // Get Chassis Status depends on. Published in addition to the State.Host
+    // RestartCause property (kept in sync in setRestartCauseProperty()).
+    restartCauseIface = objServer.add_interface(
+        "/xyz/openbmc_project/control/host" + nodeId + "/restart_cause",
+        "xyz.openbmc_project.Control.Host.RestartCause");
+
+    restartCauseIface->register_property(
+        "RestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"));
+
+    restartCauseIface->register_property(
+        "RequestedRestartCause",
+        std::string("xyz.openbmc_project.State.Host.RestartCause.Unknown"),
+        [this](const std::string& requested, std::string& resp) {
+            if (requested ==
+                "xyz.openbmc_project.State.Host.RestartCause.WatchdogTimer")
+            {
+                addRestartCause(RestartCause::watchdog);
+                lg2::info("Restart cause watchdog requested");
+            }
+            else
+            {
+                lg2::error("Unrecognized RestartCause Request");
+                return 0;
+            }
+
+            lg2::info("RestartCause requested: {RESTART_CAUSE}",
+                      "RESTART_CAUSE", requested);
+            resp = requested;
+            return 1;
+        });
+
+    restartCauseIface->initialize();
+
+    lg2::info("Created the restart cause interface successfully");
+}
+
 void PowerControl::registerGpioStateInterface()
 {
     // GPIO State Interface
@@ -2610,6 +2893,44 @@ bool PowerControl::setGPIOOutput(std::shared_ptr<ConfigData> config,
         try
         {
             config->gpioLine.set_value(value);
+        }
+        catch (const std::system_error& e)
+        {
+            if (e.code().value() != ENODEV)
+            {
+                lg2::error("Failed to set {GPIO_NAME} value: {ERROR}",
+                           "GPIO_NAME", config->lineName, "ERROR", e);
+                return false;
+            }
+
+            // GPIO core was rebound; release the stale handle and re-request
+            lg2::warning(
+                "Output GPIO '{GPIO_NAME}' lost (ENODEV), re-requesting",
+                "GPIO_NAME", config->lineName);
+            clearGPIOLine(*config);
+
+            config->gpioLine = gpiod::find_line(config->lineName);
+            if (!config->gpioLine)
+            {
+                lg2::error("Failed to re-find {GPIO_NAME} after device loss",
+                           "GPIO_NAME", config->lineName);
+                return false;
+            }
+
+            try
+            {
+                config->gpioLine.request(
+                    {appName, gpiod::line_request::DIRECTION_OUTPUT, {}},
+                    value);
+            }
+            catch (const std::exception& re)
+            {
+                lg2::error(
+                    "Failed to re-request {GPIO_NAME} output after device loss: {ERROR}",
+                    "GPIO_NAME", config->lineName, "ERROR", re);
+                config->gpioLine = gpiod::line{};
+                return false;
+            }
         }
         catch (const std::exception& e)
         {
@@ -3706,6 +4027,7 @@ void PowerControl::setRestartCauseProperty(const std::string& cause)
 {
     lg2::info("RestartCause set to {RESTART_CAUSE}", "RESTART_CAUSE", cause);
     hostIface->set_property("RestartCause", cause);
+    restartCauseIface->set_property("RestartCause", cause);
 }
 
 void PowerControl::setRestartCause()

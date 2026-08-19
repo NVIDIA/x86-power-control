@@ -78,3 +78,28 @@ Complete.
 
 See <https://github.com/Intel-BMC/host-misc-comm-manager> for implementation
 example.
+
+## G3Soft power-on sequence (x86 CPLD)
+
+On platforms that boot from G3Soft (e.g. B300, ENET256), the host must be taken
+through a short sequence before the power button is pulsed. When the following
+optional GPIOs are present in `gpio_configs`, `powerOn()` runs this sequence
+before asserting PowerOut:
+
+1. **PowerOk** (optional): If already asserted, skip the sequence.
+2. **G3SoftEn**: Drive LOW to exit G3Soft.
+3. **Ap0ResetN**: Poll until HIGH (platform ready) or timeout.
+4. **PexResetN**: Pulse LOW for a short time (e.g. 10 ms) to release MB CPLD (→
+   S5).
+5. **PowerOut**: Assert for PowerPulseMs (power button, S5 → S0).
+
+Required JSON entries when using this sequence:
+
+- **gpio_configs**: `G3SoftEn`, `Ap0ResetN`, `PexResetN` (and `PowerOk`,
+  `PowerOut` as usual).
+- **timing_configs** (optional): `G3SoftAp0TimeoutMs` (default 15000),
+  `PexResetPulseMs` (default 10). Set `PowerPulseMs` to the desired power button
+  hold time (e.g. 3000 for B300).
+
+Example B300 signal names: `G3SoftEn`, `CEC2_AP0_RESET_N`, `CEC2_PEX_RESET_N`,
+`SYS_PWROK`, `BMC_PWR_BTN_R_N`.

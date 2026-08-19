@@ -4,11 +4,13 @@
 #pragma once
 
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -207,6 +209,16 @@ struct ConfigData
     std::optional<InputEventConfig>
         inputEventConfig; // Configuration for input event monitoring
 
+    // Polled GPIO monitoring (for GPIO chips that don't support edge events,
+    // e.g. CPLD GPIO expanders over I2C). When polled is true, the line is
+    // requested as DIRECTION_INPUT and a steady_timer reads the value every
+    // pollIntervalMs, dispatching gpioHandler on level transitions.
+    bool polled;
+    std::chrono::milliseconds pollIntervalMs;
+    std::unique_ptr<boost::asio::steady_timer> pollTimer;
+    int lastPolledValue; // -1 = unknown / not yet sampled
+    bool gpioUnavailableLogged;
+
     // Default states for output signals in different host states
     DefaultState defaultStateHostStateOn;  // Default state when host is on
     DefaultState defaultStateHostStateOff; // Default state when host is off
@@ -214,7 +226,8 @@ struct ConfigData
     // Constructor to initialize event descriptor with io_context
     ConfigData(boost::asio::io_context& io) :
         eventDescriptor(io), gpioHandler(nullptr), useInputEvents(false),
-        defaultStateHostStateOn(DefaultState::NA),
+        polled(false), pollIntervalMs(100), lastPolledValue(-1),
+        gpioUnavailableLogged(false), defaultStateHostStateOn(DefaultState::NA),
         defaultStateHostStateOff(DefaultState::NA)
     {}
 };
@@ -387,6 +400,8 @@ class PowerControl
     std::string osDbusName = "xyz.openbmc_project.State.OperatingSystem";
     std::string buttonDbusName = "xyz.openbmc_project.Chassis.Buttons";
     std::string nmiDbusName = "xyz.openbmc_project.Control.Host.NMI";
+    std::string rstCauseDbusName =
+        "xyz.openbmc_project.Control.Host.RestartCause";
 
     enum class PowerAction
     {
@@ -465,6 +480,7 @@ class PowerControl
     std::shared_ptr<sdbusplus::asio::dbus_interface> osIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> idButtonIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> nmiOutIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> restartCauseIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> gpioStateIface;
 
     /**
@@ -866,6 +882,16 @@ class PowerControl
      * and triggers nmiReset() when NMI is enabled.
      */
     void nmiSourcePropertyMonitor();
+
+    /**
+     * @brief Handler for Host.Misc D-Bus property changes (e.g.
+     * ESpiPlatformReset)
+     *
+     * Public so it can be invoked from the PLT_RST match callback in main().
+     *
+     * @param msg The D-Bus message containing the property changes
+     */
+    void hostMiscHandler(sdbusplus::message_t& msg);
 
     /**
      * @brief Start the POH (Power On Hours) counter timer
@@ -1327,6 +1353,15 @@ class PowerControl
     void initializeOSInterface();
 
     /**
+     * @brief Initialize Restart Cause D-Bus interface
+     *
+     * Creates and registers the legacy Control.Host.RestartCause interface
+     * (in addition to the State.Host RestartCause property) for tracking why
+     * the host was restarted. IPMI Get Chassis Status depends on this object.
+     */
+    void initializeRestartCauseInterface();
+
+    /**
      * @brief Register GPIO State D-Bus interface
      *
      * Creates xyz.openbmc_project.State.Gpio interface and registers common
@@ -1388,6 +1423,41 @@ class PowerControl
      * handler
      */
     void waitForGPIOEvent(ConfigData& config);
+
+    /**
+     * @brief Request a polled GPIO input
+     *
+     * Requests the line as DIRECTION_INPUT (no IRQ/edge-event capability
+     * required) and starts a steady_timer that samples the value every
+     * pollIntervalMs, invoking gpioHandler on level transitions. Used for
+     * GPIOs on chips that don't support edge events (e.g. CPLD/I2C
+     * expanders).
+     */
+    bool requestGPIOPolled(ConfigData& config);
+
+    /**
+     * @brief Request the configured line for polled GPIO input.
+     *
+     * This is used both during initial setup and after a gpiochip disappears
+     * and the cached gpiod line has been cleared.
+     */
+    bool requestPolledGPIOLine(ConfigData& config);
+
+    /** Release and clear the cached GPIO line and event descriptor. */
+    void clearGPIOLine(ConfigData& config);
+
+    /** Log GPIO unavailability once until the line is recovered. */
+    void logGPIOUnavailable(ConfigData& config, const std::string& error);
+
+    /** Schedule the next polling sample. */
+    void schedulePollTimer(ConfigData& config);
+
+    /** Per-tick poll body: read line, dispatch handler on transition,
+     *  update mapped D-Bus property, then reschedule. */
+    void pollGPIOTick(ConfigData& config, const boost::system::error_code& ec);
+
+    /** Read a requested input line's value. Returns -1 and logs on failure. */
+    int readGPIOValue(ConfigData& config);
 
   protected:
     /**
@@ -1485,16 +1555,6 @@ class PowerControl
      * @param state The current state of the GPIO line
      */
     virtual void sioOnControlHandler(bool state);
-
-    /**
-     * @brief Handler for Host Misc D-Bus property changes
-     *
-     * Handles ESpiPlatformReset property changes from the Host.Misc interface.
-     * Calls pltRstHandler when the ESpiPlatformReset property changes.
-     *
-     * @param msg The D-Bus message containing the property changes
-     */
-    void hostMiscHandler(sdbusplus::message_t& msg);
 
     /**
      * @brief Extract a property value from a D-Bus PropertiesChanged message

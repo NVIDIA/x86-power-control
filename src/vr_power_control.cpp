@@ -1846,7 +1846,8 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
         auto preSysResetIt = powerSignalMap.find("Board0PreSystemReset");
         if (preSysResetIt != powerSignalMap.end())
         {
-            // de-assert: inactive = !polarity (works for both ActiveLow and ActiveHigh)
+            // de-assert: inactive = !polarity (works for both ActiveLow and
+            // ActiveHigh)
             setGPIOOutput(preSysResetIt->second,
                           static_cast<int>(!preSysResetIt->second->polarity));
         }
@@ -1855,12 +1856,13 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
 
     switch (event)
     {
-        // ---- D-Bus power-off and aux-cycle requests are allowed through ----
-        // The base class D-Bus handlers check powerActionsBlocked() first, so
-        // they are blocked while we are here.  These two events are generated
-        // internally when the D-Bus setters detect we are in a stable state
-        // *before* we entered waitForCpuRecovery, so we handle them here by
-        // aborting recovery and initiating the requested action.
+            // ---- D-Bus power-off and aux-cycle requests are allowed through
+            // ---- The base class D-Bus handlers check powerActionsBlocked()
+            // first, so they are blocked while we are here.  These two events
+            // are generated internally when the D-Bus setters detect we are in
+            // a stable state *before* we entered waitForCpuRecovery, so we
+            // handle them here by aborting recovery and initiating the
+            // requested action.
 
         case Event::powerOffRequest:
         case Event::gracefulPowerOffRequest:
@@ -1877,7 +1879,7 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
                                /*skipGraceful=*/true);
             break;
 
-        // ---- Hardware abort: power actually dropping ----
+            // ---- Hardware abort: power actually dropping ----
 
         case Event::pdbMainPowerOkDeAssert:
             lg2::error(
@@ -1895,11 +1897,11 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
             sendPowerControlEvent(Event::board0RunPowerPGDeAssert);
             break;
 
-        // ---- Everything else: ignore (GPIO chatter from CPU entering reset) ----
+        // ---- Everything else: ignore (GPIO chatter from CPU entering reset)
+        // ----
         default:
-            lg2::info(
-                "waitForCpuRecovery: ignoring event {EVENT}", "EVENT",
-                getEventName(event));
+            lg2::info("waitForCpuRecovery: ignoring event {EVENT}", "EVENT",
+                      getEventName(event));
             break;
     }
 }
