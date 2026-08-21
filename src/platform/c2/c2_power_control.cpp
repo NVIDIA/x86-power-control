@@ -241,7 +241,8 @@ bool C2PowerControl::checkAndHandlePdbMainPowerOkFault(Event powerControlEvent)
     // Power fault detection: Check for unexpected de-assertion
     if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
     {
-        if (powerState != PowerState::waitForPDBMainPowerOff)
+        if (powerState != PowerState::waitForPDBMainPowerOff &&
+            powerState != PowerState::waitForCpuRecovery)
         {
             // POWER FAULT: PDB Main Power OK de-asserted unexpectedly
             lg2::error(
@@ -261,7 +262,10 @@ bool C2PowerControl::checkAndHandlePdbMainPowerOkFault(Event powerControlEvent)
 
             return true;
         }
-        // else: Expected de-assertion in waitForPDBMainPowerOff state
+        // else: Expected de-assertion in waitForPDBMainPowerOff state, or a
+        // recovery-session fault — let it fall through to
+        // sendPowerControlEvent() so VRPowerControl::handleWaitForCpuRecovery()
+        // can release Board0PreSystemReset before driving the same cleanup.
     }
 
     // Return false to indicate normal processing should continue
