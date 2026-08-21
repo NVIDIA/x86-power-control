@@ -1841,7 +1841,9 @@ void VRPowerControl::handleWaitForHostRebootShutdownOk(Event event)
 void VRPowerControl::handleWaitForCpuRecovery(Event event)
 {
     // Helper: abort recovery — restore the reset GPIO and clear state.
-    // Called before handing off to whatever triggered the abort.
+    // Called before handing off to whatever triggered the abort. Clears the
+    // recovery-entry lock; the aux-cycle path re-asserts it via
+    // beginAuxPowerCycle() to own it for the duration of the cycle.
     auto abortRecovery = [this]() {
         auto preSysResetIt = powerSignalMap.find("Board0PreSystemReset");
         if (preSysResetIt != powerSignalMap.end())
@@ -1851,6 +1853,7 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
             setGPIOOutput(preSysResetIt->second,
                           static_cast<int>(!preSysResetIt->second->polarity));
         }
+        blockPowerActions = false;
         lg2::warning("USB-RCM recovery aborted; PreSystemReset released");
     };
 
@@ -1882,19 +1885,24 @@ void VRPowerControl::handleWaitForCpuRecovery(Event event)
             // ---- Hardware abort: power actually dropping ----
 
         case Event::pdbMainPowerOkDeAssert:
-            lg2::error(
-                "PDB Main Power lost during CPU recovery — aborting recovery");
-            abortRecovery();
-            setPowerState(preSysResetReturnState);
-            sendPowerControlEvent(Event::pdbMainPowerOkDeAssert);
-            break;
-
         case Event::board0RunPowerPGDeAssert:
-            lg2::error(
-                "Board0 Run Power PG lost during CPU recovery — aborting recovery");
+            // handlePowerStateOn()/handlePowerStateOff() do not consume these
+            // events, so restoring preSysResetReturnState and re-sending the
+            // event through sendPowerControlEvent() would silently drop the
+            // fault. Drive the same cleanup transition the raw GPIO handlers
+            // use for an unexpected de-assertion instead.
+            lg2::error("{SIGNAL} lost during CPU recovery — aborting recovery",
+                       "SIGNAL",
+                       (event == Event::pdbMainPowerOkDeAssert
+                            ? "PDB Main Power"
+                            : "Board0 Run Power PG"));
             abortRecovery();
-            setPowerState(preSysResetReturnState);
-            sendPowerControlEvent(Event::board0RunPowerPGDeAssert);
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "Power lost unexpectedly during CPU recovery."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
             break;
 
         // ---- Everything else: ignore (GPIO chatter from CPU entering reset)

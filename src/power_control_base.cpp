@@ -1918,15 +1918,18 @@ void PowerControl::registerHostInterface()
 
         preSysResetIface->register_method(
             "SetPreSystemReset", [this, preSysResetSignal](bool assertReset) {
-                // Allow release (false) from waitForCpuRecovery — that is the
-                // normal exit path. Only reject new assert (true) requests
-                // from transitional states to prevent racing a power sequence.
+                // Release (false) is only meaningful as the normal exit path
+                // from waitForCpuRecovery; a stray release outside recovery
+                // would restore preSysResetReturnState from a stale (or
+                // never-set) prior session. Reject new assert (true)
+                // requests from transitional states to prevent racing a
+                // power sequence.
                 bool inRecovery =
                     (powerState == PowerState::waitForCpuRecovery);
-                if (!assertReset && !inRecovery && !inStablePowerState())
+                if (!assertReset && !inRecovery)
                 {
                     lg2::error(
-                        "SetPreSystemReset rejected: power state is transitional");
+                        "SetPreSystemReset rejected: recovery is not active");
                     throw sdbusplus::xyz::openbmc_project::Common::Error::
                         Unavailable();
                 }
@@ -1953,6 +1956,7 @@ void PowerControl::registerHostInterface()
                 {
                     preSysResetSavedValue = gpioValue;
                     preSysResetReturnState = powerState;
+                    blockPowerActions = true;
                     setPowerState(PowerState::waitForCpuRecovery);
                     lg2::info("CPU held in reset for USB-RCM recovery; "
                               "FSM parked in waitForCpuRecovery");
@@ -1961,6 +1965,7 @@ void PowerControl::registerHostInterface()
                 {
                     setPowerState(preSysResetReturnState);
                     preSysResetSavedValue = 1;
+                    blockPowerActions = false;
                     lg2::info("CPU reset released; FSM back to {STATE}",
                               "STATE",
                               static_cast<int>(preSysResetReturnState));
@@ -1987,6 +1992,7 @@ void PowerControl::registerHostInterface()
                 setGPIOOutput(preSysResetSignal,
                               static_cast<int>(!preSysResetSignal->polarity));
                 setPowerState(preSysResetReturnState);
+                blockPowerActions = false;
             });
     }
 
