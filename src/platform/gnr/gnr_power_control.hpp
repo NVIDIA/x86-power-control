@@ -10,6 +10,10 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 
 namespace power_control
 {
@@ -94,6 +98,20 @@ class GNRPowerControl : public PowerControl
     /** Returns true if G3Soft GPIOs are configured and PowerOk is deasserted.
      */
     bool shouldRunG3SoftSequence();
+    /** Returns true if all three G3Soft GPIOs are present in the JSON config. */
+    bool hasG3SoftSignals();
+    /**
+     * @brief Read the destination MCTP EID from the host config JSON
+     *
+     * Parses the optional top-level "mctp_eid" field of configFilePath.
+     *
+     * @return the configured EID, or nullopt when the field is absent
+     * @throws std::runtime_error if the field is present but not an integer in
+     *         the assignable EID range
+     */
+    std::optional<uint8_t> loadMctpEid();
+    /** Send an erot notification VDM; no-op when no EID is configured. */
+    void sendVdm(std::span<const uint8_t> packet, const std::string& what);
 
     static constexpr int ap0PollIntervalMs = 100;
 
@@ -106,6 +124,8 @@ class GNRPowerControl : public PowerControl
     std::chrono::milliseconds g3SoftPowerButtonDelay;
     std::chrono::milliseconds pexResetPulse;
     std::chrono::milliseconds g3SoftAp0Timeout;
+    /** Destination EID for erot VDMs; required when G3Soft is configured. */
+    std::optional<uint8_t> mctpEid;
 };
 
 } // namespace power_control

@@ -21,24 +21,26 @@
 #include <span>
 #include <system_error>
 
-#ifndef MCTP_DEST_EID
-#define MCTP_DEST_EID 82
-#endif
-
 namespace power_control
 {
 
 inline constexpr std::chrono::milliseconds mctpResponseTimeout{1000};
 inline constexpr std::size_t mctpMaxResponseLen = 256;
 
+// Assignable MCTP endpoint IDs: 0 is the null EID, 1-7 are reserved and 255 is
+// the broadcast EID, so a destination must fall inside this range.
+inline constexpr uint8_t mctpMinEid = 8;
+inline constexpr uint8_t mctpMaxEid = 254;
+
 using MctpResult = std::expected<std::span<const uint8_t>, std::error_code>;
 
 // Send an MCTP message and hand the response to handler on the event loop.
-// msgType goes in smctp_type (e.g. 0x7f for IANA VDM); packet is the message
-// body without the type byte. Never blocks. The span is only valid inside the
-// callback. On timeout the socket is closed, so handler sees operation_aborted.
-inline void mctpSendAsync(boost::asio::io_context& ioContext, uint8_t msgType,
-                          std::span<const uint8_t> packet,
+// eid is the destination endpoint; msgType goes in smctp_type (e.g. 0x7f for
+// IANA VDM); packet is the message body without the type byte. Never blocks.
+// The span is only valid inside the callback. On timeout the socket is closed,
+// so handler sees operation_aborted.
+inline void mctpSendAsync(boost::asio::io_context& ioContext, uint8_t eid,
+                          uint8_t msgType, std::span<const uint8_t> packet,
                           std::function<void(MctpResult)> handler)
 {
     auto fail = [&handler](int err) {
@@ -55,7 +57,7 @@ inline void mctpSendAsync(boost::asio::io_context& ioContext, uint8_t msgType,
     struct sockaddr_mctp addr{};
     addr.smctp_family = AF_MCTP;
     addr.smctp_network = MCTP_NET_ANY;
-    addr.smctp_addr.s_addr = MCTP_DEST_EID;
+    addr.smctp_addr.s_addr = eid;
     addr.smctp_type = msgType;
     addr.smctp_tag = MCTP_TAG_OWNER;
 

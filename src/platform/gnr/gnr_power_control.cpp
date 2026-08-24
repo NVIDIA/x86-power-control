@@ -6,15 +6,77 @@
 #include "gnr_power_control.hpp"
 #include "../../mctp_send.hpp"
 
+#include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <fstream>
+#include <stdexcept>
 
 namespace power_control
 {
 using Event = PowerControl::Event;
+
+std::optional<uint8_t> GNRPowerControl::loadMctpEid()
+{
+    std::ifstream configFile(configFilePath.c_str());
+    if (!configFile.is_open())
+    {
+        lg2::error("GNR: cannot open config path '{PATH}' to read mctp_eid",
+                   "PATH", configFilePath);
+        throw std::runtime_error(
+            "Failed to open config file: " + configFilePath);
+    }
+
+    auto jsonData = nlohmann::json::parse(configFile, nullptr, true, true);
+    auto it = jsonData.find("mctp_eid");
+    if (it == jsonData.end())
+    {
+        return std::nullopt;
+    }
+
+    if (!it->is_number_integer())
+    {
+        lg2::error("GNR: 'mctp_eid' must be an integer");
+        throw std::runtime_error("Invalid 'mctp_eid' in config file");
+    }
+
+    auto eid = it->get<int>();
+    if (eid < mctpMinEid || eid > mctpMaxEid)
+    {
+        lg2::error("GNR: 'mctp_eid' {EID} outside assignable range {MIN}-{MAX}",
+                   "EID", eid, "MIN", mctpMinEid, "MAX", mctpMaxEid);
+        throw std::runtime_error("Invalid 'mctp_eid' in config file");
+    }
+
+    lg2::info("GNR: using MCTP destination eid {EID}", "EID", eid);
+    return static_cast<uint8_t>(eid);
+}
+
+void GNRPowerControl::sendVdm(std::span<const uint8_t> packet,
+                              const std::string& what)
+{
+    if (!mctpEid)
+    {
+        lg2::error("GNR: no mctp_eid configured, not sending {WHAT} VDM",
+                   "WHAT", what);
+        return;
+    }
+
+    lg2::info("GNR: sending {WHAT} VDM to eid {EID} ({LEN} bytes)", "WHAT",
+              what, "EID", *mctpEid, "LEN", packet.size());
+    mctpSendAsync(ioContext, *mctpEid, 0x7f, packet,
+                  [what](MctpResult result) {
+        if (!result)
+            lg2::error("GNR: {WHAT} VDM failed: {ERR}", "WHAT", what, "ERR",
+                       result.error().message());
+        else
+            lg2::info("GNR: {WHAT} VDM acknowledged ({LEN} bytes)", "WHAT",
+                      what, "LEN", result->size());
+    });
+}
 
 std::chrono::milliseconds GNRPowerControl::getTimeoutWithDefault(
     const std::string& key, std::chrono::milliseconds default_t)
@@ -67,20 +129,7 @@ GNRPowerControl::GNRPowerControl(
                     static constexpr std::array<uint8_t, 11> bootCompletePacket = {
                         0x00, 0x00, 0x16, 0x47,
                         0x80, 0x01, 0x02, 0x02, 0x03, 0x00, 0x00};
-                    lg2::info("GNR: sending boot-complete VDM to eid {EID} ({LEN} bytes)",
-                              "EID", MCTP_DEST_EID,
-                              "LEN", bootCompletePacket.size());
-                    // this-> because the ctor parameter of the
-                    // same name shadows the member here.
-                    mctpSendAsync(this->ioContext, 0x7f, bootCompletePacket,
-                        [](MctpResult result) {
-                            if (!result)
-                                lg2::error("GNR: boot-complete VDM failed: {ERR}",
-                                           "ERR", result.error().message());
-                            else
-                                lg2::info("GNR: boot-complete VDM acknowledged ({LEN} bytes)",
-                                          "LEN", result->size());
-                        });
+                    sendVdm(bootCompletePacket, "boot-complete");
                 }
             },
             /*optional=*/true);
@@ -89,6 +138,18 @@ GNRPowerControl::GNRPowerControl(
     validateRequiredSignals();
     validateTimerConfigs();
     setDefaultValues();
+
+    // The G3Soft sequence brackets its GPIO steps with erot notifications, so
+    // a board wired for it must also declare where those VDMs go.
+    mctpEid = loadMctpEid();
+    if (hasG3SoftSignals() && !mctpEid)
+    {
+        lg2::error(
+            "GNR: G3Soft GPIOs are configured but 'mctp_eid' is missing from {PATH}",
+            "PATH", configFilePath);
+        throw std::runtime_error(
+            "Missing 'mctp_eid' required by the G3Soft sequence");
+    }
 
     // Determine power state from hardware before exposing interfaces to D-Bus,
     // so the initial published values are correct.
@@ -279,16 +340,7 @@ void GNRPowerControl::sendPowerOffVdm()
 {
     static constexpr std::array<uint8_t, 9> powerOffNotification = {
         0x00, 0x00, 0x16, 0x47, 0x80, 0x01, 0x0a, 0x02, 0x02};
-    lg2::info("GNR: sending power-off VDM to eid {EID} ({LEN} bytes)", "EID",
-              MCTP_DEST_EID, "LEN", powerOffNotification.size());
-    mctpSendAsync(ioContext, 0x7f, powerOffNotification, [](MctpResult result) {
-        if (!result)
-            lg2::error("GNR: power-off VDM failed: {ERR}", "ERR",
-                       result.error().message());
-        else
-            lg2::info("GNR: power-off VDM acknowledged ({LEN} bytes)", "LEN",
-                      result->size());
-    });
+    sendVdm(powerOffNotification, "power-off");
 }
 
 void GNRPowerControl::completePowerDown()
@@ -331,16 +383,7 @@ void GNRPowerControl::sendPowerOnVdm()
 {
     static constexpr std::array<uint8_t, 9> powerOnNotification = {
         0x00, 0x00, 0x16, 0x47, 0x80, 0x01, 0x0a, 0x02, 0x01};
-    lg2::info("GNR: sending power-on VDM to eid {EID} ({LEN} bytes)", "EID",
-              MCTP_DEST_EID, "LEN", powerOnNotification.size());
-    mctpSendAsync(ioContext, 0x7f, powerOnNotification, [](MctpResult result) {
-        if (!result)
-            lg2::error("GNR: power-on VDM failed: {ERR}", "ERR",
-                       result.error().message());
-        else
-            lg2::info("GNR: power-on VDM acknowledged ({LEN} bytes)", "LEN",
-                      result->size());
-    });
+    sendVdm(powerOnNotification, "power-on");
 }
 
 void GNRPowerControl::powerOn()
@@ -375,12 +418,15 @@ void GNRPowerControl::initiateForcefulShutdown()
     forcePowerOff();
 }
 
+bool GNRPowerControl::hasG3SoftSignals()
+{
+    return getSignal("G3SoftEn") && getSignal("Ap0ResetN") &&
+           getSignal("PexResetN");
+}
+
 bool GNRPowerControl::shouldRunG3SoftSequence()
 {
-    auto g3SoftEn = getSignal("G3SoftEn");
-    auto ap0ResetN = getSignal("Ap0ResetN");
-    auto pexResetN = getSignal("PexResetN");
-    if (!g3SoftEn || !ap0ResetN || !pexResetN)
+    if (!hasG3SoftSignals())
     {
         lg2::info("GNR G3Soft: not configured (missing G3SoftEn/Ap0ResetN/"
                   "PexResetN), skipping sequence");
