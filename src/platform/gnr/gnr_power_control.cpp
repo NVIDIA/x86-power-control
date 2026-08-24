@@ -6,6 +6,8 @@
 #include "gnr_power_control.hpp"
 #include "../../mctp_send.hpp"
 
+#include <endian.h>
+
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/lg2.hpp>
 
@@ -39,6 +41,19 @@ struct __attribute__((__packed__)) BootCompleteV2
     // the BMC does not report which slot the host booted from.
     uint8_t bootSlot = 0x03;
     uint8_t rsvd[2] = {0x00, 0x00};
+};
+
+/**
+ * Add External Timestamp (Glacier FW design doc 4.3.1.18).
+ *
+ * Lets the erot log parser convert its boot-relative timestamps to wall clock.
+ * The erot rejects any message version other than 1, and throttles callers to
+ * 10 requests per 10 minutes.
+ */
+struct __attribute__((__packed__)) AddExternalTimestamp
+{
+    GlacierVdmHeader header{.commandCode = 0x13, .msgVersion = 0x01};
+    uint64_t epochMicroseconds; // big endian
 };
 
 /** Restart (state change) Notification v2 (architecture doc 7.3). */
@@ -376,6 +391,20 @@ bool GNRPowerControl::isSystemPowerOff()
     return (val == 0);
 }
 
+void GNRPowerControl::sendTimestampVdm()
+{
+    uint64_t nowMicroseconds = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+
+    AddExternalTimestamp timestamp{.epochMicroseconds =
+                                       htobe64(nowMicroseconds)};
+    std::array<uint8_t, sizeof(timestamp)> packet;
+    packVdm(timestamp, packet);
+    sendVdm(packet, "add-external-timestamp");
+}
+
 void GNRPowerControl::sendPowerOffVdm()
 {
     // Tell the erot the AP is entering G3Soft so it asserts AP_RESET#, copies
@@ -424,6 +453,9 @@ void GNRPowerControl::startPowerButtonDelay()
 void GNRPowerControl::powerOn()
 {
     lg2::info("GNR powerOn() entered");
+
+    // Anchor the erot log to wall clock for the boot we are about to start.
+    sendTimestampVdm();
 
     if (!shouldRunG3SoftSequence())
     {

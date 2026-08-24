@@ -85,6 +85,9 @@ class GNRPowerControl : public PowerControl
 
   private:
     void sendPowerOffVdm();
+    /** Give the erot log parser a wall-clock anchor for its boot-relative
+     * timestamps. */
+    void sendTimestampVdm();
     /** Notify the erot, assert G3SoftEn and drive PexResetN low. */
     void completePowerDown();
     /** PexResetN released; settle for G3SoftPowerButtonDelayMs, then pulse. */
