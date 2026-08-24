@@ -12,12 +12,53 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <type_traits>
 
 namespace power_control
 {
 using Event = PowerControl::Event;
+
+/** NVIDIA vendor-defined MCTP request header (architecture doc 3.1.1). */
+struct __attribute__((__packed__)) GlacierVdmHeader
+{
+    uint8_t iana[4] = {0x00, 0x00, 0x16, 0x47}; // NVIDIA IANA 0x1647
+    uint8_t request = 0x80;                     // Rq=1, D=0, instance ID 0
+    uint8_t msgType = 0x01;                     // Glacier message family
+    uint8_t commandCode;
+    uint8_t msgVersion;
+};
+
+/** Boot Complete v2 (Glacier FW design doc 4.3.1.3). */
+struct __attribute__((__packed__)) BootCompleteV2
+{
+    GlacierVdmHeader header{.commandCode = 0x02, .msgVersion = 0x02};
+    // SLOT_REPORTING_VALID (bit 2) clear, so BOOT_SLOT (bits 1:0) is 2b'11:
+    // the BMC does not report which slot the host booted from.
+    uint8_t bootSlot = 0x03;
+    uint8_t rsvd[2] = {0x00, 0x00};
+};
+
+/** Restart (state change) Notification v2 (architecture doc 7.3). */
+struct __attribute__((__packed__)) RestartNotificationV2
+{
+    GlacierVdmHeader header{.commandCode = 0x0a, .msgVersion = 0x02};
+    uint8_t apState; // 0: restarting, 1: sleep (S3/S5), 2: G3Soft (DC cycle)
+};
+constexpr uint8_t apStateG3Soft = 0x02;
+
+/** Copy a VDM struct into the caller's buffer for mctpSendAsync(). */
+template <typename T>
+void packVdm(const T& msg, std::array<uint8_t, sizeof(T)>& bytes)
+{
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "VDM message must be trivially copyable");
+    static_assert(sizeof(bytes) == sizeof(T),
+                  "VDM buffer must be exactly the size of the message");
+    std::memcpy(bytes.data(), &msg, sizeof(T));
+}
 
 std::optional<uint8_t> GNRPowerControl::loadMctpEid()
 {
@@ -126,10 +167,9 @@ GNRPowerControl::GNRPowerControl(
                 // boot-complete notification.
                 if (asserted)
                 {
-                    static constexpr std::array<uint8_t, 11> bootCompletePacket = {
-                        0x00, 0x00, 0x16, 0x47,
-                        0x80, 0x01, 0x02, 0x02, 0x03, 0x00, 0x00};
-                    sendVdm(bootCompletePacket, "boot-complete");
+                    std::array<uint8_t, sizeof(BootCompleteV2)> packet;
+                    packVdm(BootCompleteV2{}, packet);
+                    sendVdm(packet, "boot-complete");
                 }
             },
             /*optional=*/true);
@@ -338,9 +378,11 @@ bool GNRPowerControl::isSystemPowerOff()
 
 void GNRPowerControl::sendPowerOffVdm()
 {
-    static constexpr std::array<uint8_t, 9> powerOffNotification = {
-        0x00, 0x00, 0x16, 0x47, 0x80, 0x01, 0x0a, 0x02, 0x02};
-    sendVdm(powerOffNotification, "power-off");
+    // Tell the erot the AP is entering G3Soft so it asserts AP_RESET#, copies
+    // NVRAM and revalidates flash before releasing the AP again.
+    std::array<uint8_t, sizeof(RestartNotificationV2)> packet;
+    packVdm(RestartNotificationV2{.apState = apStateG3Soft}, packet);
+    sendVdm(packet, "power-off");
 }
 
 void GNRPowerControl::completePowerDown()
