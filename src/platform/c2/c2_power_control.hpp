@@ -237,6 +237,20 @@ class C2PowerControl : public VRPowerControl
     // C2-specific GPIO handler
     // =========================================================================
 
+    /** Handle a CPU Boot Done GPIO edge. */
+    void cpuBootDoneHandler(bool state);
+
+    /**
+     * Update CPU Boot Done state from a raw GPIO value.
+     *
+     * Initial state discovery uses notifyStateMachine=false; real edges use
+     * true so reboot/shutdown classification happens immediately.
+     */
+    void updateCpuBootDoneFromGpio(bool state, bool notifyStateMachine);
+
+    /** Maintain the legacy IPMI restriction-mode marker file. */
+    void updateCpuBootDoneMarker(bool asserted);
+
     /**
      * @brief Handler for PDB Main Power OK GPIO events (C2)
      *
