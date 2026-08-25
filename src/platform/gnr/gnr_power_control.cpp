@@ -68,6 +68,22 @@ void GNRPowerControl::setDefaultValues()
     }
 }
 
+void GNRPowerControl::handlePowerStateOn(Event event)
+{
+    if (event != Event::gracefulResetRequest)
+    {
+        PowerControl::handlePowerStateOn(event);
+        return;
+    }
+
+    lg2::info(
+        "Graceful warm reboot requested; starting graceful power cycle");
+    setPowerState(PowerState::gracefulTransitionToCycleOff);
+    startTimer("GracefulPowerOffS", gracefulPowerOffTimer,
+               Event::gracefulPowerOffTimerExpired);
+    gracefulPowerOff();
+}
+
 void GNRPowerControl::handlePowerStateOff(Event event)
 {
     switch (event)
@@ -85,6 +101,10 @@ void GNRPowerControl::handlePowerStateOff(Event event)
             powerOn();
             break;
         case Event::powerButtonPressed:
+            break;
+        case Event::gracefulResetRequest:
+            lg2::info(
+                "Graceful warm reboot requested while host is off; no action");
             break;
         case Event::resetRequest:
             break;

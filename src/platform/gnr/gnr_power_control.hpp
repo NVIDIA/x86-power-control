@@ -71,6 +71,7 @@ class GNRPowerControl : public PowerControl
   protected:
     void validateTimerConfigs() override;
     void setDefaultValues();
+    void handlePowerStateOn(Event event) override;
     void handlePowerStateOff(Event event) override;
     void handleTransitionToOff(Event event) override;
     void handleGracefulTransitionToOff(Event event) override;
