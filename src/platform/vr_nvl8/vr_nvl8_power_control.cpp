@@ -44,6 +44,7 @@ VRNVL8PowerControl::VRNVL8PowerControl(
     // Initialize all host0 interfaces — makes the path visible to ObjectMapper.
     // Called after initializePowerStateFromHardware so the correct state is
     // published immediately on InterfacesAdded.
+    registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
 }
 

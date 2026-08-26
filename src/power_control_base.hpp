@@ -1127,12 +1127,21 @@ class PowerControl
     /**
      * @brief Register GPIO State D-Bus interface
      *
-     * Creates xyz.openbmc_project.State.Gpio interface and registers
-     * common GPIO methods/properties (CPU Boot Done). Does NOT call
-     * initialize() - derived classes can add additional GPIO properties
-     * before calling initializeHostStateInterface().
+     * Creates xyz.openbmc_project.State.Gpio interface and registers common
+     * GPIO properties. Does NOT call initialize() - derived classes can add
+     * methods and additional GPIO properties before calling
+     * initializeHostStateInterface().
      */
     void registerGpioStateInterface();
+
+    /**
+     * @brief Register the legacy SetCpuBootDone D-Bus method
+     *
+     * Platforms that receive CPU Boot Done through D-Bus call this before
+     * initializeHostStateInterface(). Platforms that own the GPIO directly
+     * leave the CpuBootDone property read-only.
+     */
+    void registerCpuBootDoneSetterMethod();
 
     /**
      * @brief Initialize ALL D-Bus interfaces on host0 path (call from derived
@@ -1658,6 +1667,25 @@ class PowerControl
      * @param stage The new OS state stage
      */
     void setOperatingSystemState(OperatingSystemStateStage stage);
+
+    /**
+     * @brief Update the CPU Boot Done D-Bus state and optionally notify the FSM
+     *
+     * Used by both the legacy SetCpuBootDone D-Bus method and platforms that
+     * own the CPU Boot Done GPIO directly.
+     *
+     * @param state Logical state: 0 = de-asserted, 1 = asserted
+     * @param notifyStateMachine Whether to dispatch the corresponding event
+     * @return true when state is valid and was applied
+     */
+    bool updateCpuBootDoneState(int state, bool notifyStateMachine);
+
+    /**
+     * @brief Ask systemd to start a unit without blocking the event loop
+     *
+     * @param unitName Service or target unit to start
+     */
+    void startSystemdUnit(const std::string& unitName);
 
     /**
      * @brief Set all control GPIOs to their default state for host "on"
