@@ -1387,8 +1387,18 @@ void PowerControl::advanceAuxPowerCycle()
     if (auxPowerCycleForce)
     {
         lg2::warning(
-            "Aux power cycle (force): host could not be powered off; asserting aux-cycle GPIO regardless.");
-        assertAuxPowerCycle();
+            "Aux power cycle (force): forceful shutdown did not power the host off; "
+            "cutting tray standby power (aux-cycle GPIO) regardless.");
+        if (assertAuxPowerCycle())
+        {
+            // Best effort after GPIO assertion: event logging must never block
+            // the requested recovery action.
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "Forceful shutdown failed to power host off; cutting tray standby power regardless"},
+                 "xyz.openbmc_project.Logging.Entry.Level.Warning");
+        }
     }
     else
     {
@@ -1402,7 +1412,7 @@ void PowerControl::advanceAuxPowerCycle()
     }
 }
 
-void PowerControl::assertAuxPowerCycle()
+bool PowerControl::assertAuxPowerCycle()
 {
     auto auxCycle = getSignal("AuxPowerCycle");
     if (!auxCycle)
@@ -1415,7 +1425,7 @@ void PowerControl::assertAuxPowerCycle()
         // Defensive (config is validated at startup): give up cleanly, leaving
         // the host in its already-settled state.
         endAuxPowerCycle();
-        return;
+        return false;
     }
 
     // Where to return if standby never cycles: the host's settled state. Off
@@ -1449,7 +1459,7 @@ void PowerControl::assertAuxPowerCycle()
                          "xyz.openbmc_project.Logging.Entry.Level.Error");
         endAuxPowerCycle();
         setPowerState(auxPowerCycleReturnState);
-        return;
+        return false;
     }
 
     // Arm the watchdog only after the GPIO is actually driven, so its window
@@ -1457,6 +1467,7 @@ void PowerControl::assertAuxPowerCycle()
     startTimer("AuxPowerCycleWatchdogMs", auxPowerCycleWatchdogTimer,
                Event::auxPowerCycleWatchdogTimerExpired);
     setPowerState(PowerState::waitForAuxPowerCycle);
+    return true;
 }
 
 // Call one journald varlink method, blocking until its reply (or the socket
@@ -1765,8 +1776,8 @@ void PowerControl::registerHostInterface()
                         "FullPowerCycle rejected: host not in a stable power state.");
                     return 0;
                 }
-                // Full power cycle (DMTF): forceful shutdown, then cut standby
-                // only if the host actually powered off.
+                // Full power cycle (DMTF): attempt forceful shutdown, then cut
+                // standby even if the shutdown does not power the host off.
                 lg2::info("Host Full Power Cycle requested");
                 addRestartCause(RestartCause::command);
                 // Reserve the aux-cycle lock before ACKing so a later request
@@ -1922,9 +1933,10 @@ void PowerControl::initializeChassisInterface()
                         "FullPowerCycle rejected: host not in a stable power state.");
                     return 0;
                 }
-                // Full power cycle (DMTF): forceful shutdown, then cut standby
-                // only if the host actually powered off. Also reachable via the
-                // host RequestedHostTransition; both post the same event.
+                // Full power cycle (DMTF): attempt forceful shutdown, then cut
+                // standby even if the shutdown does not power the host off.
+                // Also reachable via RequestedHostTransition; both post the
+                // same event.
                 lg2::info("Chassis Full Power Cycle requested");
                 addRestartCause(RestartCause::command);
                 // Reserve the aux-cycle lock before ACKing so a later request
