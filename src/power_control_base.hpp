@@ -618,11 +618,13 @@ class PowerControl
      * Captures the return state, starts the aux-power-cycle watchdog,
      * transitions to PowerState::waitForAuxPowerCycle, and drives the
      * configured aux-cycle line to its active polarity — cutting tray standby
-     * power (the BMC restarts, so on success this never returns). Virtual so a
-     * platform that cuts standby differently can override; the base default
-     * uses the configured GPIO.
+     * power. Virtual so a platform that cuts standby differently can override;
+     * the base default uses the configured GPIO.
+     *
+     * @return true after the GPIO is asserted; false if the cycle could not be
+     * started.
      */
-    virtual void assertAuxPowerCycle();
+    virtual bool assertAuxPowerCycle();
 
     /**
      * @brief Clear all aux-power-cycle state and resume normal persistence
