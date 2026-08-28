@@ -233,6 +233,9 @@ class C2PowerControl : public VRPowerControl
     void handleWaitForPDBMainPowerOff(Event event) override;
 
   private:
+    /** PDBMainPowerOk fell while the FSM was parked in CPU recovery. */
+    bool pdbMainPowerOkDeassertedDuringRecovery{false};
+
     // =========================================================================
     // C2-specific GPIO handler
     // =========================================================================

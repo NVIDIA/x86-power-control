@@ -442,15 +442,7 @@ void PowerControl::sendPowerControlEvent(Event event)
     // transitions reach here; the isAuxPowerCycleActive() guard is defensive
     // against a re-entrant start. AuxPowerCycleForce cuts standby even if the
     // host can't power off; FullPowerCycle skips the graceful attempt.
-    //
-    // Exception: while parked in waitForCpuRecovery, a request can be ACKed
-    // (host was stable) and then deferred via boost::asio::post, racing a
-    // SetPreSystemReset(true) that parks the FSM before the post runs. Let
-    // the event fall through to the per-state handler instead of dropping it
-    // here — VRPowerControl::handleWaitForCpuRecovery aborts recovery and
-    // starts the requested cycle.
-    if (isAuxPowerCycleRequest(event) &&
-        powerState != PowerState::waitForCpuRecovery)
+    if (isAuxPowerCycleRequest(event))
     {
         if (!isAuxPowerCycleActive() && inStablePowerState())
         {
@@ -1316,6 +1308,11 @@ std::string_view PowerControl::getHostState() const
                        ? "xyz.openbmc_project.State.Host.HostState.Running"
                        : "xyz.openbmc_project.State.Host.HostState.Off";
             break;
+        case PowerState::waitForCpuRecovery:
+            return preSysResetReturnState == PowerState::on
+                       ? "xyz.openbmc_project.State.Host.HostState.Running"
+                       : "xyz.openbmc_project.State.Host.HostState.Off";
+            break;
         default:
             lg2::error(
                 "getHostState: unhandled PowerState {STATE}, defaulting to Off",
@@ -1347,6 +1344,11 @@ std::string_view PowerControl::getChassisState() const
         case PowerState::waitForAuxPowerCycle:
             // Aux-cycle GPIO asserted; tray power is being cut.
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOff";
+            break;
+        case PowerState::waitForCpuRecovery:
+            return preSysResetReturnState == PowerState::on
+                       ? "xyz.openbmc_project.State.Chassis.PowerState.On"
+                       : "xyz.openbmc_project.State.Chassis.PowerState.Off";
             break;
         default:
             lg2::error(
@@ -1394,6 +1396,9 @@ std::string PowerControl::getPowerStateName() const
             break;
         case PowerState::waitForAuxPowerCycle:
             return "Wait for Aux Power Cycle";
+            break;
+        case PowerState::waitForCpuRecovery:
+            return "Wait for CPU Recovery";
             break;
         default:
             return "unknown state: " +
@@ -1558,8 +1563,101 @@ bool PowerControl::isAuxPowerCycleRequest(Event event) const
            event == Event::fullPowerCycleRequest;
 }
 
+bool PowerControl::canAcceptAuxPowerCycle(
+    AuxPowerCycleVariant /*variant*/) const
+{
+    return !powerActionsBlocked() && inStablePowerState();
+}
+
+bool PowerControl::prepareForAuxPowerCycle(AuxPowerCycleVariant /*variant*/,
+                                           bool& /*skipGraceful*/)
+{
+    return inStablePowerState();
+}
+
+bool PowerControl::queueAuxPowerCycle(AuxPowerCycleVariant variant)
+{
+    if (auxPowerCycleQueued || isAuxPowerCycleActive())
+    {
+        lg2::warning(
+            "Aux power cycle rejected because another aux power cycle is active; current FSM state: {STATE}.",
+            "STATE", getPowerStateName());
+        return false;
+    }
+
+    if (!canAcceptAuxPowerCycle(variant))
+    {
+        if (powerActionsBlocked())
+        {
+            lg2::warning(
+                "Aux power cycle rejected because another power action is active; current FSM state: {STATE}.",
+                "STATE", getPowerStateName());
+        }
+        else
+        {
+            lg2::warning(
+                "Aux power cycle rejected in the current FSM state: {STATE}.",
+                "STATE", getPowerStateName());
+        }
+        return false;
+    }
+
+    // Reserve the request before acknowledging it. beginAuxPowerCycle() keeps
+    // the lock set and endAuxPowerCycle() releases it.
+    auxPowerCycleQueued = true;
+    blockPowerActions = true;
+    boost::asio::post(ioContext,
+                      [this, variant]() { executeAuxPowerCycle(variant); });
+    return true;
+}
+
+void PowerControl::executeAuxPowerCycle(AuxPowerCycleVariant variant)
+{
+    if (!auxPowerCycleQueued)
+    {
+        return;
+    }
+
+    if (isAuxPowerCycleActive())
+    {
+        // The active cycle already owns blockPowerActions.
+        auxPowerCycleQueued = false;
+        return;
+    }
+
+    // Both AUX variants normally begin gracefully. A platform preparation
+    // override may skip that phase when recovering from a wedged state.
+    bool skipGraceful = false;
+
+    if (!prepareForAuxPowerCycle(variant, skipGraceful))
+    {
+        lg2::warning(
+            "Aux power cycle canceled because the current FSM state could not be prepared; current state: {STATE}. Releasing power-action lock.",
+            "STATE", getPowerStateName());
+        auxPowerCycleQueued = false;
+        blockPowerActions = false;
+        return;
+    }
+
+    if (!inStablePowerState())
+    {
+        lg2::error(
+            "Aux-cycle preparation did not return the FSM to a stable power state; current state: {STATE}. Releasing power-action lock.",
+            "STATE", getPowerStateName());
+        auxPowerCycleQueued = false;
+        blockPowerActions = false;
+        return;
+    }
+
+    addRestartCause(RestartCause::command);
+    auxPowerCycleQueued = false;
+    beginAuxPowerCycle(variant == AuxPowerCycleVariant::auxCycleForce,
+                       skipGraceful);
+}
+
 void PowerControl::endAuxPowerCycle()
 {
+    auxPowerCycleQueued = false;
     auxPowerCycleState = AuxPowerCycleState::inactive;
     auxPowerCycleForce = false;
     suppressPowerStateSave = false;
@@ -1640,16 +1738,7 @@ void PowerControl::advanceAuxPowerCycle()
         lg2::warning(
             "Aux power cycle (force): forceful shutdown did not power the host off; "
             "cutting tray standby power (aux-cycle GPIO) regardless.");
-        if (assertAuxPowerCycle())
-        {
-            // Best effort after GPIO assertion: event logging must never block
-            // the requested recovery action.
-            logResourceEvent(
-                "ResourceErrorsDetected",
-                {"Host0",
-                 "Forceful shutdown failed to power host off; cutting tray standby power regardless"},
-                "xyz.openbmc_project.Logging.Entry.Level.Warning");
-        }
+        assertAuxPowerCycle();
     }
     else
     {
@@ -1916,61 +2005,66 @@ void PowerControl::registerHostInterface()
             "/xyz/openbmc_project/control/host" + nodeId + "/pre_system_reset",
             "com.nvidia.PreSystemReset");
 
-        preSysResetIface->register_method(
-            "SetPreSystemReset", [this, preSysResetSignal](bool assertReset) {
-                // Release (false) is only meaningful as the normal exit path
-                // from waitForCpuRecovery; a stray release outside recovery
-                // would restore preSysResetReturnState from a stale (or
-                // never-set) prior session. Reject new assert (true)
-                // requests from transitional states to prevent racing a
-                // power sequence.
-                bool inRecovery =
-                    (powerState == PowerState::waitForCpuRecovery);
-                if (!assertReset && !inRecovery)
-                {
-                    lg2::error(
-                        "SetPreSystemReset rejected: recovery is not active");
-                    throw sdbusplus::xyz::openbmc_project::Common::Error::
-                        Unavailable();
-                }
-                if (assertReset && !inStablePowerState())
-                {
-                    lg2::error(
-                        "SetPreSystemReset rejected: power state is transitional");
-                    throw sdbusplus::xyz::openbmc_project::Common::Error::
-                        Unavailable();
-                }
-                // assert: polarity value; de-assert: !polarity
-                int gpioValue =
-                    assertReset
-                        ? static_cast<int>(preSysResetSignal->polarity)
-                        : static_cast<int>(!preSysResetSignal->polarity);
-                if (!setGPIOOutput(preSysResetSignal, gpioValue))
-                {
-                    lg2::error("SetPreSystemReset({A}) failed", "A",
-                               assertReset);
-                    throw sdbusplus::xyz::openbmc_project::Common::Error::
-                        InternalFailure();
-                }
-                if (assertReset)
-                {
-                    preSysResetSavedValue = gpioValue;
-                    preSysResetReturnState = powerState;
-                    blockPowerActions = true;
-                    setPowerState(PowerState::waitForCpuRecovery);
-                    lg2::info("CPU held in reset for USB-RCM recovery; "
-                              "FSM parked in waitForCpuRecovery");
-                }
-                else
-                {
-                    setPowerState(preSysResetReturnState);
-                    preSysResetSavedValue = 1;
-                    blockPowerActions = false;
-                    lg2::info("CPU reset released; FSM back to {STATE}",
-                              "STATE",
-                              static_cast<int>(preSysResetReturnState));
-                }
-            });
+        preSysResetIface->register_method("SetPreSystemReset", [this,
+                                                                preSysResetSignal](
+                                                                   bool
+                                                                       assertReset) {
+            // Release (false) is only meaningful as the normal exit path
+            // from waitForCpuRecovery; a stray release outside recovery
+            // would restore preSysResetReturnState from a stale (or
+            // never-set) prior session. Reject new assert (true)
+            // requests from transitional states to prevent racing a
+            // power sequence.
+            bool inRecovery = (powerState == PowerState::waitForCpuRecovery);
+            if (!assertReset && !inRecovery)
+            {
+                lg2::error(
+                    "SetPreSystemReset rejected: recovery is not active");
+                throw sdbusplus::xyz::openbmc_project::Common::Error::
+                    Unavailable();
+            }
+            if (assertReset && powerActionsBlocked())
+            {
+                lg2::error(
+                    "SetPreSystemReset rejected: another power action is active");
+                throw sdbusplus::xyz::openbmc_project::Common::Error::
+                    Unavailable();
+            }
+            if (assertReset && !inStablePowerState())
+            {
+                lg2::error(
+                    "SetPreSystemReset rejected: power state is transitional");
+                throw sdbusplus::xyz::openbmc_project::Common::Error::
+                    Unavailable();
+            }
+            // assert: polarity value; de-assert: !polarity
+            int gpioValue =
+                assertReset ? static_cast<int>(preSysResetSignal->polarity)
+                            : static_cast<int>(!preSysResetSignal->polarity);
+            if (!setGPIOOutput(preSysResetSignal, gpioValue))
+            {
+                lg2::error("SetPreSystemReset({A}) failed", "A", assertReset);
+                throw sdbusplus::xyz::openbmc_project::Common::Error::
+                    InternalFailure();
+            }
+            if (assertReset)
+            {
+                preSysResetSavedValue = gpioValue;
+                preSysResetReturnState = powerState;
+                blockPowerActions = true;
+                setPowerState(PowerState::waitForCpuRecovery);
+                lg2::info("CPU held in reset for USB-RCM recovery; "
+                          "FSM parked in waitForCpuRecovery");
+            }
+            else
+            {
+                setPowerState(preSysResetReturnState);
+                preSysResetSavedValue = 1;
+                blockPowerActions = false;
+                lg2::info("CPU reset released; FSM back to {STATE}", "STATE",
+                          static_cast<int>(preSysResetReturnState));
+            }
+        });
         preSysResetIface->initialize();
 
         // Watch for fw-status disappearing while the CPU is held in reset.
@@ -1989,8 +2083,14 @@ void PowerControl::registerHostInterface()
                     "com.Nvidia.FWStatus disappeared during CPU recovery — "
                     "releasing PreSystemReset and returning to {STATE}",
                     "STATE", static_cast<int>(preSysResetReturnState));
-                setGPIOOutput(preSysResetSignal,
-                              static_cast<int>(!preSysResetSignal->polarity));
+                if (!setGPIOOutput(
+                        preSysResetSignal,
+                        static_cast<int>(!preSysResetSignal->polarity)))
+                {
+                    lg2::error(
+                        "Failed to release PreSystemReset after com.Nvidia.FWStatus disappeared; keeping CPU recovery active");
+                    return;
+                }
                 setPowerState(preSysResetReturnState);
                 blockPowerActions = false;
             });
@@ -2006,11 +2106,11 @@ void PowerControl::registerHostInterface()
             // TODO: Uncomment when powerButtonMask, resetButtonMask, and
             // addRestartCause are moved
 
-            // Reject external requests while an aux power cycle is atomic.
             if (powerActionsBlocked())
             {
                 lg2::warning(
-                    "RequestedHostTransition rejected: aux power cycle in progress.");
+                    "RequestedHostTransition rejected because power actions are blocked; current FSM state: {STATE}.",
+                    "STATE", getPowerStateName());
                 return 0;
             }
 
@@ -2122,8 +2222,8 @@ void PowerControl::registerHostInterface()
                         "FullPowerCycle rejected: host not in a stable power state.");
                     return 0;
                 }
-                // Full power cycle (DMTF): attempt forceful shutdown, then cut
-                // standby even if the shutdown does not power the host off.
+                // Full power cycle (DMTF): forceful shutdown, then cut standby
+                // only if the host actually powered off.
                 lg2::info("Host Full Power Cycle requested");
                 addRestartCause(RestartCause::command);
                 // Reserve the aux-cycle lock before ACKing so a later request
@@ -2203,11 +2303,11 @@ void PowerControl::initializeChassisInterface()
             // TODO: Uncomment when powerButtonMask and addRestartCause are
             // moved
 
-            // Reject external requests while an aux power cycle is atomic.
             if (powerActionsBlocked())
             {
                 lg2::warning(
-                    "RequestedPowerTransition rejected: aux power cycle in progress.");
+                    "RequestedPowerTransition rejected because power actions are blocked; current FSM state: {STATE}.",
+                    "STATE", getPowerStateName());
                 return 0;
             }
 
@@ -2279,10 +2379,9 @@ void PowerControl::initializeChassisInterface()
                         "FullPowerCycle rejected: host not in a stable power state.");
                     return 0;
                 }
-                // Full power cycle (DMTF): attempt forceful shutdown, then cut
-                // standby even if the shutdown does not power the host off.
-                // Also reachable via RequestedHostTransition; both post the
-                // same event.
+                // Full power cycle (DMTF): forceful shutdown, then cut standby
+                // only if the host actually powered off. Also reachable via the
+                // host RequestedHostTransition; both post the same event.
                 lg2::info("Chassis Full Power Cycle requested");
                 addRestartCause(RestartCause::command);
                 // Reserve the aux-cycle lock before ACKing so a later request
@@ -2309,52 +2408,17 @@ void PowerControl::initializeChassisInterface()
     chassisIface->register_property(
         "RequestedAuxPowerTransition", std::string{},
         [this](const std::string& requested, std::string& resp) {
-            // Reject a second aux request once a cycle is running; the first
-            // request (flag still clear) falls through and starts the cycle.
-            if (powerActionsBlocked())
-            {
-                lg2::warning(
-                    "RequestedAuxPowerTransition rejected: aux power cycle in progress.");
-                return 0;
-            }
-
-            // Aux cycles can only start from a stable state; reject (rather
-            // than silently drop) a request that arrives mid-transition.
-            if (!inStablePowerState())
-            {
-                lg2::warning(
-                    "RequestedAuxPowerTransition rejected: host not in a stable power state.");
-                return 0;
-            }
-
+            AuxPowerCycleVariant variant;
             if (requested ==
                 "xyz.openbmc_project.State.Chassis.Transition.AuxPowerCycle")
             {
-                lg2::info("Chassis Aux Power Cycle requested");
-                addRestartCause(RestartCause::command);
-                // Reserve the aux-cycle lock before ACKing so a later request
-                // can't race into the gap (released by endAuxPowerCycle() or
-                // the start hook if the cycle can't begin).
-                blockPowerActions = true;
-                // Defer event processing to avoid D-Bus reentrancy
-                boost::asio::post(ioContext, [this]() {
-                    sendPowerControlEvent(Event::auxPowerCycleRequest);
-                });
+                variant = AuxPowerCycleVariant::auxCycle;
             }
             else if (
                 requested ==
                 "xyz.openbmc_project.State.Chassis.Transition.AuxPowerCycleForce")
             {
-                lg2::info("Chassis Aux Power Cycle (Force) requested");
-                addRestartCause(RestartCause::command);
-                // Reserve the aux-cycle lock before ACKing so a later request
-                // can't race into the gap (released by endAuxPowerCycle() or
-                // the start hook if the cycle can't begin).
-                blockPowerActions = true;
-                // Defer event processing to avoid D-Bus reentrancy
-                boost::asio::post(ioContext, [this]() {
-                    sendPowerControlEvent(Event::auxPowerCycleForceRequest);
-                });
+                variant = AuxPowerCycleVariant::auxCycleForce;
             }
             else
             {
@@ -2362,6 +2426,17 @@ void PowerControl::initializeChassisInterface()
                     "Unrecognized chassis aux power transition request.");
                 return 0;
             }
+
+            if (!queueAuxPowerCycle(variant))
+            {
+                return 0;
+            }
+
+            lg2::info("Chassis Aux Power Cycle requested (variant={VARIANT})",
+                      "VARIANT",
+                      variant == AuxPowerCycleVariant::auxCycleForce
+                          ? "AuxPowerCycleForce"
+                          : "AuxPowerCycle");
             resp = requested;
             return 1;
         });
