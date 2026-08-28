@@ -226,6 +226,15 @@ void C2PowerControl::pdbMainPowerOkHandler(bool state)
                                   ? Event::pdbMainPowerOkAssert
                                   : Event::pdbMainPowerOkDeAssert;
 
+    if (powerControlEvent == Event::pdbMainPowerOkAssert)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = false;
+    }
+    else if (powerState == PowerState::waitForCpuRecovery)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = true;
+    }
+
     // Check for power faults and handle if detected
     if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
     {
@@ -583,6 +592,15 @@ void C2PowerControl::initiatePDBPowerOff()
     setGPIOOutput(pdb12vHPMAICEnable, !pdb12vHPMAICEnable->polarity);
     setGPIOOutput(pdb12vGPU1Enable, !pdb12vGPU1Enable->polarity);
     setGPIOOutput(pdb12vGPU2Enable, !pdb12vGPU2Enable->polarity);
+
+    if (pdbMainPowerOkDeassertedDuringRecovery)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = false;
+        lg2::info(
+            "PDBMainPowerOk already de-asserted during CPU recovery; bypassing the duplicate wait and continuing PSU teardown.");
+        completeShutdownAndTransitionToOff(true);
+        return;
+    }
 
     // Wait for the PDBMainPowerOk de-assertion GPIO event rather than reading
     // its level here. De-asserting the 12V rails above drops PDBMainPowerOk,
