@@ -214,6 +214,13 @@ GNRPowerControl::GNRPowerControl(
     g3SoftPowerButtonDelay =
         getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
     pexResetPulse = getTimeoutWithDefault("PexResetPulseMs", 10ms);
+
+    // Anchor the erot log to wall clock once, as soon as we know where to send
+    // it. The send is queued on ioContext and completes after run() starts.
+    if (mctpEid)
+    {
+        sendTimestampVdm();
+    }
 }
 
 void GNRPowerControl::validateTimerConfigs() {}
@@ -324,6 +331,10 @@ void GNRPowerControl::handleTransitionToCycleOff(Event event)
     {
         case Event::powerOKDeAssert:
             setPowerState(PowerState::cycleOff);
+            // A cycle enters G3Soft just like a power off does, so the erot
+            // gets the same NVRAM/flash handling before the AP comes back and
+            // powerOn()'s G3Soft exit has a matching entry.
+            completePowerDown();
             startTimer("PowerCycleMs", powerCycleTimer,
                        Event::powerCycleTimerExpired);
             break;
@@ -340,6 +351,7 @@ void GNRPowerControl::handleGracefulTransitionToCycleOff(Event event)
         case Event::powerOKDeAssert:
             gracefulPowerOffTimer.cancel();
             setPowerState(PowerState::cycleOff);
+            completePowerDown();
             startTimer("PowerCycleMs", powerCycleTimer,
                        Event::powerCycleTimerExpired);
             break;
@@ -453,9 +465,6 @@ void GNRPowerControl::startPowerButtonDelay()
 void GNRPowerControl::powerOn()
 {
     lg2::info("GNR powerOn() entered");
-
-    // Anchor the erot log to wall clock for the boot we are about to start.
-    sendTimestampVdm();
 
     if (!shouldRunG3SoftSequence())
     {
