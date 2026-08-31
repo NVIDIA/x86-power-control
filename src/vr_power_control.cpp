@@ -520,9 +520,8 @@ void VRPowerControl::handleShutdownRequest(Event event)
 
         if (bootDoneState < 0)
         {
-            lg2::error(
-                "CPU Boot Done signal value has not been initialized. "
-                "Host graceful operations cannot proceed.");
+            lg2::error("CPU Boot Done signal value has not been initialized. "
+                       "Host graceful operations cannot proceed.");
             logResourceEvent(
                 "ResourceErrorsDetected",
                 {"Host0",
@@ -1838,63 +1837,95 @@ void VRPowerControl::handleWaitForHostRebootShutdownOk(Event event)
     }
 }
 
+bool VRPowerControl::canAcceptAuxPowerCycle(AuxPowerCycleVariant variant) const
+{
+    return PowerControl::canAcceptAuxPowerCycle(variant) ||
+           powerState == PowerState::waitForCpuRecovery;
+}
+
+bool VRPowerControl::prepareForAuxPowerCycle(AuxPowerCycleVariant variant,
+                                             bool& skipGraceful)
+{
+    if (powerState == PowerState::waitForCpuRecovery)
+    {
+        abortCpuRecovery();
+
+        // A host in USB-RCM recovery is considered wedged. Skip the graceful
+        // phase for both auxiliary power-cycle variants.
+        skipGraceful = true;
+    }
+
+    return PowerControl::prepareForAuxPowerCycle(variant, skipGraceful);
+}
+
+void VRPowerControl::abortCpuRecovery(bool restorePowerState)
+{
+    auto preSystemReset = getSignal("Board0PreSystemReset");
+    if (!preSystemReset)
+    {
+        lg2::error(
+            "Board0PreSystemReset unavailable while aborting CPU recovery; continuing with the requested power action.");
+    }
+    else if (!setGPIOOutput(preSystemReset,
+                            static_cast<int>(!preSystemReset->polarity)))
+    {
+        lg2::error(
+            "Failed to deassert Board0PreSystemReset while aborting CPU recovery; continuing with the requested power action.");
+    }
+    else
+    {
+        lg2::warning("USB-RCM recovery aborted; PreSystemReset released");
+    }
+
+    // Release the recovery-session lock. The aux-cycle path immediately takes
+    // ownership of it again in beginAuxPowerCycle().
+    blockPowerActions = false;
+    preSysResetSavedValue = 1;
+
+    if (restorePowerState)
+    {
+        // Recovery can only be entered from a stable state, so this restores On
+        // or Off even when GPIO cleanup fails.
+        setPowerState(preSysResetReturnState);
+    }
+}
+
 void VRPowerControl::handleWaitForCpuRecovery(Event event)
 {
-    // Helper: abort recovery — restore the reset GPIO and clear state.
-    // Called before handing off to whatever triggered the abort.
-    auto abortRecovery = [this]() {
-        auto preSysResetIt = powerSignalMap.find("Board0PreSystemReset");
-        if (preSysResetIt != powerSignalMap.end())
-        {
-            // de-assert: inactive = !polarity (works for both ActiveLow and
-            // ActiveHigh)
-            setGPIOOutput(preSysResetIt->second,
-                          static_cast<int>(!preSysResetIt->second->polarity));
-        }
-        lg2::warning("USB-RCM recovery aborted; PreSystemReset released");
-    };
-
     switch (event)
     {
-            // ---- D-Bus power-off and aux-cycle requests are allowed through
-            // ---- The base class D-Bus handlers check powerActionsBlocked()
-            // first, so they are blocked while we are here.  These two events
-            // are generated internally when the D-Bus setters detect we are in
-            // a stable state *before* we entered waitForCpuRecovery, so we
-            // handle them here by aborting recovery and initiating the
-            // requested action.
+            // ---- D-Bus power-off requests are allowed through ----
+            // These events may have been accepted while the FSM was stable and
+            // delivered after it entered waitForCpuRecovery. Abort recovery
+            // before initiating the requested shutdown.
 
         case Event::powerOffRequest:
         case Event::gracefulPowerOffRequest:
-            abortRecovery();
-            setPowerState(preSysResetReturnState);
+            abortCpuRecovery();
             handleShutdownRequest(event);
-            break;
-
-        case Event::auxPowerCycleRequest:
-        case Event::auxPowerCycleForceRequest:
-            abortRecovery();
-            setPowerState(preSysResetReturnState);
-            beginAuxPowerCycle(event == Event::auxPowerCycleForceRequest,
-                               /*skipGraceful=*/true);
             break;
 
             // ---- Hardware abort: power actually dropping ----
 
         case Event::pdbMainPowerOkDeAssert:
-            lg2::error(
-                "PDB Main Power lost during CPU recovery — aborting recovery");
-            abortRecovery();
-            setPowerState(preSysResetReturnState);
-            sendPowerControlEvent(Event::pdbMainPowerOkDeAssert);
-            break;
-
         case Event::board0RunPowerPGDeAssert:
-            lg2::error(
-                "Board0 Run Power PG lost during CPU recovery — aborting recovery");
-            abortRecovery();
-            setPowerState(preSysResetReturnState);
-            sendPowerControlEvent(Event::board0RunPowerPGDeAssert);
+            // handlePowerStateOn()/handlePowerStateOff() do not consume these
+            // events, so restoring preSysResetReturnState and re-sending the
+            // event through sendPowerControlEvent() would silently drop the
+            // fault. Drive the same cleanup transition the raw GPIO handlers
+            // use for an unexpected de-assertion instead.
+            lg2::error("{SIGNAL} lost during CPU recovery — aborting recovery",
+                       "SIGNAL",
+                       (event == Event::pdbMainPowerOkDeAssert
+                            ? "PDB Main Power"
+                            : "Board0 Run Power PG"));
+            abortCpuRecovery(/*restorePowerState=*/false);
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0", "Power lost unexpectedly during CPU recovery."},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
             break;
 
         // ---- Everything else: ignore (GPIO chatter from CPU entering reset)
@@ -1979,6 +2010,11 @@ std::string_view VRPowerControl::getHostState() const
     // state
     switch (powerState)
     {
+        case PowerState::waitForCpuRecovery:
+            // USB-RCM recovery holds the CPU in reset while host power remains
+            // on.
+            return "xyz.openbmc_project.State.Host.HostState.Running";
+            break;
         case PowerState::waitForPDBMainPowerOk:
         case PowerState::waitForHPMPowerGoodAssert:
         case PowerState::waitForCPUResetDeAssert:
@@ -2036,6 +2072,10 @@ std::string_view VRPowerControl::getChassisState() const
     // chassis state
     switch (powerState)
     {
+        case PowerState::waitForCpuRecovery:
+            // USB-RCM recovery does not remove chassis power.
+            return "xyz.openbmc_project.State.Chassis.PowerState.On";
+            break;
         case PowerState::waitForPDBMainPowerOk:
         case PowerState::waitForHPMPowerGoodAssert:
             return "xyz.openbmc_project.State.Chassis.PowerState.TransitioningToOn";

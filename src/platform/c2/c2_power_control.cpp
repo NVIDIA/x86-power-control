@@ -151,8 +151,8 @@ void C2PowerControl::updateCpuBootDoneMarker(bool asserted)
     std::filesystem::remove(marker, ec);
     if (ec)
     {
-        lg2::error("Failed to remove CPU Boot Done marker {PATH}: {ERR}", "PATH",
-                   marker.string(), "ERR", ec.message());
+        lg2::error("Failed to remove CPU Boot Done marker {PATH}: {ERR}",
+                   "PATH", marker.string(), "ERR", ec.message());
     }
 }
 
@@ -226,6 +226,15 @@ void C2PowerControl::pdbMainPowerOkHandler(bool state)
                                   ? Event::pdbMainPowerOkAssert
                                   : Event::pdbMainPowerOkDeAssert;
 
+    if (powerControlEvent == Event::pdbMainPowerOkAssert)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = false;
+    }
+    else if (powerState == PowerState::waitForCpuRecovery)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = true;
+    }
+
     // Check for power faults and handle if detected
     if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
     {
@@ -241,7 +250,8 @@ bool C2PowerControl::checkAndHandlePdbMainPowerOkFault(Event powerControlEvent)
     // Power fault detection: Check for unexpected de-assertion
     if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
     {
-        if (powerState != PowerState::waitForPDBMainPowerOff)
+        if (powerState != PowerState::waitForPDBMainPowerOff &&
+            powerState != PowerState::waitForCpuRecovery)
         {
             // POWER FAULT: PDB Main Power OK de-asserted unexpectedly
             lg2::error(
@@ -261,7 +271,10 @@ bool C2PowerControl::checkAndHandlePdbMainPowerOkFault(Event powerControlEvent)
 
             return true;
         }
-        // else: Expected de-assertion in waitForPDBMainPowerOff state
+        // else: Expected de-assertion in waitForPDBMainPowerOff state, or a
+        // recovery-session fault — let it fall through to
+        // sendPowerControlEvent() so VRPowerControl::handleWaitForCpuRecovery()
+        // can release Board0PreSystemReset before driving the same cleanup.
     }
 
     // Return false to indicate normal processing should continue
@@ -579,6 +592,15 @@ void C2PowerControl::initiatePDBPowerOff()
     setGPIOOutput(pdb12vHPMAICEnable, !pdb12vHPMAICEnable->polarity);
     setGPIOOutput(pdb12vGPU1Enable, !pdb12vGPU1Enable->polarity);
     setGPIOOutput(pdb12vGPU2Enable, !pdb12vGPU2Enable->polarity);
+
+    if (pdbMainPowerOkDeassertedDuringRecovery)
+    {
+        pdbMainPowerOkDeassertedDuringRecovery = false;
+        lg2::info(
+            "PDBMainPowerOk already de-asserted during CPU recovery; bypassing the duplicate wait and continuing PSU teardown.");
+        completeShutdownAndTransitionToOff(true);
+        return;
+    }
 
     // Wait for the PDBMainPowerOk de-assertion GPIO event rather than reading
     // its level here. De-asserting the 12V rails above drops PDBMainPowerOk,

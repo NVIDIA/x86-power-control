@@ -103,6 +103,29 @@ class VRPowerControl : public PowerControl
 
   protected:
     /**
+     * @brief Accept aux power cycles from stable states or CPU recovery
+     */
+    bool canAcceptAuxPowerCycle(AuxPowerCycleVariant variant) const override;
+
+    /**
+     * @brief Leave CPU recovery before starting common aux-cycle sequencing
+     */
+    bool prepareForAuxPowerCycle(AuxPowerCycleVariant variant,
+                                 bool& skipGraceful) override;
+
+    /**
+     * @brief Best-effort CPU recovery cleanup for an overriding power action
+     *
+     * Releases Board0PreSystemReset when possible and clears the recovery
+     * lock. By default it restores the stable state captured before entering
+     * recovery; hardware-fault callers may proceed directly to their fault
+     * transition instead.
+     *
+     * @param restorePowerState Whether to restore the saved stable state
+     */
+    void abortCpuRecovery(bool restorePowerState = true);
+
+    /**
      * @brief Validate that all required signals for detected hardware are
      * present in config
      *
@@ -655,7 +678,8 @@ class VRPowerControl : public PowerControl
      * strap programming. Ignores GPIO chatter from the CPU entering reset
      * (SHDN_OK, CpuResetIndicator). Exits and restores the reset GPIO if
      * power actually drops (PDBMainPowerOkDeAssert, Board0RunPowerPGDeAssert)
-     * or if an explicit power-off / aux-cycle is requested over D-Bus.
+     * or if an explicit power-off is requested over D-Bus. Aux-cycle requests
+     * use prepareForAuxPowerCycle().
      */
     virtual void handleWaitForCpuRecovery(Event event);
 
