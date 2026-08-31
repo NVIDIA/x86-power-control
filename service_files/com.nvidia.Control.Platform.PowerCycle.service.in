@@ -1,0 +1,11 @@
+[Unit]
+Description=NVIDIA platform power-cycle control
+
+[Service]
+Type=dbus
+BusName=com.nvidia.Control.Platform.PowerCycle
+ExecStart=@BINDIR@/nvidia-platform-power-cycled
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

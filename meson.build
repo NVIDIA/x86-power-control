@@ -7,6 +7,9 @@ project(
     meson_version: '>=1.1.1',
 )
 
+cpp = meson.get_compiler('cpp')
+fs = import('fs')
+
 add_project_arguments(
     '-Wno-psabi',
     '-DBOOST_SYSTEM_NO_DEPRECATED',
@@ -68,6 +71,28 @@ phosphorlogging = dependency('phosphor-logging')
 sdbusplus = dependency('sdbusplus')
 sdeventplus = dependency('sdeventplus')
 boost = dependency('boost')
+
+platform_power_cycle_option = get_option('platform-power-cycle-service')
+platform_power_cycle_contract = false
+if not platform_power_cycle_option.disabled()
+    if phosphordbusinterfaces.type_name() == 'internal'
+        pdi_yamldir = phosphordbusinterfaces.get_variable(internal: 'yamldir')
+        platform_power_cycle_contract = fs.exists(
+            pdi_yamldir / 'com/nvidia/Control/Platform/PowerCycle.interface.yaml',
+        )
+    else
+        platform_power_cycle_contract = cpp.has_header(
+            'com/nvidia/Control/Platform/PowerCycle/server.hpp',
+            dependencies: phosphordbusinterfaces,
+        )
+    endif
+endif
+if platform_power_cycle_option.enabled() and not platform_power_cycle_contract
+    error(
+        'platform-power-cycle-service requires the PlatformPowerCycle D-Bus contract',
+    )
+endif
+build_platform_power_cycle = not platform_power_cycle_option.disabled() and platform_power_cycle_contract
 deps = [
     libgpiodcxx,
     libsystemd,
@@ -96,6 +121,20 @@ executable(
 
 systemd = dependency('systemd')
 if systemd.found()
+    if build_platform_power_cycle
+        platform_power_cycle_service_conf = configuration_data()
+        platform_power_cycle_service_conf.set(
+            'BINDIR',
+            join_paths(get_option('prefix'), get_option('bindir')),
+        )
+        configure_file(
+            input: 'service_files/com.nvidia.Control.Platform.PowerCycle.service.in',
+            output: 'com.nvidia.Control.Platform.PowerCycle.service',
+            configuration: platform_power_cycle_service_conf,
+            install: true,
+            install_dir: systemd.get_variable('systemdsystemunitdir'),
+        )
+    endif
     install_data(
         'service_files/chassis-system-reset.service',
         'service_files/chassis-system-reset.target',
@@ -109,4 +148,7 @@ install_data(
     install_dir: '/usr/share/x86-power-control/',
 )
 
+if build_platform_power_cycle
+    subdir('src/platform_power_cycle')
+endif
 subdir('src/bmc')
