@@ -151,7 +151,7 @@ GNRPowerControl::GNRPowerControl(
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
     PowerControl(ioContext, conn, node, appState, configFilePath),
-    gnrPowerOnTimer(ioContext)
+    gnrPowerOnTimer(ioContext), sbiosResetSettleTimer(ioContext)
 {
     using namespace std::chrono_literals;
     // Only require PowerOk and PowerOut; G3Soft GPIOs are optional in JSON
@@ -210,6 +210,11 @@ GNRPowerControl::GNRPowerControl(
     // so the initial published values are correct.
     initializePowerStateFromHardware({"PowerOk"}, true);
     initializeHostStateInterface();
+    // The host is already up, so its SBIOS reset is still ahead of us. Boards
+    // without the G3Soft GPIOs have nothing to bracket, so they keep reacting
+    // to the first de-assert.
+    ignoreNextPowerOkDeAssert = hasG3SoftSignals() && !isSystemPowerOff();
+    sbiosResetSettleTimeout = getTimeoutWithDefault("SbiosResetSettleMs", 10s);
     g3SoftAp0Timeout = getTimeoutWithDefault("G3SoftAp0TimeoutMs", 15s);
     g3SoftPowerButtonDelay =
         getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
@@ -238,8 +243,60 @@ void GNRPowerControl::setDefaultValues()
     }
 }
 
+void GNRPowerControl::powerOKHandler(bool state)
+{
+    auto it = powerSignalMap.find("PowerOk");
+    if (it != powerSignalMap.end() && state == it->second->polarity)
+    {
+        // PowerOk is back: either the ignored de-assert really was the SBIOS
+        // reset (drop the backstop) or the host just came up (arm the ignore).
+        sbiosResetSettleTimer.cancel();
+        if (hasG3SoftSignals() &&
+            (powerState == PowerState::off || powerState == PowerState::cycleOff))
+        {
+            ignoreNextPowerOkDeAssert = true;
+        }
+    }
+
+    PowerControl::powerOKHandler(state);
+}
+
+bool GNRPowerControl::consumePowerOkDeAssertIgnore()
+{
+    if (!ignoreNextPowerOkDeAssert)
+    {
+        return false;
+    }
+    ignoreNextPowerOkDeAssert = false;
+
+    lg2::info(
+        "GNR: ignoring PowerOk de-assert from the SBIOS reset, waiting up to {MS}ms for PowerOk to return",
+        "MS", sbiosResetSettleTimeout.count());
+    sbiosResetSettleTimer.expires_after(sbiosResetSettleTimeout);
+    sbiosResetSettleTimer.async_wait(
+        [this](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            // Cancelled by PowerOk coming back, so it was the SBIOS reset.
+            return;
+        }
+        // PowerOk stayed low: this was a real power off after all. Replay the
+        // event so the current state runs its normal power-down path.
+        lg2::warning(
+            "GNR: PowerOk did not return within {MS}ms, treating the de-assert as a power off",
+            "MS", sbiosResetSettleTimeout.count());
+        sendPowerControlEvent(Event::powerOKDeAssert);
+    });
+    return true;
+}
+
 void GNRPowerControl::handlePowerStateOn(Event event)
 {
+    if (event == Event::powerOKDeAssert && consumePowerOkDeAssertIgnore())
+    {
+        return;
+    }
+
     if (event != Event::gracefulResetRequest)
     {
         PowerControl::handlePowerStateOn(event);
@@ -297,6 +354,10 @@ void GNRPowerControl::handleTransitionToOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
+            if (consumePowerOkDeAssertIgnore())
+            {
+                break;
+            }
             setPowerState(PowerState::off);
             completePowerDown();
             break;
@@ -311,6 +372,12 @@ void GNRPowerControl::handleGracefulTransitionToOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
+            if (consumePowerOkDeAssertIgnore())
+            {
+                // Leave GracefulPowerOffS running: if the host never finishes
+                // its reset the timeout still forces the power off.
+                break;
+            }
             gracefulPowerOffTimer.cancel();
             setPowerState(PowerState::off);
             completePowerDown();
@@ -330,6 +397,10 @@ void GNRPowerControl::handleTransitionToCycleOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
+            if (consumePowerOkDeAssertIgnore())
+            {
+                break;
+            }
             setPowerState(PowerState::cycleOff);
             // A cycle enters G3Soft just like a power off does, so the erot
             // gets the same NVRAM/flash handling before the AP comes back and
@@ -349,6 +420,10 @@ void GNRPowerControl::handleGracefulTransitionToCycleOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
+            if (consumePowerOkDeAssertIgnore())
+            {
+                break;
+            }
             gracefulPowerOffTimer.cancel();
             setPowerState(PowerState::cycleOff);
             completePowerDown();
@@ -428,6 +503,10 @@ void GNRPowerControl::sendPowerOffVdm()
 
 void GNRPowerControl::completePowerDown()
 {
+    // We are committed to the power down, so nothing is left to reconsider.
+    ignoreNextPowerOkDeAssert = false;
+    sbiosResetSettleTimer.cancel();
+
     // Notify the erot that we are powering down, then drive the system into G3.
     sendPowerOffVdm();
 

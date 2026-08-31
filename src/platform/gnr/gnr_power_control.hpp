@@ -73,6 +73,7 @@ class GNRPowerControl : public PowerControl
     void initiateForcefulShutdown() override;
 
   protected:
+    void powerOKHandler(bool state) override;
     void validateTimerConfigs() override;
     void setDefaultValues();
     void handlePowerStateOn(Event event) override;
@@ -85,6 +86,17 @@ class GNRPowerControl : public PowerControl
 
   private:
     void sendPowerOffVdm();
+    /**
+     * @brief Consume the one-shot ignore for the SBIOS reset
+     *
+     * SBIOS resets the host part way through its power sequence, so the first
+     * PowerOk de-assert after the host comes up is not a real power off. When
+     * the ignore is armed this clears it, starts the settle fallback and
+     * returns true so the caller leaves the power state alone.
+     *
+     * @return true if this de-assert must be ignored
+     */
+    bool consumePowerOkDeAssertIgnore();
     /** Give the erot log parser a wall-clock anchor for its boot-relative
      * timestamps. */
     void sendTimestampVdm();
@@ -122,6 +134,12 @@ class GNRPowerControl : public PowerControl
 
     GNRPowerOnPhase gnrPowerOnPhase{GNRPowerOnPhase::Idle};
     boost::asio::steady_timer gnrPowerOnTimer;
+    /** Set while the host is up: the next PowerOk de-assert is the SBIOS
+     * reset, not a power off. */
+    bool ignoreNextPowerOkDeAssert{false};
+    /** Backstop for an ignored de-assert that PowerOk never recovers from. */
+    boost::asio::steady_timer sbiosResetSettleTimer;
+    std::chrono::milliseconds sbiosResetSettleTimeout;
     std::chrono::steady_clock::time_point gnrPowerOnStartTime{};
     std::chrono::milliseconds g3SoftPowerButtonDelay;
     std::chrono::milliseconds pexResetPulse;
