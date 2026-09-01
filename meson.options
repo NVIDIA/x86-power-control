@@ -53,3 +53,9 @@ option(
     value: 'disabled',
     description: 'Enable workaround for hardware bug where CPU_RESET asserts before entering waitForCPUResetAssert state (old/broken hardware only)',
 )
+option(
+    'config-file',
+    type: 'string',
+    value: 'power-config-host0',
+    description: 'JSON configuration file to use for power control settings',
+)

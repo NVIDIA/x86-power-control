@@ -3139,7 +3139,8 @@ void PowerControl::setRestartCause()
 void PowerControl::resetACBootProperty()
 {
     if ((this->causeSet.contains(RestartCause::command)) ||
-        (this->causeSet.contains(RestartCause::softReset)))
+        ((this->causeSet.contains(RestartCause::softReset)) &&
+         this->ignoreNextSoftReset))
     {
         conn->async_method_call(
             [](boost::system::error_code ec) {
