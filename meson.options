@@ -48,6 +48,12 @@ option(
     description: 'Install the D-Bus based powerctrl.sh script from this repo',
 )
 option(
+    'platform-power-cycle-service',
+    type: 'feature',
+    value: 'auto',
+    description: 'Build the NVIDIA platform power-cycle D-Bus service',
+)
+option(
     'cpu-reset-early-assert-war',
     type: 'feature',
     value: 'disabled',
