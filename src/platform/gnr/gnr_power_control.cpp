@@ -354,10 +354,6 @@ void GNRPowerControl::handleTransitionToOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
-            if (consumePowerOkDeAssertIgnore())
-            {
-                break;
-            }
             setPowerState(PowerState::off);
             completePowerDown();
             break;
@@ -372,12 +368,6 @@ void GNRPowerControl::handleGracefulTransitionToOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
-            if (consumePowerOkDeAssertIgnore())
-            {
-                // Leave GracefulPowerOffS running: if the host never finishes
-                // its reset the timeout still forces the power off.
-                break;
-            }
             gracefulPowerOffTimer.cancel();
             setPowerState(PowerState::off);
             completePowerDown();
@@ -397,10 +387,6 @@ void GNRPowerControl::handleTransitionToCycleOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
-            if (consumePowerOkDeAssertIgnore())
-            {
-                break;
-            }
             setPowerState(PowerState::cycleOff);
             // A cycle enters G3Soft just like a power off does, so the erot
             // gets the same NVRAM/flash handling before the AP comes back and
@@ -420,10 +406,6 @@ void GNRPowerControl::handleGracefulTransitionToCycleOff(Event event)
     switch (event)
     {
         case Event::powerOKDeAssert:
-            if (consumePowerOkDeAssertIgnore())
-            {
-                break;
-            }
             gracefulPowerOffTimer.cancel();
             setPowerState(PowerState::cycleOff);
             completePowerDown();
