@@ -10,6 +10,10 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
 
 namespace power_control
 {
@@ -69,6 +73,7 @@ class GNRPowerControl : public PowerControl
     void initiateForcefulShutdown() override;
 
   protected:
+    void powerOKHandler(bool state) override;
     void validateTimerConfigs() override;
     void setDefaultValues();
     void handlePowerStateOn(Event event) override;
@@ -80,6 +85,25 @@ class GNRPowerControl : public PowerControl
     void handleCycleOff(Event event) override;
 
   private:
+    void sendPowerOffVdm();
+    /**
+     * @brief Consume the one-shot ignore for the SBIOS reset
+     *
+     * SBIOS resets the host part way through its power sequence, so the first
+     * PowerOk de-assert after the host comes up is not a real power off. When
+     * the ignore is armed this clears it, starts the settle fallback and
+     * returns true so the caller leaves the power state alone.
+     *
+     * @return true if this de-assert must be ignored
+     */
+    bool consumePowerOkDeAssertIgnore();
+    /** Give the erot log parser a wall-clock anchor for its boot-relative
+     * timestamps. */
+    void sendTimestampVdm();
+    /** Notify the erot, assert G3SoftEn and drive PexResetN low. */
+    void completePowerDown();
+    /** PexResetN released; settle for G3SoftPowerButtonDelayMs, then pulse. */
+    void startPowerButtonDelay();
     int readGPIOInputValue(std::shared_ptr<ConfigData> config);
     /** Start the async G3Soft sequence (no blocking). */
     void startGNRPowerOnSequence();
@@ -88,6 +112,20 @@ class GNRPowerControl : public PowerControl
     /** Returns true if G3Soft GPIOs are configured and PowerOk is deasserted.
      */
     bool shouldRunG3SoftSequence();
+    /** Returns true if all three G3Soft GPIOs are present in the JSON config. */
+    bool hasG3SoftSignals();
+    /**
+     * @brief Read the destination MCTP EID from the host config JSON
+     *
+     * Parses the optional top-level "mctp_eid" field of configFilePath.
+     *
+     * @return the configured EID, or nullopt when the field is absent
+     * @throws std::runtime_error if the field is present but not an integer in
+     *         the assignable EID range
+     */
+    std::optional<uint8_t> loadMctpEid();
+    /** Send an erot notification VDM; no-op when no EID is configured. */
+    void sendVdm(std::span<const uint8_t> packet, const std::string& what);
 
     static constexpr int ap0PollIntervalMs = 100;
 
@@ -96,10 +134,18 @@ class GNRPowerControl : public PowerControl
 
     GNRPowerOnPhase gnrPowerOnPhase{GNRPowerOnPhase::Idle};
     boost::asio::steady_timer gnrPowerOnTimer;
+    /** Set while the host is up: the next PowerOk de-assert is the SBIOS
+     * reset, not a power off. */
+    bool ignoreNextPowerOkDeAssert{false};
+    /** Backstop for an ignored de-assert that PowerOk never recovers from. */
+    boost::asio::steady_timer sbiosResetSettleTimer;
+    std::chrono::milliseconds sbiosResetSettleTimeout;
     std::chrono::steady_clock::time_point gnrPowerOnStartTime{};
     std::chrono::milliseconds g3SoftPowerButtonDelay;
     std::chrono::milliseconds pexResetPulse;
     std::chrono::milliseconds g3SoftAp0Timeout;
+    /** Destination EID for erot VDMs; required when G3Soft is configured. */
+    std::optional<uint8_t> mctpEid;
 };
 
 } // namespace power_control

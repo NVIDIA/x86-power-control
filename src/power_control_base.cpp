@@ -3221,17 +3221,10 @@ void PowerControl::cancelTimer(const std::string& timerName,
 
 void PowerControl::addRequiredSignal(const std::string& signalName,
                                      int boardIndex, GPIODirection direction,
-                                     std::function<void(bool)> handler)
+                                     std::function<void(bool)> handler,
+                                     bool optional)
 {
-    if (boardIndex == 0)
-    {
-        requiredBoard0Signals.push_back(signalName);
-    }
-    else if (boardIndex == 1)
-    {
-        requiredBoard1Signals.push_back(signalName);
-    }
-    else
+    if (boardIndex != 0 && boardIndex != 1)
     {
         lg2::error("Invalid board index {INDEX} for signal {SIGNAL}", "INDEX",
                    boardIndex, "SIGNAL", signalName);
@@ -3251,7 +3244,27 @@ void PowerControl::addRequiredSignal(const std::string& signalName,
 
     if (handler)
     {
-        registerGPIOHandler(signalName, direction, handler);
+        if (!registerGPIOHandler(signalName, direction, handler))
+        {
+            if (optional)
+            {
+                lg2::warning(
+                    "Optional signal '{SIGNAL}' unavailable; continuing without it",
+                    "SIGNAL", signalName);
+                return;
+            }
+            throw std::runtime_error(
+                "Failed to register GPIO events for '" + signalName + "'");
+        }
+    }
+
+    if (boardIndex == 0)
+    {
+        requiredBoard0Signals.push_back(signalName);
+    }
+    else
+    {
+        requiredBoard1Signals.push_back(signalName);
     }
 }
 
@@ -3382,7 +3395,7 @@ void PowerControl::validateTimerConfigs()
     lg2::info("PowerControl timer configuration validation complete");
 }
 
-void PowerControl::registerGPIOHandler(const std::string& signalName,
+bool PowerControl::registerGPIOHandler(const std::string& signalName,
                                        GPIODirection direction,
                                        std::function<void(bool)> handler)
 {
@@ -3396,7 +3409,7 @@ void PowerControl::registerGPIOHandler(const std::string& signalName,
         lg2::error(
             "GPIO signal '{SIGNAL}' not found in config, handler not registered",
             "SIGNAL", signalName);
-        return;
+        return false;
     }
 
     // Set the direction of the GPIO
@@ -3415,8 +3428,8 @@ void PowerControl::registerGPIOHandler(const std::string& signalName,
             lg2::error(
                 "Signal '{SIGNAL}' is configured for input events but inputEventConfig is not set",
                 "SIGNAL", signalName);
-            throw std::runtime_error(
-                "Signal '" + signalName + "' missing inputEventConfig");
+            it->second->gpioHandler = nullptr;
+            return false;
         }
 
         auto& inputConfig = it->second->inputEventConfig.value();
@@ -3429,8 +3442,8 @@ void PowerControl::registerGPIOHandler(const std::string& signalName,
         {
             lg2::error("Failed to register input events for '{SIGNAL}'",
                        "SIGNAL", signalName);
-            throw std::runtime_error(
-                "Failed to register input events for '" + signalName + "'");
+            it->second->gpioHandler = nullptr;
+            return false;
         }
 
         lg2::info("Successfully registered input event handler for '{SIGNAL}'",
@@ -3443,13 +3456,15 @@ void PowerControl::registerGPIOHandler(const std::string& signalName,
         {
             lg2::error("Failed to register GPIO events for '{SIGNAL}'",
                        "SIGNAL", signalName);
-            throw std::runtime_error(
-                "Failed to register GPIO events for '" + signalName + "'");
+            it->second->gpioHandler = nullptr;
+            return false;
         }
 
         lg2::info("Successfully registered GPIO handler for '{SIGNAL}'",
                   "SIGNAL", signalName);
     }
+
+    return true;
 }
 
 // ===========================================================================
