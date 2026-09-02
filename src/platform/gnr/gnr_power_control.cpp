@@ -112,25 +112,38 @@ std::optional<uint8_t> GNRPowerControl::loadMctpEid()
 }
 
 void GNRPowerControl::sendVdm(std::span<const uint8_t> packet,
-                              const std::string& what)
+                              const std::string& what,
+                              std::function<void(MctpResult)> onComplete)
 {
     if (!mctpEid)
     {
         lg2::error("GNR: no mctp_eid configured, not sending {WHAT} VDM",
                    "WHAT", what);
+        if (onComplete)
+        {
+            onComplete(std::unexpected(
+                std::make_error_code(std::errc::no_such_device_or_address)));
+        }
         return;
     }
 
     lg2::info("GNR: sending {WHAT} VDM to eid {EID} ({LEN} bytes)", "WHAT",
               what, "EID", *mctpEid, "LEN", packet.size());
     mctpSendAsync(ioContext, *mctpEid, 0x7f, packet,
-                  [what](MctpResult result) {
+                  [what, onComplete = std::move(onComplete)](
+                      MctpResult result) {
         if (!result)
             lg2::error("GNR: {WHAT} VDM failed: {ERR}", "WHAT", what, "ERR",
                        result.error().message());
         else
             lg2::info("GNR: {WHAT} VDM acknowledged ({LEN} bytes)", "WHAT",
                       what, "LEN", result->size());
+        // mctpSendAsync always reports, either a response or its own 1s
+        // timeout, so the power-on sequence cannot stall waiting here.
+        if (onComplete)
+        {
+            onComplete(result);
+        }
     });
 }
 
@@ -151,7 +164,8 @@ GNRPowerControl::GNRPowerControl(
     const std::string& configFilePath, const std::string& node,
     PersistentState& appState) :
     PowerControl(ioContext, conn, node, appState, configFilePath),
-    gnrPowerOnTimer(ioContext), sbiosResetSettleTimer(ioContext)
+    gnrPowerOnTimer(ioContext), sbiosResetSettleTimer(ioContext),
+    g3SoftMinAssertTimer(ioContext)
 {
     using namespace std::chrono_literals;
     // Only require PowerOk and PowerOut; G3Soft GPIOs are optional in JSON
@@ -194,8 +208,8 @@ GNRPowerControl::GNRPowerControl(
     validateTimerConfigs();
     setDefaultValues();
 
-    // The G3Soft sequence brackets its GPIO steps with erot notifications, so
-    // a board wired for it must also declare where those VDMs go.
+    // The G3Soft sequence opens with an erot notification, so a board wired
+    // for it must also declare where that VDM goes.
     mctpEid = loadMctpEid();
     if (hasG3SoftSignals() && !mctpEid)
     {
@@ -219,6 +233,8 @@ GNRPowerControl::GNRPowerControl(
     g3SoftPowerButtonDelay =
         getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
     pexResetPulse = getTimeoutWithDefault("PexResetPulseMs", 10ms);
+    g3SoftMinAssertTimeout =
+        getTimeoutWithDefault("G3SoftMinAssertMs", 500ms);
 
     // Anchor the erot log to wall clock once, as soon as we know where to send
     // it. The send is queued on ioContext and completes after run() starts.
@@ -388,9 +404,6 @@ void GNRPowerControl::handleTransitionToCycleOff(Event event)
     {
         case Event::powerOKDeAssert:
             setPowerState(PowerState::cycleOff);
-            // A cycle enters G3Soft just like a power off does, so the erot
-            // gets the same NVRAM/flash handling before the AP comes back and
-            // powerOn()'s G3Soft exit has a matching entry.
             completePowerDown();
             startTimer("PowerCycleMs", powerCycleTimer,
                        Event::powerCycleTimerExpired);
@@ -474,48 +487,18 @@ void GNRPowerControl::sendTimestampVdm()
     sendVdm(packet, "add-external-timestamp");
 }
 
-void GNRPowerControl::sendPowerOffVdm()
-{
-    // Tell the erot the AP is entering G3Soft so it asserts AP_RESET#, copies
-    // NVRAM and revalidates flash before releasing the AP again.
-    std::array<uint8_t, sizeof(RestartNotificationV2)> packet;
-    packVdm(RestartNotificationV2{.apState = apStateG3Soft}, packet);
-    sendVdm(packet, "power-off");
-}
-
 void GNRPowerControl::completePowerDown()
 {
     // We are committed to the power down, so nothing is left to reconsider.
+    // The G3Soft GPIOs and the erot notification are driven by the power-on
+    // flow instead, so there is nothing to do to the hardware here.
     ignoreNextPowerOkDeAssert = false;
     sbiosResetSettleTimer.cancel();
-
-    // Notify the erot that we are powering down, then drive the system into G3.
-    sendPowerOffVdm();
-
-    auto g3SoftEn = getSignal("G3SoftEn");
-    if (g3SoftEn)
-    {
-        lg2::info("GNR power-off: asserting G3SoftEn");
-        if (!setGPIOOutput(g3SoftEn, g3SoftEn->polarity))
-        {
-            lg2::error("GNR power-off: failed to assert G3SoftEn");
-        }
-    }
-
-    auto pexResetN = getSignal("PexResetN");
-    if (pexResetN)
-    {
-        lg2::info("GNR power-off: asserting PexResetN");
-        if (!setGPIOOutput(pexResetN, pexResetN->polarity))
-        {
-            lg2::error("GNR power-off: failed to assert PexResetN");
-        }
-    }
 }
 
 void GNRPowerControl::startPowerButtonDelay()
 {
-    lg2::info("GNR power-on: step 4 - waiting {MS}ms before power button",
+    lg2::info("GNR power-on: step 5 - waiting {MS}ms before power button",
               "MS", g3SoftPowerButtonDelay.count());
     gnrPowerOnPhase = GNRPowerOnPhase::WaitingPowerButtonDelay;
     gnrPowerOnTimer.expires_after(g3SoftPowerButtonDelay);
@@ -594,14 +577,60 @@ void GNRPowerControl::startGNRPowerOnSequence()
         return;
     }
 
-    lg2::info("GNR power-on: step 1 - de-asserting G3SoftEn");
-    if (!setGPIOOutput(g3SoftEn, !g3SoftEn->polarity))
+    lg2::info("GNR power-on: step 1 - asserting G3SoftEn and PexResetN");
+    if (!setGPIOOutput(g3SoftEn, g3SoftEn->polarity))
     {
-        lg2::error("GNR power-on: failed to de-assert G3SoftEn");
+        lg2::error("GNR power-on: failed to assert G3SoftEn");
+        return;
+    }
+    if (!setGPIOOutput(pexResetN, pexResetN->polarity))
+    {
+        lg2::error("GNR power-on: failed to assert PexResetN");
+        setGPIOOutput(g3SoftEn, !g3SoftEn->polarity);
         return;
     }
 
-    lg2::info("GNR power-on: step 2 - polling Ap0ResetN until de-asserted");
+    // Tell the erot the AP is entering G3Soft so it asserts AP_RESET#, copies
+    // NVRAM and revalidates flash. G3SoftEn is released after
+    // G3SoftMinAssertMs regardless of the erot's reply: the board's power
+    // sequencer needs a stable assert width to start driving Ap0ResetN, and
+    // that requirement is independent of whether/when the erot acks.
+    lg2::info("GNR power-on: step 2 - notifying erot of G3Soft entry");
+    gnrPowerOnPhase = GNRPowerOnPhase::WaitingG3SoftMinAssert;
+
+    std::array<uint8_t, sizeof(RestartNotificationV2)> packet;
+    packVdm(RestartNotificationV2{.apState = apStateG3Soft}, packet);
+    sendVdm(packet, "g3soft-entry");
+
+    g3SoftMinAssertTimer.expires_after(g3SoftMinAssertTimeout);
+    g3SoftMinAssertTimer.async_wait([this](const boost::system::error_code& ec) {
+        if (ec || gnrPowerOnPhase != GNRPowerOnPhase::WaitingG3SoftMinAssert)
+        {
+            return;
+        }
+        releaseG3SoftAndPollAp0();
+    });
+}
+
+void GNRPowerControl::releaseG3SoftAndPollAp0()
+{
+    auto g3SoftEn = getSignal("G3SoftEn");
+    if (!g3SoftEn)
+    {
+        lg2::error("GNR G3Soft: G3SoftEn missing");
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return;
+    }
+
+    lg2::info("GNR power-on: step 3 - de-asserting G3SoftEn");
+    if (!setGPIOOutput(g3SoftEn, !g3SoftEn->polarity))
+    {
+        lg2::error("GNR power-on: failed to de-assert G3SoftEn");
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return;
+    }
+
+    lg2::info("GNR power-on: step 4 - polling Ap0ResetN until de-asserted");
     gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetN;
     gnrPowerOnStartTime = std::chrono::steady_clock::now();
     gnrPowerOnTimer.expires_after(std::min(
@@ -642,14 +671,14 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
             if (val == 1)
             {
                 lg2::info(
-                    "GNR G3Soft: step 2 - Ap0ResetN reached HIGH after {MS}ms",
+                    "GNR G3Soft: step 4 - Ap0ResetN reached HIGH after {MS}ms",
                     "MS",
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         elapsed)
                         .count());
                 auto pexResetN = getSignal("PexResetN");
                 lg2::info(
-                    "GNR G3Soft: step 3 - pulsing PexResetN LOW for {MS}ms",
+                    "GNR G3Soft: step 5 - pulsing PexResetN LOW for {MS}ms",
                     "MS", pexResetPulse.count());
                 if (!setGPIOOutput(pexResetN, 0))
                 {
@@ -695,7 +724,7 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
             return;
         }
         case GNRPowerOnPhase::WaitingPowerButtonDelay:
-            lg2::info("GNR power-on: step 5 - pulsing power button");
+            lg2::info("GNR power-on: step 6 - pulsing power button");
             gnrPowerOnPhase = GNRPowerOnPhase::Idle;
             PowerControl::powerOn();
             return;
