@@ -50,7 +50,7 @@ option(
 option(
     'platform-power-cycle-service',
     type: 'feature',
-    value: 'auto',
+    value: 'disabled',
     description: 'Build the NVIDIA platform power-cycle D-Bus service',
 )
 option(
