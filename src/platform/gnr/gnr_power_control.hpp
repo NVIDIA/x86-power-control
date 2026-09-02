@@ -5,12 +5,14 @@
 
 #pragma once
 
+#include "../../mctp_send.hpp"
 #include "../../power_control_base.hpp"
 
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -22,6 +24,7 @@ namespace power_control
 enum class GNRPowerOnPhase
 {
     Idle,
+    WaitingG3SoftMinAssert, // G3SoftEn asserted, waiting for G3SoftMinAssertMs
     WaitingAp0ResetN,       // polling Ap0ResetN until HIGH or timeout
     WaitingPexResetPulse,   // PexResetN LOW held for PexResetPulseMs
     WaitingPowerButtonDelay // delay after PEX reset before pressing power
@@ -85,7 +88,6 @@ class GNRPowerControl : public PowerControl
     void handleCycleOff(Event event) override;
 
   private:
-    void sendPowerOffVdm();
     /**
      * @brief Consume the one-shot ignore for the SBIOS reset
      *
@@ -100,13 +102,22 @@ class GNRPowerControl : public PowerControl
     /** Give the erot log parser a wall-clock anchor for its boot-relative
      * timestamps. */
     void sendTimestampVdm();
-    /** Notify the erot, assert G3SoftEn and drive PexResetN low. */
+    /** Drop the SBIOS-reset backstop now that the power down is committed. */
     void completePowerDown();
     /** PexResetN released; settle for G3SoftPowerButtonDelayMs, then pulse. */
     void startPowerButtonDelay();
     int readGPIOInputValue(std::shared_ptr<ConfigData> config);
-    /** Start the async G3Soft sequence (no blocking). */
+    /**
+     * @brief Start the async G3Soft sequence (no blocking)
+     *
+     * Asserts G3SoftEn and PexResetN and notifies the erot that the AP is
+     * entering G3Soft; the rest of the sequence resumes once G3SoftMinAssertMs
+     * has elapsed.
+     */
     void startGNRPowerOnSequence();
+    /** G3SoftMinAssertMs elapsed: release G3SoftEn and start polling
+     * Ap0ResetN. */
+    void releaseG3SoftAndPollAp0();
     /** Timer callback: advance the power-on state machine. */
     void onGNRPowerOnTimer(const boost::system::error_code& ec);
     /** Returns true if G3Soft GPIOs are configured and PowerOk is deasserted.
@@ -124,8 +135,14 @@ class GNRPowerControl : public PowerControl
      *         the assignable EID range
      */
     std::optional<uint8_t> loadMctpEid();
-    /** Send an erot notification VDM; no-op when no EID is configured. */
-    void sendVdm(std::span<const uint8_t> packet, const std::string& what);
+    /**
+     * @brief Send an erot notification VDM
+     *
+     * onComplete, when given, is always invoked exactly once: with the erot's
+     * reply, or with an error when the send failed or no EID is configured.
+     */
+    void sendVdm(std::span<const uint8_t> packet, const std::string& what,
+                 std::function<void(MctpResult)> onComplete = {});
 
     static constexpr int ap0PollIntervalMs = 100;
 
@@ -144,6 +161,11 @@ class GNRPowerControl : public PowerControl
     std::chrono::milliseconds g3SoftPowerButtonDelay;
     std::chrono::milliseconds pexResetPulse;
     std::chrono::milliseconds g3SoftAp0Timeout;
+    /** Minimum time G3SoftEn must stay asserted before release, independent
+     * of the erot's G3Soft-entry VDM reply; the board's power sequencer needs
+     * a stable assert width to start driving Ap0ResetN. */
+    std::chrono::milliseconds g3SoftMinAssertTimeout;
+    boost::asio::steady_timer g3SoftMinAssertTimer;
     /** Destination EID for erot VDMs; required when G3Soft is configured. */
     std::optional<uint8_t> mctpEid;
 };

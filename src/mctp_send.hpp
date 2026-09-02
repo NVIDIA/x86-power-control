@@ -4,6 +4,11 @@
 
 #pragma once
 
+// <net/if.h> must come before <linux/mctp.h>: the latter drags in
+// <linux/if.h>, whose IFF_*/struct ifreq definitions clash with glibc's
+// <net/if.h> if that hasn't been included yet.
+#include <net/if.h>
+
 #include <linux/mctp.h>
 #include <sys/socket.h>
 #include <unistd.h>
