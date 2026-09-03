@@ -24,9 +24,10 @@ namespace power_control
 enum class GNRPowerOnPhase
 {
     Idle,
-    WaitingG3SoftMinAssert, // G3SoftEn asserted, waiting for G3SoftMinAssertMs
-    WaitingAp0ResetN,       // polling Ap0ResetN until HIGH or timeout
-    WaitingPexResetPulse,   // PexResetN LOW held for PexResetPulseMs
+    WaitingG3SoftMinAssert,   // G3SoftEn asserted, waiting for G3SoftMinAssertMs
+    WaitingAp0ResetNAssert,   // waiting for Ap0ResetN to go LOW (asserted)
+    WaitingAp0ResetNDeassert, // assert seen, waiting for Ap0ResetN to go HIGH
+    WaitingPexResetPulse,     // PexResetN LOW held for PexResetPulseMs
     WaitingPowerButtonDelay // delay after PEX reset before pressing power
                             // button
 };
@@ -115,9 +116,33 @@ class GNRPowerControl : public PowerControl
      * has elapsed.
      */
     void startGNRPowerOnSequence();
-    /** G3SoftMinAssertMs elapsed: release G3SoftEn and start polling
-     * Ap0ResetN. */
+    /** G3SoftMinAssertMs elapsed: release G3SoftEn and start polling Ap0ResetN
+     * for the assert, then the de-assert. */
     void releaseG3SoftAndPollAp0();
+    /**
+     * @brief Sample Ap0ResetN and advance the step 4 wait
+     *
+     * The line has no edge-event (IRQ) support, so it is sampled every
+     * Ap0ResetPollIntervalMs. The assert must be observed before the
+     * de-asserted level is accepted: otherwise a sample taken before the
+     * sequencer drives AP_RESET# reads the idle level and is mistaken for a
+     * completed reset.
+     *
+     * @param elapsed time since the step 4 wait started
+     * @return true if the sequence has moved on and the caller must not
+     *         re-arm the poll timer
+     */
+    bool pollAp0Reset(std::chrono::milliseconds elapsed);
+    /** Read Ap0ResetN and compare against its configured polarity.
+     *
+     * @return 1 asserted, 0 de-asserted, -1 read failed */
+    int readAp0ResetAsserted();
+    /** Give back the Ap0ResetN line held for the step 4 poll. */
+    void releaseAp0ResetLine();
+    /** Ap0ResetN de-asserted: drive PexResetN LOW and arm the pulse timer.
+     *
+     * @return false if the GPIO write failed (sequence aborted) */
+    bool startPexResetPulse();
     /** Timer callback: advance the power-on state machine. */
     void onGNRPowerOnTimer(const boost::system::error_code& ec);
     /** Returns true if G3Soft GPIOs are configured and PowerOk is deasserted.
@@ -144,8 +169,6 @@ class GNRPowerControl : public PowerControl
     void sendVdm(std::span<const uint8_t> packet, const std::string& what,
                  std::function<void(MctpResult)> onComplete = {});
 
-    static constexpr int ap0PollIntervalMs = 100;
-
     std::chrono::milliseconds getTimeoutWithDefault(
         const std::string& key, std::chrono::milliseconds default_t);
 
@@ -158,6 +181,9 @@ class GNRPowerControl : public PowerControl
     boost::asio::steady_timer sbiosResetSettleTimer;
     std::chrono::milliseconds sbiosResetSettleTimeout;
     std::chrono::steady_clock::time_point gnrPowerOnStartTime{};
+    /** Sample period for the step 4 Ap0ResetN wait; short enough to catch the
+     * assert, which can be much briefer than the whole reset. */
+    std::chrono::milliseconds ap0PollInterval;
     std::chrono::milliseconds g3SoftPowerButtonDelay;
     std::chrono::milliseconds pexResetPulse;
     std::chrono::milliseconds g3SoftAp0Timeout;

@@ -230,6 +230,10 @@ GNRPowerControl::GNRPowerControl(
     ignoreNextPowerOkDeAssert = hasG3SoftSignals() && !isSystemPowerOff();
     sbiosResetSettleTimeout = getTimeoutWithDefault("SbiosResetSettleMs", 10s);
     g3SoftAp0Timeout = getTimeoutWithDefault("G3SoftAp0TimeoutMs", 15s);
+    // Ap0ResetN has no edge-event support, so step 4 samples it. The assert
+    // can be far shorter than the reset itself, hence a much tighter interval
+    // than a level wait would need.
+    ap0PollInterval = getTimeoutWithDefault("Ap0ResetPollIntervalMs", 10ms);
     g3SoftPowerButtonDelay =
         getTimeoutWithDefault("G3SoftPowerButtonDelayMs", 10s);
     pexResetPulse = getTimeoutWithDefault("PexResetPulseMs", 10ms);
@@ -612,6 +616,32 @@ void GNRPowerControl::startGNRPowerOnSequence()
     });
 }
 
+void GNRPowerControl::releaseAp0ResetLine()
+{
+    auto ap0ResetN = getSignal("Ap0ResetN");
+    if (ap0ResetN && ap0ResetN->gpioLine)
+    {
+        clearGPIOLine(*ap0ResetN);
+    }
+}
+
+int GNRPowerControl::readAp0ResetAsserted()
+{
+    auto ap0ResetN = getSignal("Ap0ResetN");
+    if (!ap0ResetN)
+    {
+        return -1;
+    }
+    int level = readGPIOInputValue(ap0ResetN);
+    if (level < 0)
+    {
+        return -1;
+    }
+    // Same convention as the base class handlers: the JSON polarity says which
+    // raw level means asserted (ActiveLow -> LOW).
+    return (static_cast<bool>(level) == ap0ResetN->polarity) ? 1 : 0;
+}
+
 void GNRPowerControl::releaseG3SoftAndPollAp0()
 {
     auto g3SoftEn = getSignal("G3SoftEn");
@@ -630,13 +660,120 @@ void GNRPowerControl::releaseG3SoftAndPollAp0()
         return;
     }
 
-    lg2::info("GNR power-on: step 4 - polling Ap0ResetN until de-asserted");
-    gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetN;
+    // Wait for the assert first and only then for the de-assert. Watching for
+    // the de-asserted level alone lets a sample taken before the sequencer
+    // drives Ap0ResetN read the idle level and pass step 4 without a reset
+    // ever having happened.
+    lg2::info(
+        "GNR power-on: step 4 - polling Ap0ResetN every {POLL}ms for the assert, then the de-assert (up to {MS}ms)",
+        "POLL", ap0PollInterval.count(), "MS", g3SoftAp0Timeout.count());
+    gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetNAssert;
     gnrPowerOnStartTime = std::chrono::steady_clock::now();
-    gnrPowerOnTimer.expires_after(std::min(
-        std::chrono::milliseconds(ap0PollIntervalMs), g3SoftAp0Timeout));
+
+    // Hold the line for the whole of step 4 so each sample is a plain read
+    // rather than a request/release pair. readGPIOInputValue() falls back to
+    // per-sample requests if this fails, so the failure is not fatal.
+    auto ap0ResetN = getSignal("Ap0ResetN");
+    if (ap0ResetN && !ap0ResetN->gpioLine)
+    {
+        requestPolledGPIOLine(*ap0ResetN);
+    }
+
+    // The sequencer may already be holding it asserted (it reacts to the
+    // G3SoftEn release, and on a repeat cycle the line can still be low).
+    if (readAp0ResetAsserted() == 1)
+    {
+        lg2::info("GNR G3Soft: step 4 - Ap0ResetN already asserted");
+        gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetNDeassert;
+    }
+
+    gnrPowerOnTimer.expires_after(std::min(ap0PollInterval, g3SoftAp0Timeout));
     gnrPowerOnTimer.async_wait(
         std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
+}
+
+bool GNRPowerControl::pollAp0Reset(std::chrono::milliseconds elapsed)
+{
+    int asserted = readAp0ResetAsserted();
+
+    if (gnrPowerOnPhase == GNRPowerOnPhase::WaitingAp0ResetNAssert)
+    {
+        if (asserted == 1)
+        {
+            lg2::info("GNR G3Soft: step 4 - Ap0ResetN asserted after {MS}ms",
+                      "MS", elapsed.count());
+            gnrPowerOnPhase = GNRPowerOnPhase::WaitingAp0ResetNDeassert;
+        }
+    }
+    else if (asserted == 0)
+    {
+        lg2::info("GNR G3Soft: step 4 - Ap0ResetN de-asserted after {MS}ms",
+                  "MS", elapsed.count());
+        startPexResetPulse();
+        return true;
+    }
+
+    if (elapsed < g3SoftAp0Timeout)
+    {
+        return false;
+    }
+
+    if (gnrPowerOnPhase == GNRPowerOnPhase::WaitingAp0ResetNDeassert)
+    {
+        lg2::error(
+            "GNR G3Soft: Ap0ResetN asserted but did not de-assert within {MS}ms",
+            "MS", g3SoftAp0Timeout.count());
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return true;
+    }
+
+    if (asserted < 0)
+    {
+        lg2::error("GNR G3Soft: could not read Ap0ResetN within {MS}ms", "MS",
+                   g3SoftAp0Timeout.count());
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return true;
+    }
+
+    // Never caught the line asserted: either the reset really did not happen,
+    // or it came and went between two samples. Carry on rather than leaving
+    // the host off, but say so — a run that logs this and then fails to boot
+    // points at the poll interval.
+    lg2::warning(
+        "GNR G3Soft: Ap0ResetN never sampled asserted within {MS}ms; the assert may have been shorter than the {POLL}ms poll. Continuing the sequence",
+        "MS", g3SoftAp0Timeout.count(), "POLL", ap0PollInterval.count());
+    startPexResetPulse();
+    return true;
+}
+
+bool GNRPowerControl::startPexResetPulse()
+{
+    auto pexResetN = getSignal("PexResetN");
+    if (!pexResetN)
+    {
+        lg2::error("GNR G3Soft: PexResetN missing");
+        gnrPowerOnTimer.cancel();
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return false;
+    }
+
+    lg2::info("GNR G3Soft: step 5 - asserting PexResetN for {MS}ms", "MS",
+              pexResetPulse.count());
+    if (!setGPIOOutput(pexResetN, pexResetN->polarity))
+    {
+        lg2::error("GNR G3Soft: failed to assert PexResetN");
+        gnrPowerOnTimer.cancel();
+        gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+        return false;
+    }
+
+    gnrPowerOnPhase = GNRPowerOnPhase::WaitingPexResetPulse;
+    // Re-arming replaces the step 4 timeout wait, whose handler then runs with
+    // operation_aborted and bails out.
+    gnrPowerOnTimer.expires_after(pexResetPulse);
+    gnrPowerOnTimer.async_wait(
+        std::bind_front(&GNRPowerControl::onGNRPowerOnTimer, this));
+    return true;
 }
 
 void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
@@ -661,58 +798,30 @@ void GNRPowerControl::onGNRPowerOnTimer(const boost::system::error_code& ec)
 
     switch (gnrPowerOnPhase)
     {
-        case GNRPowerOnPhase::WaitingAp0ResetN:
+        case GNRPowerOnPhase::WaitingAp0ResetNAssert:
+        case GNRPowerOnPhase::WaitingAp0ResetNDeassert:
         {
-            auto ap0ResetN = getSignal("Ap0ResetN");
-
-            auto elapsed = std::chrono::steady_clock::now() -
-                           gnrPowerOnStartTime;
-            int val = readGPIOInputValue(ap0ResetN);
-            if (val == 1)
+            const auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - gnrPowerOnStartTime);
+            if (pollAp0Reset(elapsed))
             {
-                lg2::info(
-                    "GNR G3Soft: step 4 - Ap0ResetN reached HIGH after {MS}ms",
-                    "MS",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        elapsed)
-                        .count());
-                auto pexResetN = getSignal("PexResetN");
-                lg2::info(
-                    "GNR G3Soft: step 5 - pulsing PexResetN LOW for {MS}ms",
-                    "MS", pexResetPulse.count());
-                if (!setGPIOOutput(pexResetN, 0))
-                {
-                    lg2::error("GNR G3Soft: failed to set PexResetN LOW");
-                    gnrPowerOnPhase = GNRPowerOnPhase::Idle;
-                    return;
-                }
-                gnrPowerOnPhase = GNRPowerOnPhase::WaitingPexResetPulse;
-                gnrPowerOnTimer.expires_after(pexResetPulse);
-            }
-            else if (elapsed >= g3SoftAp0Timeout)
-            {
-                lg2::error("GNR G3Soft: Ap0ResetN did not assert within {MS}ms",
-                           "MS", g3SoftAp0Timeout.count());
-                gnrPowerOnPhase = GNRPowerOnPhase::Idle;
+                // Step 4 is done (or aborted); whoever finished it owns the
+                // timer now. Nothing samples Ap0ResetN from here on, so give
+                // the line back.
+                releaseAp0ResetLine();
                 return;
             }
-            else
-            {
-                const auto remaining =
-                    g3SoftAp0Timeout -
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        elapsed);
-                gnrPowerOnTimer.expires_after(std::min(
-                    std::chrono::milliseconds(ap0PollIntervalMs), remaining));
-            }
+            gnrPowerOnTimer.expires_after(
+                std::min(ap0PollInterval, g3SoftAp0Timeout - elapsed));
             break;
         }
         case GNRPowerOnPhase::WaitingPexResetPulse:
         {
             auto pexResetN = getSignal("PexResetN");
-            if (!setGPIOOutput(pexResetN, 1))
+            if (!pexResetN || !setGPIOOutput(pexResetN, !pexResetN->polarity))
             {
-                lg2::error("GNR G3Soft: failed to set PexResetN HIGH");
+                lg2::error("GNR G3Soft: failed to de-assert PexResetN");
                 gnrPowerOnPhase = GNRPowerOnPhase::Idle;
                 return;
             }
