@@ -19,6 +19,7 @@ VC256PowerControl::VC256PowerControl(
     VRPowerControl(ioContext, conn, configFilePath, node, appState)
 {
     addRequiredResource("Board0IoxPath", ResourceType::IOXPath);
+    addRequiredResource("BaseboardIOX", ResourceType::IOXPath);
 
     // VRPowerControl already registers the common Board 0 VR signals:
     //   Board0RunPowerEnable, Board0RunPowerPG, Board0PreSystemReset,
@@ -29,6 +30,9 @@ VC256PowerControl::VC256PowerControl(
     // IOX hosting the power-sequencing GPIOs.
     addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
                       [this](bool state) { this->stbyPwrOkHandler(state); });
+
+    // HostReadyPowerEnable is VC-256-specific, registered here.
+    addRequiredSignal("HostReadyPowerEnable", 0, GPIODirection::OUT);
 
     PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
@@ -98,6 +102,52 @@ void VC256PowerControl::initiatePDBPowerOff()
         "HPM Board 0 Run Power Good de-asserted. No PDB - dispatching shutdown action.");
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
     applyShutdownAction();
+}
+
+// ============================================================================
+// Platform peripheral hooks
+// ============================================================================
+
+void VC256PowerControl::assertPlatformPeripherals()
+{
+    auto hostReadyPowerEnable = getSignal("HostReadyPowerEnable");
+    if (!hostReadyPowerEnable)
+    {
+        return;
+    }
+    setGPIOOutput(hostReadyPowerEnable, hostReadyPowerEnable->polarity);
+}
+
+void VC256PowerControl::deassertPlatformPeripherals()
+{
+    auto hostReadyPowerEnable = getSignal("HostReadyPowerEnable");
+    if (!hostReadyPowerEnable)
+    {
+        return;
+    }
+    setGPIOOutput(hostReadyPowerEnable, !hostReadyPowerEnable->polarity);
+}
+
+void VC256PowerControl::setDefaultValues()
+{
+    lg2::info(
+        "Defining VC-256 platform GPIOs asserted and de-asserted states based on host state ON and OFF");
+
+    auto hostReadyPowerEnable = getSignal("HostReadyPowerEnable");
+    if (!hostReadyPowerEnable)
+    {
+        return;
+    }
+
+    // Host Ready Power Enable: ON=Asserted, OFF=DeAsserted
+    hostReadyPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    hostReadyPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
+
+    // Call parent to set common VR/HPM defaults
+    VRPowerControl::setDefaultValues();
+
+    lg2::info(
+        "VC-256 GPIOs asserted and de-asserted states defined successfully");
 }
 
 // ============================================================================
