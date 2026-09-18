@@ -34,6 +34,14 @@ VC256PowerControl::VC256PowerControl(
     // HostReadyPowerEnable is VC-256-specific, registered here.
     addRequiredSignal("HostReadyPowerEnable", 0, GPIODirection::OUT);
 
+    // PDBMainPowerOk/PDBMainPowerEnable are the HSC (Hot Swap Controller)
+    // equivalent of NVL72's PDB Main Power signals: P54V_HSC_PG-I / -EN-O.
+    addRequiredSignal("PDBMainPowerOk", 0, GPIODirection::IN,
+                      [this](bool state) {
+                          this->pdbMainPowerOkHandler(state);
+                      });
+    addRequiredSignal("PDBMainPowerEnable", 0, GPIODirection::OUT);
+
     PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
     validateTimerConfigs();
@@ -57,13 +65,22 @@ bool VC256PowerControl::isSystemPowerOff()
         return false;
     }
 
-    return board0RunPowerPG->gpioLine.get_value() ==
-           !board0RunPowerPG->polarity;
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
+    {
+        lg2::error("CRITICAL: PDBMainPowerOk not available");
+        return false;
+    }
+
+    return (
+        board0RunPowerPG->gpioLine.get_value() == !board0RunPowerPG->polarity &&
+        pdbMainPowerOk->gpioLine.get_value() == !pdbMainPowerOk->polarity);
 }
 
 void VC256PowerControl::handlePowerOnRequest()
 {
-    lg2::info("Power On Request received. Commencing HPM run-power sequence.");
+    lg2::info(
+        "Power On Request received. Setting GPIOs to default state for host state Off and Commencing Host Main Power On sequence.");
 
     auto board0RunPowerPG = getSignal("Board0RunPowerPG");
     if (!board0RunPowerPG || !board0RunPowerPG->gpioLine)
@@ -73,10 +90,26 @@ void VC256PowerControl::handlePowerOnRequest()
         return;
     }
 
-    if (board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity)
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
+    {
+        lg2::error("CRITICAL: PDBMainPowerOk not available - cannot power on");
+        return;
+    }
+
+    auto pdbMainPowerEnable = getSignal("PDBMainPowerEnable");
+    if (!pdbMainPowerEnable || !pdbMainPowerEnable->gpioLine)
+    {
+        lg2::error(
+            "CRITICAL: PDBMainPowerEnable not available - cannot power on");
+        return;
+    }
+
+    if (board0RunPowerPG->gpioLine.get_value() == board0RunPowerPG->polarity &&
+        pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity)
     {
         lg2::info(
-            "Board 0 Run Power Good is already asserted. Setting GPIOs for host state ON and transitioning to PowerState::on.");
+            "PDB Main Power and HPM Run Power is already enabled. Setting GPIOs for host state ON and transitioning to PowerState::On");
         setGPIOsForHostStateOn();
         action = PowerAction::NONE;
         setPowerState(PowerState::on);
@@ -84,19 +117,57 @@ void VC256PowerControl::handlePowerOnRequest()
     }
 
     setGPIOsForHostStateOff();
-
     lg2::info(
-        "Commencing HPM run-power sequencing. Transitioning to PowerState::waitForHPMPowerGoodAssert.");
+        "Asserting PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOk");
     action = PowerAction::POWER_ON;
-    transitionToHPMPowerGoodAssertState();
+    setGPIOOutput(pdbMainPowerEnable, pdbMainPowerEnable->polarity);
+    startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+               Event::pdbMainPowerOkWatchdogTimerExpired);
+    setPowerState(PowerState::waitForPDBMainPowerOk);
 }
 
 void VC256PowerControl::initiatePDBPowerOff()
 {
-    lg2::info(
-        "HPM Board 0 Run Power Good de-asserted. No PDB - dispatching shutdown action.");
     cancelTimer("HPM Power Good Watchdog Timer", hpmPowerGoodWatchdogTimer);
-    applyShutdownAction();
+
+    auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+    if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
+    {
+        lg2::error("CRITICAL: PDBMainPowerOk not available");
+        // Fallback: assume worst case and transition to waitForPDBMainPowerOff
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. De-asserting PDB Main Power Enable. "
+            "Starting PDB Main Power OK Watchdog Timer. Transitioning to PowerState::waitForPDBMainPowerOff.");
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+        deassertPDBMainPower();
+        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+                   Event::pdbMainPowerOkWatchdogTimerExpired);
+        return;
+    }
+
+    bool pdbMainPowerOkAsserted =
+        pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity;
+
+    if (pdbMainPowerOkAsserted)
+    {
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. PDBMainPowerOk is currently asserted. "
+            "De-asserting PDB Main Power Enable. Starting PDB Main Power OK Watchdog Timer. "
+            "Transitioning to PowerState::waitForPDBMainPowerOff to wait for de-assertion.");
+        setPowerState(PowerState::waitForPDBMainPowerOff);
+        deassertPDBMainPower();
+        startTimer("PdbMainPowerOkWatchdogMs", pdbMainPowerOkWatchdogTimer,
+                   Event::pdbMainPowerOkWatchdogTimerExpired);
+    }
+    else
+    {
+        // PDB Main Power OK is already de-asserted — bypass wait state
+        lg2::info(
+            "HPM Board 0 Run Power Good de-asserted. PDBMainPowerOk is already de-asserted. "
+            "De-asserting PDB Main Power Enable. Bypassing PowerState::waitForPDBMainPowerOff...");
+        deassertPDBMainPower();
+        completeShutdownAndTransitionToOff(true);
+    }
 }
 
 // ============================================================================
@@ -143,6 +214,94 @@ void VC256PowerControl::setDefaultValues()
 
     lg2::info(
         "VC-256 GPIOs asserted and de-asserted states defined successfully");
+}
+
+// ============================================================================
+// PDB Main Power (HSC) overrides
+// ============================================================================
+
+void VC256PowerControl::pdbMainPowerOkHandler(bool state)
+{
+    lg2::info("PDBMainPowerOk GPIO event: value={VALUE}", "VALUE",
+              static_cast<int>(state));
+
+    auto configPtr = getSignal("PDBMainPowerOk");
+    if (!configPtr)
+    {
+        return;
+    }
+
+    Event powerControlEvent = (state == configPtr->polarity)
+                                  ? Event::pdbMainPowerOkAssert
+                                  : Event::pdbMainPowerOkDeAssert;
+
+    if (checkAndHandlePdbMainPowerOkFault(powerControlEvent))
+    {
+        return; // Fault was handled, exit early
+    }
+
+    this->sendPowerControlEvent(powerControlEvent);
+}
+
+bool VC256PowerControl::checkAndHandlePdbMainPowerOkFault(
+    Event powerControlEvent)
+{
+    if (powerControlEvent == Event::pdbMainPowerOkDeAssert)
+    {
+        if (powerState != PowerState::waitForPDBMainPowerOff)
+        {
+            lg2::error(
+                "POWER FAULT DETECTED: PDBMainPowerOk de-asserted unexpectedly while in power state {STATE}. "
+                "Setting GPIO states to match Host State OFF. Transitioning to Host State OFF.",
+                "STATE", getPowerStateName());
+
+            action = PowerAction::NONE;
+            logResourceEvent(
+                "ResourceErrorsDetected",
+                {"Host0",
+                 "PDB Main Power OK de-asserted unexpectedly while in power state {STATE}.",
+                 "STATE", getPowerStateName()},
+                "xyz.openbmc_project.Logging.Entry.Level.Error");
+            transitionToOffStateWithRunPowerCheck();
+
+            return true;
+        }
+        // else: Expected de-assertion in waitForPDBMainPowerOff state
+    }
+
+    return false;
+}
+
+void VC256PowerControl::deassertPDBMainPower()
+{
+    auto pdbMainPowerEnable = getSignal("PDBMainPowerEnable");
+    if (!pdbMainPowerEnable)
+    {
+        return;
+    }
+
+    setGPIOOutput(pdbMainPowerEnable, !pdbMainPowerEnable->polarity);
+}
+
+void VC256PowerControl::validateTimerConfigs()
+{
+    for (const auto& timerName : vc256RequiredTimeoutValues)
+    {
+        if (TimerMap.find(timerName) == TimerMap.end())
+        {
+            lg2::error(
+                "Required VC-256 timer config '{TIMER}' not found in config",
+                "TIMER", timerName);
+            throw std::runtime_error(
+                "VC256PowerControl: Required timer config missing: " +
+                timerName);
+        }
+    }
+
+    VRPowerControl::validateTimerConfigs();
+
+    lg2::info(
+        "VC-256 timer configuration validation complete - all required timers present");
 }
 
 // ============================================================================
@@ -248,72 +407,6 @@ void VC256PowerControl::markStandbyLost()
         "xyz.openbmc_project.Logging.Entry.Level.Error");
 
     setPowerState(PowerState::off);
-}
-
-// ============================================================================
-// Defensive overrides - PDB states should never be entered on this platform
-// ============================================================================
-
-std::function<void(Event)> VC256PowerControl::getPowerStateHandler()
-{
-    switch (powerState)
-    {
-        case PowerState::waitForPDBMainPowerOk:
-        case PowerState::waitForPDBMainPowerOff:
-            lg2::error(
-                "VC-256: Unexpected PDB power state - platform has no PDB. "
-                "Events in this state will be dropped.");
-            return {};
-
-        default:
-            return VRPowerControl::getPowerStateHandler();
-    }
-}
-
-std::string_view VC256PowerControl::getHostState() const
-{
-    switch (powerState)
-    {
-        case PowerState::waitForPDBMainPowerOk:
-        case PowerState::waitForPDBMainPowerOff:
-            lg2::error(
-                "VC-256: Unexpected PDB power state in getHostState, returning Off");
-            return "xyz.openbmc_project.State.Host.HostState.Off";
-
-        default:
-            break;
-    }
-    return VRPowerControl::getHostState();
-}
-
-std::string_view VC256PowerControl::getChassisState() const
-{
-    switch (powerState)
-    {
-        case PowerState::waitForPDBMainPowerOk:
-        case PowerState::waitForPDBMainPowerOff:
-            lg2::error(
-                "VC-256: Unexpected PDB power state in getChassisState, returning Off");
-            return "xyz.openbmc_project.State.Chassis.PowerState.Off";
-
-        default:
-            break;
-    }
-    return VRPowerControl::getChassisState();
-}
-
-std::string VC256PowerControl::getPowerStateName() const
-{
-    switch (powerState)
-    {
-        case PowerState::waitForPDBMainPowerOk:
-        case PowerState::waitForPDBMainPowerOff:
-            return "Unexpected PDB state (platform has no PDB)";
-
-        default:
-            break;
-    }
-    return VRPowerControl::getPowerStateName();
 }
 
 } // namespace power_control
