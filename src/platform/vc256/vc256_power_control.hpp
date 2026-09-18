@@ -22,6 +22,11 @@ namespace power_control
  *   - getPowerStateHandler / getHostState / getChassisState /
  *     getPowerStateName: defensive mappings for PDB states this platform
  *     should never enter.
+ *   - assertPlatformPeripherals / deassertPlatformPeripherals: drive
+ *     HostReadyPowerEnable around Board0 Run Power Enable, same mechanism
+ *     as USBPowerEnable on C2/NVL72.
+ *   - setDefaultValues: adds HostReadyPowerEnable host-on/off defaults on
+ *     top of the shared VR/HPM defaults.
  */
 class VC256PowerControl : public VRPowerControl
 {
@@ -44,6 +49,9 @@ class VC256PowerControl : public VRPowerControl
     void initiatePDBPowerOff() override;
     bool canAcceptPowerOnRequest(std::string& reason) override;
     bool shouldIgnoreEvent(const std::string& signalName) override;
+    void assertPlatformPeripherals() override;
+    void deassertPlatformPeripherals() override;
+    void setDefaultValues() override;
 
   private:
     void stbyPwrOkHandler(bool state);
