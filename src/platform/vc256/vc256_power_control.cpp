@@ -205,9 +205,19 @@ void VC256PowerControl::setDefaultValues()
         return;
     }
 
+    auto pdbMainPowerEnable = getSignal("PDBMainPowerEnable");
+    if (!pdbMainPowerEnable)
+    {
+        return;
+    }
+
     // Host Ready Power Enable: ON=Asserted, OFF=DeAsserted
     hostReadyPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
     hostReadyPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
+
+    // PDB Main Power Enable: ON=Asserted, OFF=DeAsserted
+    pdbMainPowerEnable->defaultStateHostStateOn = DefaultState::Asserted;
+    pdbMainPowerEnable->defaultStateHostStateOff = DefaultState::DeAsserted;
 
     // Call parent to set common VR/HPM defaults
     VRPowerControl::setDefaultValues();
