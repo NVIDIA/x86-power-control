@@ -11,17 +11,23 @@ namespace power_control
 /**
  * @brief VC-256 Power Control class
  *
- * Single-board VR platform with no PDB and HPM-only run-power sequencing.
- * Inherits all shared VR/HPM sequencing from VRPowerControl. Overrides
- * only the VC-256-specific pieces:
- *   - handlePowerOnRequest: skip PDB stage, go straight to HPM run power.
- *   - isSystemPowerOff: only checks Board0RunPowerPG / MODULE_PWR_GOOD.
- *   - initiatePDBPowerOff: no PDB to tear down, dispatch shutdown action.
+ * Single-board VR platform with a PDB-equivalent HSC (Hot Swap Controller)
+ * stage ahead of HPM run-power sequencing, mirroring NVL72's PDB Main Power
+ * mechanism with the HSC signals in place of NVL72's PDB PSU signals.
+ * Inherits all shared VR/HPM sequencing (including the generic
+ * waitForPDBMainPowerOk / waitForPDBMainPowerOff states) from
+ * VRPowerControl. Overrides only the VC-256-specific pieces:
+ *   - handlePowerOnRequest / initiatePDBPowerOff: assert/de-assert
+ *     PDBMainPowerEnable (P54V_HSC_EN-O) and wait for PDBMainPowerOk
+ *     (P54V_HSC_PG-I), same mechanism as NVL72's PDB Main Power stage.
+ *   - isSystemPowerOff: checks Board0RunPowerPG AND PDBMainPowerOk.
+ *   - pdbMainPowerOkHandler / checkAndHandlePdbMainPowerOkFault: dispatch
+ *     PDBMainPowerOk edge events and treat an unexpected de-assert outside
+ *     waitForPDBMainPowerOff as a power fault, same as NVL72 (without
+ *     NVL72's HSC alert-mask WAR, which is hardware-specific to its HSC
+ *     vendor).
  *   - canAcceptPowerOnRequest: rejects power-on when standby power is lost.
  *   - shouldIgnoreEvent: suppresses IOX events while standby is lost.
- *   - getPowerStateHandler / getHostState / getChassisState /
- *     getPowerStateName: defensive mappings for PDB states this platform
- *     should never enter.
  *   - assertPlatformPeripherals / deassertPlatformPeripherals: drive
  *     HostReadyPowerEnable around Board0 Run Power Enable, same mechanism
  *     as USBPowerEnable on C2/NVL72.
@@ -38,11 +44,6 @@ class VC256PowerControl : public VRPowerControl
 
     ~VC256PowerControl() override = default;
 
-    std::function<void(Event)> getPowerStateHandler() override;
-    std::string_view getHostState() const override;
-    std::string_view getChassisState() const override;
-    std::string getPowerStateName() const override;
-
   protected:
     bool isSystemPowerOff() override;
     void handlePowerOnRequest() override;
@@ -52,6 +53,7 @@ class VC256PowerControl : public VRPowerControl
     void assertPlatformPeripherals() override;
     void deassertPlatformPeripherals() override;
     void setDefaultValues() override;
+    void validateTimerConfigs() override;
 
   private:
     void stbyPwrOkHandler(bool state);
@@ -62,7 +64,33 @@ class VC256PowerControl : public VRPowerControl
     // this service starts produces no event to observe.
     void refreshStandbyLostFromHardware();
 
-    const std::vector<std::string> powerIndicators = {"Board0RunPowerPG"};
+    // PDBMainPowerOk (P54V_HSC_PG-I) edge handler. Dispatches
+    // pdbMainPowerOkAssert/DeAssert events, same as NVL72.
+    void pdbMainPowerOkHandler(bool state);
+
+    // Treats an unexpected PDBMainPowerOk de-assert outside
+    // waitForPDBMainPowerOff as a power fault and forces off. Returns true
+    // if a fault was handled (caller should not dispatch the event further).
+    bool checkAndHandlePdbMainPowerOkFault(Event powerControlEvent);
+
+    // De-assert PDBMainPowerEnable (P54V_HSC_EN-O).
+    void deassertPDBMainPower();
+
+    /**
+     * @brief Power indicators used to determine host on/off from hardware
+     *
+     * Host is ON only if BOTH Board0RunPowerPG AND PDBMainPowerOk are
+     * asserted.
+     */
+    const std::vector<std::string> powerIndicators = {"Board0RunPowerPG",
+                                                      "PDBMainPowerOk"};
+
+    /**
+     * @brief VC-256-specific required timer configuration keys
+     */
+    const std::vector<std::string> vc256RequiredTimeoutValues = {
+        "PdbMainPowerOkWatchdogMs",
+    };
 
     // Set when StbyPwrOk de-asserts; blocks power-on and suppresses IOX
     // events while the standby power domain that feeds the sequencing IOX
