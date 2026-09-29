@@ -7,9 +7,12 @@
 
 #include <sdbusplus/bus.hpp>
 
+#include <iostream>
+
 using BMCState = sdbusplus::server::xyz::openbmc_project::state::BMC;
 
 int main()
+try
 {
     auto bus = sdbusplus::bus::new_default();
 
@@ -32,6 +35,9 @@ int main()
         bus.process_discard();
         bus.wait();
     }
-
-    exit(EXIT_SUCCESS);
+}
+catch (const std::exception& e)
+{
+    std::cerr << "Unhandled exception in main: " << e.what() << "\n";
+    return 1;
 }
