@@ -4,6 +4,7 @@
 #include "config.h"
 
 #include "platform/c2/c2_power_control.hpp"
+#include "platform/cmx/cmx_power_control.hpp"
 #include "platform/gnr/gnr_power_control.hpp"
 #include "platform/etl256/etl256_power_control.hpp"
 #include "platform/nvl72/nvl72_power_control.hpp"
@@ -232,6 +233,11 @@ static std::unique_ptr<PowerControl> createPowerControl(
     else if (platformType == "gnr")
     {
         return std::make_unique<GNRPowerControl>(io, conn, configPath, node,
+                                                 appState);
+    }
+    else if (platformType == "cmx")
+    {
+        return std::make_unique<CMXPowerControl>(io, conn, configPath, node,
                                                  appState);
     }
     else if (platformType == "etl256")
