@@ -3973,13 +3973,14 @@ void PowerControl::beep(const uint8_t& beepPriority)
 
 void PowerControl::currentHostStateMonitor()
 {
-    if (getHostState() == "xyz.openbmc_project.State.Host.HostState.Running")
+    const std::string_view hostState = getHostState();
+    if (hostState == "xyz.openbmc_project.State.Host.HostState.Running")
     {
         pohCounterTimerStart();
         // Clear the restart cause set for the next restart
         clearRestartCause();
     }
-    else
+    else if (hostState == "xyz.openbmc_project.State.Host.HostState.Off")
     {
         cancelTimer("POH Counter Timer", pohCounterTimer);
         // Set the restart cause set for this restart
@@ -4035,7 +4036,8 @@ void PowerControl::currentHostStateMonitor()
                                 "REDFISH_MESSAGE_ID=%s",
                                 "OpenBMC.0.1.DCPowerOn", NULL);
             }
-            else
+            else if (*currentHostState ==
+                     "xyz.openbmc_project.State.Host.HostState.Off")
             {
                 cancelTimer("POH Counter Timer", pohCounterTimer);
                 // POST_COMPLETE GPIO event is not working in some platforms
