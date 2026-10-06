@@ -304,9 +304,9 @@ PowerControl::PowerControl(boost::asio::io_context& ioContext,
     gpioAssertTimer(ioContext), powerCycleTimer(ioContext),
     gracefulPowerOffTimer(ioContext), warmResetCheckTimer(ioContext),
     powerOKWatchdogTimer(ioContext), sioPowerGoodWatchdogTimer(ioContext),
-    powerStateSaveTimer(ioContext), auxPowerCycleWatchdogTimer(ioContext),
-    pohCounterTimer(ioContext), restartCauseTimer(ioContext),
-    slotPowerCycleTimer(ioContext)
+    powerStateSaveTimer(ioContext), auxPowerCycleReplyDelayTimer(ioContext),
+    auxPowerCycleWatchdogTimer(ioContext), pohCounterTimer(ioContext),
+    restartCauseTimer(ioContext), slotPowerCycleTimer(ioContext)
 {
     // Load configuration from JSON file and populate powerSignalMap
     loadConfigValues();
@@ -1563,8 +1563,27 @@ bool PowerControl::queueAuxPowerCycle(AuxPowerCycleVariant variant)
     // the lock set and endAuxPowerCycle() releases it.
     auxPowerCycleQueued = true;
     blockPowerActions = true;
-    boost::asio::post(ioContext,
-                      [this, variant]() { executeAuxPowerCycle(variant); });
+    // Match the GB BMC's three-second grace period before cutting power.
+    // Posting immediately can power off an already-off host's BMC before
+    // bmcweb sends the HTTP reply. Keep the event loop responsive so D-Bus
+    // acknowledgement and the Redfish response can proceed during the delay.
+    // This is a timing mitigation, not a guarantee of client receipt.
+    auxPowerCycleReplyDelayTimer.expires_after(std::chrono::seconds(3));
+    auxPowerCycleReplyDelayTimer.async_wait(
+        [this, variant](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return;
+            }
+            if (ec)
+            {
+                lg2::error("Aux power cycle reply delay failed: {ERROR}",
+                           "ERROR", ec.message());
+                endAuxPowerCycle();
+                return;
+            }
+            executeAuxPowerCycle(variant);
+        });
     return true;
 }
 
