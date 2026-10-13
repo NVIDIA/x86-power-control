@@ -140,6 +140,20 @@ class ETL256PowerControl : public VRPowerControl
     void setDefaultValues() override;
 
   private:
+    /** Handle a CPU Boot Done GPIO edge. */
+    void cpuBootDoneHandler(bool state);
+
+    /**
+     * Update CPU Boot Done state from a raw GPIO value.
+     *
+     * Initial state discovery uses notifyStateMachine=false; real edges use
+     * true so reboot/shutdown classification happens immediately.
+     */
+    void updateCpuBootDoneFromGpio(bool state, bool notifyStateMachine);
+
+    /** Maintain the legacy IPMI restriction-mode marker file. */
+    void updateCpuBootDoneMarker(bool asserted);
+
     /**
      * @brief Power indicator signals used to determine initial hardware state.
      *

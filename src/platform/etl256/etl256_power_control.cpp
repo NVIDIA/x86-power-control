@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -14,6 +15,14 @@ namespace power_control
 {
 // Type aliases for convenience
 using Event = PowerControl::Event;
+
+namespace
+{
+constexpr auto cpuBootDoneMarker = "/run/bmc-state/CPU_BOOT_DONE-I";
+constexpr auto cpuBootDoneService = "cpu-boot-done.service";
+constexpr auto cpuBootUndoneService = "cpu-boot-undone.service";
+} // namespace
+
 ETL256PowerControl::ETL256PowerControl(
     boost::asio::io_context& ioContext,
     std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -34,10 +43,12 @@ ETL256PowerControl::ETL256PowerControl(
     //   Board0CpuShutdownForce, Board0CpuShutdownRequest,
     //   Board0CpuShutdownOk, CpuResetIndicator.
     //
-    // ETL256 adds USBPowerEnable, but has no PDB signals, no 12V PDB rails,
-    // no E1S/SSD platform peripherals, and no Board 1.
+    // ETL256 adds USBPowerEnable and CpuBootDone, but has no PDB signals, no
+    // 12V PDB rails, no E1S/SSD platform peripherals, and no Board 1.
 
     addRequiredSignal("USBPowerEnable", 0, GPIODirection::OUT);
+    addRequiredSignal("CpuBootDone", 0, GPIODirection::IN,
+                      [this](bool state) { this->cpuBootDoneHandler(state); });
 
     PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
@@ -47,10 +58,83 @@ ETL256PowerControl::ETL256PowerControl(
     // ETL256 is ON iff the HPM module power-good signal is asserted.
     initializePowerStateFromHardware(powerIndicators, true);
 
+    // Synchronize the initial GPIO state without injecting an artificial edge
+    // into the power-control state machine. Subsequent GPIO edges notify it.
+    auto cpuBootDoneSignal = getSignal("CpuBootDone");
+    if (cpuBootDoneSignal && cpuBootDoneSignal->gpioLine)
+    {
+        updateCpuBootDoneFromGpio(cpuBootDoneSignal->gpioLine.get_value(),
+                                  false);
+    }
+
     // Publish the host/chassis/GPIO D-Bus interfaces after initial state is
     // derived from hardware, so clients see the correct state immediately.
     registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
+}
+
+void ETL256PowerControl::cpuBootDoneHandler(bool state)
+{
+    updateCpuBootDoneFromGpio(state, true);
+}
+
+void ETL256PowerControl::updateCpuBootDoneFromGpio(bool state,
+                                                   bool notifyStateMachine)
+{
+    auto config = getSignal("CpuBootDone");
+    if (!config)
+    {
+        return;
+    }
+
+    const bool asserted = (state == config->polarity);
+    lg2::info(
+        "CpuBootDone GPIO event: raw value={VALUE}, logical state={STATE}",
+        "VALUE", static_cast<int>(state), "STATE",
+        asserted ? "ASSERTED" : "DE-ASSERTED");
+
+    if (!updateCpuBootDoneState(asserted ? 1 : 0, notifyStateMachine))
+    {
+        return;
+    }
+
+    setOperatingSystemState(asserted ? OperatingSystemStateStage::Standby
+                                     : OperatingSystemStateStage::Inactive);
+    updateCpuBootDoneMarker(asserted);
+
+    startSystemdUnit(asserted ? cpuBootDoneService : cpuBootUndoneService);
+}
+
+void ETL256PowerControl::updateCpuBootDoneMarker(bool asserted)
+{
+    const std::filesystem::path marker(cpuBootDoneMarker);
+    std::error_code ec;
+
+    if (asserted)
+    {
+        std::filesystem::create_directories(marker.parent_path(), ec);
+        if (ec)
+        {
+            lg2::error("Failed to create CPU Boot Done state directory: {ERR}",
+                       "ERR", ec.message());
+            return;
+        }
+
+        std::ofstream markerFile(marker);
+        if (!markerFile)
+        {
+            lg2::error("Failed to create CPU Boot Done marker {PATH}", "PATH",
+                       marker.string());
+        }
+        return;
+    }
+
+    std::filesystem::remove(marker, ec);
+    if (ec)
+    {
+        lg2::error("Failed to remove CPU Boot Done marker {PATH}: {ERR}",
+                   "PATH", marker.string(), "ERR", ec.message());
+    }
 }
 
 // ============================================================================

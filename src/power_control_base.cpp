@@ -153,10 +153,6 @@ void PowerControl::logResourceEvent(
         return;
     }
 
-    auto method = conn->new_method_call(
-        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
-        "xyz.openbmc_project.Logging.Create", "Create");
-
     std::map<std::string, std::string> additionalData;
     additionalData["REDFISH_MESSAGE_ID"] =
         std::format("ResourceEvent.1.0.{}", eventName);
@@ -171,18 +167,20 @@ void PowerControl::logResourceEvent(
     }
     additionalData["REDFISH_MESSAGE_ARGS"] = argsStr;
 
-    method.append(eventName, severity, additionalData);
-    try
-    {
-        conn->call(method);
-    }
-    catch (const sdbusplus::exception::SdBusError& e)
-    {
-        lg2::error(
-            "Failed to create event log entry '{EVENT}' - "
-            "xyz.openbmc_project.Logging may not be available yet: {ERROR}",
-            "EVENT", eventName, "ERROR", e.what());
-    }
+    conn->async_method_call(
+        [eventName](const boost::system::error_code ec) {
+            if (ec)
+            {
+                lg2::error(
+                    "Failed to create event log entry '{EVENT}' - "
+                    "xyz.openbmc_project.Logging may not be available yet: "
+                    "{ERROR}",
+                    "EVENT", eventName, "ERROR", ec.message());
+            }
+        },
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+        "xyz.openbmc_project.Logging.Create", "Create", eventName, severity,
+        additionalData);
 }
 
 void PowerControl::logEvent(std::string_view stateHandler, Event event)
