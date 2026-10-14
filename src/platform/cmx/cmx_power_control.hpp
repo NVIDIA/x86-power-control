@@ -54,6 +54,7 @@ class CMXPowerControl : public VRPowerControl
   private:
     void cpldReadyHandler(bool state);
     void stbyPwrOkHandler(bool state);
+    void modulePwrGoodHandler(bool state);
     void markStandbyLost();
 
     /**
