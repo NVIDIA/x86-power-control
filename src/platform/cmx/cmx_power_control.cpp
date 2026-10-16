@@ -34,6 +34,18 @@ CMXPowerControl::CMXPowerControl(
     addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
                       [this](bool state) { this->stbyPwrOkHandler(state); });
 
+    // Module power good hands the SOCAMM I2C to the CPU while asserted.
+    // Both signals are optional; skip when either is not configured.
+    bool hasSocammSel =
+        powerSignalMap.find("ModulePwrGood") != powerSignalMap.end() &&
+        powerSignalMap.find("SocammI2cSel") != powerSignalMap.end();
+    if (hasSocammSel)
+    {
+        addRequiredSignal(
+            "ModulePwrGood", 0, GPIODirection::IN,
+            [this](bool state) { this->modulePwrGoodHandler(state); }, true);
+    }
+
     PowerControl::validateRequiredResources();
     PowerControl::validateRequiredSignals();
     validateTimerConfigs();
@@ -43,6 +55,16 @@ CMXPowerControl::CMXPowerControl(
     initializePowerStateFromHardware(powerIndicators, true);
     registerCpuBootDoneSetterMethod();
     initializeHostStateInterface();
+
+    // Sync the SOCAMM I2C select with the current module power good level.
+    if (hasSocammSel)
+    {
+        auto modulePwrGood = getSignal("ModulePwrGood");
+        if (modulePwrGood->gpioLine)
+        {
+            modulePwrGoodHandler(modulePwrGood->gpioLine.get_value());
+        }
+    }
 }
 
 // ============================================================================
@@ -186,6 +208,22 @@ void CMXPowerControl::cpldReadyHandler(bool state)
         lg2::warning("CPLD ready de-asserted in power state {STATE}", "STATE",
                      getPowerStateName());
     }
+}
+
+void CMXPowerControl::modulePwrGoodHandler(bool state)
+{
+    auto modulePwrGood = getSignal("ModulePwrGood");
+    auto socammI2cSel = getSignal("SocammI2cSel");
+    if (!modulePwrGood || !socammI2cSel)
+    {
+        return;
+    }
+
+    bool asserted = (state == modulePwrGood->polarity);
+    lg2::info("Module power good {STATE}, SOCAMM I2C to {OWNER}", "STATE",
+              std::string(asserted ? "asserted" : "de-asserted"), "OWNER",
+              std::string(asserted ? "CPU" : "BMC"));
+    setGPIOOutput(socammI2cSel, asserted == socammI2cSel->polarity);
 }
 
 void CMXPowerControl::stbyPwrOkHandler(bool state)
