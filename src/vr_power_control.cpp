@@ -1851,7 +1851,7 @@ bool VRPowerControl::prepareForAuxPowerCycle(AuxPowerCycleVariant variant,
         abortCpuRecovery();
 
         // A host in USB-RCM recovery is considered wedged. Skip the graceful
-        // phase for both auxiliary power-cycle variants.
+        // phase for AuxPowerCycle, AuxPowerCycleForce, and FullPowerCycle.
         skipGraceful = true;
     }
 

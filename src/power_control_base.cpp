@@ -1340,9 +1340,10 @@ void PowerControl::executeAuxPowerCycle(AuxPowerCycleVariant variant)
         return;
     }
 
-    // Both AUX variants normally begin gracefully. A platform preparation
-    // override may skip that phase when recovering from a wedged state.
-    bool skipGraceful = false;
+    // FullPowerCycle skips the graceful shutdown and starts forcefully.
+    // AuxPowerCycle and AuxPowerCycleForce leave skipGraceful false and begin
+    // gracefully unless a platform preparation override changes it.
+    bool skipGraceful = variant == AuxPowerCycleVariant::fullCycle;
 
     if (!prepareForAuxPowerCycle(variant, skipGraceful))
     {
@@ -1366,25 +1367,33 @@ void PowerControl::executeAuxPowerCycle(AuxPowerCycleVariant variant)
 
     addRestartCause(RestartCause::command);
     auxPowerCycleQueued = false;
-    beginAuxPowerCycle(variant == AuxPowerCycleVariant::auxCycleForce,
-                       skipGraceful);
+    beginAuxPowerCycle(variant, skipGraceful);
 }
 
 void PowerControl::endAuxPowerCycle()
 {
     auxPowerCycleQueued = false;
     auxPowerCycleState = AuxPowerCycleState::inactive;
-    auxPowerCycleForce = false;
+    auxPowerCycleVariant = AuxPowerCycleVariant::none;
     suppressPowerStateSave = false;
     blockPowerActions = false;
 }
 
-void PowerControl::beginAuxPowerCycle(bool force, bool skipGraceful)
+void PowerControl::beginAuxPowerCycle(AuxPowerCycleVariant variant,
+                                      bool skipGraceful)
 {
-    lg2::info("Aux power cycle starting (force={FORCE}, skipGraceful={SKIP}).",
-              "FORCE", force, "SKIP", skipGraceful);
+    const char* variantName =
+        variant == AuxPowerCycleVariant::fullCycle ? "FullPowerCycle"
+        : variant == AuxPowerCycleVariant::auxCycleForce
+            ? "AuxPowerCycleForce"
+            : "AuxPowerCycle";
+    lg2::info("Aux power cycle starting (variant={VAR}, skipGraceful={SKIP}).",
+              "VAR", variantName, "SKIP", skipGraceful);
 
-    auxPowerCycleForce = force;
+    // Record which request this is; drives the failure-path decision in
+    // advanceAuxPowerCycle(). Independent of skipGraceful, which is sequencing
+    // only (VR recovery skips graceful for an ordinary AuxPowerCycle).
+    auxPowerCycleVariant = variant;
     // Keep the internal shutdown out of the power-restore persistent state.
     suppressPowerStateSave = true;
     // Reject external power actions at their input points for the duration of
@@ -1400,8 +1409,8 @@ void PowerControl::beginAuxPowerCycle(bool force, bool skipGraceful)
 
     // Host on: run an atomic shutdown. It always settles back at on/off, and
     // the setPowerState() completion hook then calls advanceAuxPowerCycle().
-    // Platform recovery may skip the graceful attempt. Otherwise start
-    // gracefully and escalate to forceful on failure.
+    // FullPowerCycle starts forceful (no graceful attempt); the others start
+    // graceful and escalate to forceful on failure.
     if (skipGraceful)
     {
         auxPowerCycleState = AuxPowerCycleState::forceful;
@@ -1447,12 +1456,24 @@ void PowerControl::advanceAuxPowerCycle()
         return;
     }
 
-    // Forceful shutdown also left the host on. The variant decides:
-    if (auxPowerCycleForce)
+    // Forceful shutdown also left the host on. AuxPowerCycle aborts (don't
+    // hard-cut a live host); AuxPowerCycleForce and FullPowerCycle cut standby
+    // regardless and record the failed shutdown in the journal and event log.
+    if (auxPowerCycleVariant == AuxPowerCycleVariant::fullCycle ||
+        auxPowerCycleVariant == AuxPowerCycleVariant::auxCycleForce)
     {
-        lg2::warning(
-            "Aux power cycle (force): forceful shutdown did not power the host off; "
-            "cutting tray standby power (aux-cycle GPIO) regardless.");
+        if (auxPowerCycleVariant == AuxPowerCycleVariant::fullCycle)
+        {
+            lg2::warning(
+                "Full power cycle: forceful shutdown did not power the host off; "
+                "cutting tray standby power (aux-cycle GPIO) regardless.");
+        }
+        else
+        {
+            lg2::warning(
+                "Aux power cycle: forceful shutdown did not power the host off; "
+                "cutting tray standby power (aux-cycle GPIO) regardless.");
+        }
         assertAuxPowerCycle();
     }
     else
@@ -1819,7 +1840,14 @@ void PowerControl::registerHostInterface()
             // TODO: Uncomment when powerButtonMask, resetButtonMask, and
             // addRestartCause are moved
 
-            if (powerActionsBlocked())
+            const bool fullPowerCycleRequest =
+                requested ==
+                "xyz.openbmc_project.State.Host.Transition.FullPowerCycle";
+
+            // FullPowerCycle has its own virtual admission policy so VR
+            // platforms can accept it from CPU recovery. Other actions remain
+            // blocked for the entire recovery or aux-cycle session.
+            if (powerActionsBlocked() && !fullPowerCycleRequest)
             {
                 lg2::warning(
                     "RequestedHostTransition rejected because power actions are blocked; current FSM state: {STATE}.",
@@ -1924,6 +1952,16 @@ void PowerControl::registerHostInterface()
                     return 0;
                 }
             }
+            else if (fullPowerCycleRequest)
+            {
+                if (!queueAuxPowerCycle(AuxPowerCycleVariant::fullCycle))
+                {
+                    return 0;
+                }
+                // Full power cycle (DMTF): attempt forceful shutdown, then cut
+                // standby even if the shutdown does not power the host off.
+                lg2::info("Host Full Power Cycle requested");
+            }
             else
             {
                 lg2::error("Unrecognized host state transition request.");
@@ -1992,7 +2030,14 @@ void PowerControl::initializeChassisInterface()
             // TODO: Uncomment when powerButtonMask and addRestartCause are
             // moved
 
-            if (powerActionsBlocked())
+            const bool fullPowerCycleRequest =
+                requested ==
+                "xyz.openbmc_project.State.Chassis.Transition.FullPowerCycle";
+
+            // FullPowerCycle has its own virtual admission policy so VR
+            // platforms can accept it from CPU recovery. Other actions remain
+            // blocked for the entire recovery or aux-cycle session.
+            if (powerActionsBlocked() && !fullPowerCycleRequest)
             {
                 lg2::warning(
                     "RequestedPowerTransition rejected because power actions are blocked; current FSM state: {STATE}.",
@@ -2055,6 +2100,18 @@ void PowerControl::initializeChassisInterface()
                     lg2::warning("Power Button Masked.");
                     return 0;
                 }
+            }
+            else if (fullPowerCycleRequest)
+            {
+                if (!queueAuxPowerCycle(AuxPowerCycleVariant::fullCycle))
+                {
+                    return 0;
+                }
+                // Full power cycle (DMTF): attempt forceful shutdown, then cut
+                // standby even if the shutdown does not power the host off.
+                // Also reachable via RequestedHostTransition; both queue the
+                // same common operation.
+                lg2::info("Chassis Full Power Cycle requested");
             }
             else
             {
