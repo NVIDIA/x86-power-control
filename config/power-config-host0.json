@@ -126,6 +126,12 @@
             "Path": "/xyz/openbmc_project/misc/platform_state",
             "Interface": "xyz.openbmc_project.State.Host.Misc",
             "Property": "ESpiPlatformReset"
+        },
+        {
+            "Name": "AuxPowerCycle",
+            "LineName": "PDB_TRAY_RST-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
         }
     ],
     "resources": [
@@ -156,7 +162,9 @@
         "PowerCycleDelayMs": 15000,
         "ForceWarmRebootDelayMs": 1000,
         "GracefulWarmRebootDelayMs": 1000,
-        "PowerOffSaveMs": 10000
+        "PowerOffSaveMs": 10000,
+        "AuxPowerCycleWatchdogMs": 5000,
+        "AuxPowerCycleJournalSyncTimeoutMs": 2000
     },
     "event_configs": {
         "NMIWhenPoweredOff": true

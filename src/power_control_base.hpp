@@ -42,6 +42,12 @@ enum class PowerState
     transitionToCycleOff,
     gracefulTransitionToCycleOff,
     checkForWarmReset,
+    // Aux power cycle: aux-cycle GPIO asserted, waiting for tray standby power
+    // to drop (i.e. for the BMC to lose power and restart)
+    waitForAuxPowerCycle,
+    // CPU held in reset for USB-RCM recovery; FSM parked here until
+    // SetPreSystemReset(false) is called or a hardware abort event fires.
+    waitForCpuRecovery,
     // VR-specific states
     waitForPDBMainPowerOk,
     waitForPDBMainPowerOff,
@@ -267,6 +273,7 @@ class PowerControl
         powerOnRequest,
         powerOffRequest,
         powerCycleRequest,
+        auxPowerCycleWatchdogTimerExpired,
         resetRequest,
         gracefulResetRequest,
         gracefulPowerOffRequest,
@@ -396,6 +403,33 @@ class PowerControl
         GRACEFUL_WARM_REBOOT,
     };
 
+    /**
+     * @brief Aux power cycle phase
+     *
+     * Marks an in-progress aux power cycle and which shutdown attempt is
+     * running, decoupled from the PowerAction that drives the shutdown
+     * mechanics (GRACE_OFF / FORCE_OFF). Drives the aux-specific decisions in
+     * advanceAuxPowerCycle().
+     * - inactive: no aux power cycle in progress
+     * - graceful: the graceful shutdown attempt is running
+     * - forceful: the forceful shutdown attempt is running
+     */
+    enum class AuxPowerCycleState
+    {
+        inactive,
+        graceful,
+        forceful,
+    };
+
+    /**
+     * @brief Requested auxiliary power-cycle behavior
+     */
+    enum class AuxPowerCycleVariant
+    {
+        auxCycle,
+        auxCycleForce,
+    };
+
     // This map contains all timer values that are to be read from json config
     boost::container::flat_map<std::string, int> TimerMap;
 
@@ -418,6 +452,14 @@ class PowerControl
     std::string target_state = "HostOff";
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> hostIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> preSysResetIface;
+    std::unique_ptr<sdbusplus::bus::match_t> fwStatusNameWatch;
+    // GPIO value that was active on Board0PreSystemReset when
+    // SetPreSystemReset was last called; used to restore on abort.
+    int preSysResetSavedValue{1};
+    // Power state captured just before entering waitForCpuRecovery; restored
+    // when recovery ends so a session entered from off returns to off.
+    PowerState preSysResetReturnState{PowerState::off};
     std::shared_ptr<sdbusplus::asio::dbus_interface> bootProgressIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> chassisIface;
 #ifdef CHASSIS_SYSTEM_RESET
@@ -524,6 +566,173 @@ class PowerControl
      * The save is delayed to avoid excessive writes during rapid state changes.
      */
     void savePowerState(const PowerState state);
+
+    // ---- Aux power cycle (platform-agnostic; see AuxPowerCycleState) --------
+    //
+    // Flow: queue -> prepare -> begin -> [graceful shutdown] -> settle at
+    // on/off
+    // -> advance decides:
+    //   off          -> assert aux GPIO (cut standby)       [both variants]
+    //   on, graceful -> forceful shutdown, then advance again
+    //   on, forceful -> force variant asserts GPIO; normal variant aborts
+    // Each shutdown is atomic; the completion hook in setPowerState() calls
+    // advanceAuxPowerCycle() once the shutdown settles. Platforms supply the
+    // two shutdown primitives; everything else is inherited.
+
+    /**
+     * @brief Queue an aux power cycle after applying platform admission policy
+     *
+     * Reserves the power-action lock before acknowledging the caller, then
+     * defers execution to avoid D-Bus reentrancy.
+     *
+     * @param variant Requested aux-cycle variant
+     * @return true if the request was accepted and queued; false if rejected
+     */
+    bool queueAuxPowerCycle(AuxPowerCycleVariant variant);
+
+    /**
+     * @brief Execute a previously accepted aux power-cycle request
+     *
+     * Applies platform preparation, validates that the FSM is stable, and
+     * starts the common aux power-cycle orchestration.
+     *
+     * @param variant Requested aux-cycle variant
+     */
+    void executeAuxPowerCycle(AuxPowerCycleVariant variant);
+
+    /**
+     * @brief Check whether the current platform state accepts an aux cycle
+     *
+     * The default accepts requests only while the FSM is stable and power
+     * actions are not blocked. Platforms may override this for parked states
+     * whose platform-owned lock can be released during preparation.
+     *
+     * @param variant Requested aux-cycle variant
+     * @return true if the request may be accepted in the current state
+     */
+    virtual bool canAcceptAuxPowerCycle(AuxPowerCycleVariant variant) const;
+
+    /**
+     * @brief Prepare the platform to begin common aux-cycle orchestration
+     *
+     * Called during deferred execution because the state may have changed after
+     * admission. A successful implementation must leave the FSM in a stable
+     * state. The default requires that the FSM already be stable.
+     *
+     * @param variant Requested aux-cycle variant
+     * @param skipGraceful May be set when platform preparation requires the
+     *                      graceful shutdown phase to be skipped
+     * @return true if the platform is ready for common aux-cycle sequencing
+     */
+    virtual bool prepareForAuxPowerCycle(AuxPowerCycleVariant variant,
+                                         bool& skipGraceful);
+
+    /**
+     * @brief Begin an aux power cycle from a stable (on/off) power state
+     *
+     * If the host is already off this is the success condition, so the
+     * aux-cycle GPIO is asserted directly; otherwise a shutdown is started.
+     * Called by executeAuxPowerCycle() after admission and platform
+     * preparation, so platform state handlers need no aux wiring.
+     *
+     * @param force true for AuxPowerCycleForce (cut standby even if the host
+     *              cannot be powered off); false for AuxPowerCycle
+     * @param skipGraceful true when platform recovery requires starting with
+     *              forceful shutdown; false for the normal sequence
+     */
+    void beginAuxPowerCycle(bool force, bool skipGraceful);
+
+    /**
+     * @brief Advance the aux power cycle after a shutdown attempt settles
+     *
+     * Invoked (deferred) from setPowerState() when an aux cycle is active and
+     * the host reaches a stable on/off state. Decides the next step from that
+     * state.
+     */
+    virtual void advanceAuxPowerCycle();
+
+    /**
+     * @brief Assert the platform aux-power-cycle GPIO ("AuxPowerCycle")
+     *
+     * Captures the return state, starts the aux-power-cycle watchdog,
+     * transitions to PowerState::waitForAuxPowerCycle, and drives the
+     * configured aux-cycle line to its active polarity — cutting tray standby
+     * power. Virtual so a platform that cuts standby differently can override;
+     * the base default uses the configured GPIO.
+     *
+     * @return true after the GPIO is asserted; false if the cycle could not be
+     * started.
+     */
+    virtual bool assertAuxPowerCycle();
+
+    /**
+     * @brief Clear all aux-power-cycle state and resume normal persistence
+     */
+    void endAuxPowerCycle();
+
+    /**
+     * @brief Flush and sync the systemd journal to disk (best-effort, bounded)
+     *
+     * Called from assertAuxPowerCycle() just before the aux-cycle GPIO is
+     * driven, so the shutdown/assertion log survives the imminent standby power
+     * loss. Calls journald's varlink interface (FlushToVar then Synchronize)
+     * over /run/systemd/journal/io.systemd.journal, blocking until each method
+     * replies or timeoutMs elapses. Always returns so the power cycle proceeds
+     * regardless of the outcome.
+     *
+     * @param timeoutMs Maximum time to wait for each varlink method to reply.
+     */
+    void flushAndSyncJournal(int timeoutMs);
+
+    /**
+     * @brief True while an aux power cycle is in progress
+     *
+     * Covers both the shutdown phases and the waitForAuxPowerCycle phase (the
+     * latter also reached by the host-already-off path). Drives the
+     * setPowerState() completion hook and guards against a re-entrant start in
+     * executeAuxPowerCycle().
+     */
+    bool isAuxPowerCycleActive() const;
+
+    /**
+     * @brief True while external power actions are rejected at their sources
+     *
+     * Consulted by the D-Bus transition setters and physical button handlers
+     * to reject external requests while a recovery session, queued aux request,
+     * or active aux power cycle owns the power-action lock.
+     */
+    bool powerActionsBlocked() const
+    {
+        return blockPowerActions || auxPowerCycleQueued;
+    }
+
+    /**
+     * @brief True while the FSM is settled at On or Off
+     *
+     * Auxiliary power cycles can only start from a stable state; the D-Bus
+     * setters use this to reject (rather than silently drop) a request that
+     * arrives mid-transition.
+     */
+    bool inStablePowerState() const
+    {
+        return powerState == PowerState::on || powerState == PowerState::off;
+    }
+
+    /**
+     * @brief Start the graceful host shutdown (platform primitive)
+     *
+     * Must run the platform's atomic graceful shutdown, which settles at
+     * PowerState::on or ::off. Called by the aux orchestration.
+     */
+    virtual void initiateGracefulShutdown() = 0;
+
+    /**
+     * @brief Start the forceful host shutdown (platform primitive)
+     *
+     * Must run the platform's atomic forceful shutdown, which settles at
+     * PowerState::on or ::off. Called by the aux orchestration.
+     */
+    virtual void initiateForcefulShutdown() = 0;
 
     /**
      * @brief Get the host state string for a given power state (virtual)
@@ -854,6 +1063,56 @@ class PowerControl
     PowerState powerState{PowerState::off};
 
     /**
+     * @brief Active aux power cycle phase (inactive when none in progress)
+     */
+    AuxPowerCycleState auxPowerCycleState{AuxPowerCycleState::inactive};
+
+    /**
+     * @brief Whether the in-progress aux power cycle is the forceful variant
+     */
+    bool auxPowerCycleForce{false};
+
+    /**
+     * @brief True after an aux request is accepted but before execution begins
+     *
+     * Keeps duplicate requests from being accepted while a recovery session
+     * already owns blockPowerActions and the accepted aux request is waiting in
+     * the event loop.
+     */
+    bool auxPowerCycleQueued{false};
+
+    /**
+     * @brief Power state to return to if the aux-cycle GPIO fails to cut
+     * standby
+     *
+     * Captured when the aux-cycle GPIO is asserted: Off if the host was powered
+     * off (always so for AuxPowerCycle), or On for a forced cycle that could
+     * not power the host off.
+     */
+    PowerState auxPowerCycleReturnState{PowerState::off};
+
+    /**
+     * @brief When set, savePowerState() is a no-op
+     *
+     * Set while an aux power cycle runs an internal shutdown so that shutdown
+     * is not persisted to the power-restore state. Cleared by
+     * endAuxPowerCycle().
+     */
+    bool suppressPowerStateSave{false};
+
+    /**
+     * @brief When set, external power-action requests are rejected at source
+     *
+     * Set for the duration of a CPU-recovery session or aux power cycle so its
+     * atomic sequence cannot be interrupted. Enforced at external input points
+     * (the D-Bus transition setters and physical power/reset button handlers),
+     * so internally driven FSM transitions are unaffected. Aux orchestration
+     * reserves it in queueAuxPowerCycle() and releases it in endAuxPowerCycle()
+     * or when deferred preparation fails.
+     */
+    bool blockPowerActions{false};
+
+    /**
      * @brief Set of restart causes for the current restart
      *
      * Multiple causes can be added during a restart sequence.
@@ -1007,6 +1266,15 @@ class PowerControl
      * @brief Timer for power-off state save for power loss tracking
      */
     boost::asio::steady_timer powerStateSaveTimer;
+
+    /**
+     * @brief Watchdog for the aux power cycle
+     *
+     * Started just before the aux-cycle GPIO is asserted. If standby power
+     * actually cycles the BMC restarts and this never fires; if it fires,
+     * standby did not cycle and handleWaitForAuxPowerCycle() recovers.
+     */
+    boost::asio::steady_timer auxPowerCycleWatchdogTimer;
 
     /**
      * @brief POH (Power On Hours) timer
@@ -1607,6 +1875,18 @@ class PowerControl
      * - If cold reset (power off), transitioned to off
      */
     virtual void handleCheckForWarmReset(Event event);
+
+    /**
+     * @brief Handler for PowerState::waitForAuxPowerCycle
+     *
+     * Entered after the aux-cycle GPIO is asserted. Normally the BMC loses
+     * standby power and restarts before any event arrives. If the
+     * aux-power-cycle watchdog expires, standby power did not cycle: logs an
+     * error to the journal and event log, de-asserts the aux-cycle GPIO, and
+     * returns to the captured return state. All other events are ignored (the
+     * cycle is atomic).
+     */
+    virtual void handleWaitForAuxPowerCycle(Event event);
 
     // POWER CONTROL OPERATIONS
     // referenced by upstream power state handlers
