@@ -422,12 +422,23 @@ class PowerControl
     };
 
     /**
-     * @brief Requested auxiliary power-cycle behavior
+     * @brief Which request initiated the in-progress aux power cycle
+     *
+     * Distinct from AuxPowerCycleState (the shutdown phase). Drives the
+     * failure-path decision in advanceAuxPowerCycle(): auxCycle aborts if the
+     * host can't be powered off, while auxCycleForce and fullCycle cut standby
+     * regardless. fullCycle additionally skips the graceful attempt.
+     * - none: no aux power cycle in progress
+     * - auxCycle: AuxPowerCycle (graceful->forceful, abort on failure)
+     * - auxCycleForce: AuxPowerCycleForce (graceful->forceful, cut regardless)
+     * - fullCycle: FullPowerCycle (forceful only, cut regardless)
      */
     enum class AuxPowerCycleVariant
     {
+        none,
         auxCycle,
         auxCycleForce,
+        fullCycle,
     };
 
     // This map contains all timer values that are to be read from json config
@@ -572,9 +583,9 @@ class PowerControl
     // Flow: queue -> prepare -> begin -> [graceful shutdown] -> settle at
     // on/off
     // -> advance decides:
-    //   off          -> assert aux GPIO (cut standby)       [both variants]
+    //   off          -> assert aux GPIO (cut standby)       [all variants]
     //   on, graceful -> forceful shutdown, then advance again
-    //   on, forceful -> force variant asserts GPIO; normal variant aborts
+    //   on, forceful -> forced/full ? assert aux GPIO : abort
     // Each shutdown is atomic; the completion hook in setPowerState() calls
     // advanceAuxPowerCycle() once the shutdown settles. Platforms supply the
     // two shutdown primitives; everything else is inherited.
@@ -635,12 +646,15 @@ class PowerControl
      * Called by executeAuxPowerCycle() after admission and platform
      * preparation, so platform state handlers need no aux wiring.
      *
-     * @param force true for AuxPowerCycleForce (cut standby even if the host
-     *              cannot be powered off); false for AuxPowerCycle
-     * @param skipGraceful true when platform recovery requires starting with
-     *              forceful shutdown; false for the normal sequence
+     * @param variant which request this is; drives the failure-path decision
+     *              (auxCycle aborts if the host stays on; auxCycleForce and
+     *              fullCycle cut standby regardless).
+     * @param skipGraceful sequencing only: start at the forceful shutdown with
+     *              no graceful attempt. Independent of variant — e.g. VR
+     *              USB-RCM recovery skips graceful for an ordinary
+     * AuxPowerCycle.
      */
-    void beginAuxPowerCycle(bool force, bool skipGraceful);
+    void beginAuxPowerCycle(AuxPowerCycleVariant variant, bool skipGraceful);
 
     /**
      * @brief Advance the aux power cycle after a shutdown attempt settles
@@ -709,7 +723,7 @@ class PowerControl
     /**
      * @brief True while the FSM is settled at On or Off
      *
-     * Auxiliary power cycles can only start from a stable state; the D-Bus
+     * Aux/full power cycles can only start from a stable state; the D-Bus
      * setters use this to reject (rather than silently drop) a request that
      * arrives mid-transition.
      */
@@ -1068,9 +1082,12 @@ class PowerControl
     AuxPowerCycleState auxPowerCycleState{AuxPowerCycleState::inactive};
 
     /**
-     * @brief Whether the in-progress aux power cycle is the forceful variant
+     * @brief Which request initiated the in-progress aux power cycle
+     *
+     * See AuxPowerCycleVariant. Replaces the old force bool: auxCycleForce and
+     * fullCycle both cut standby even if the host can't be powered off.
      */
-    bool auxPowerCycleForce{false};
+    AuxPowerCycleVariant auxPowerCycleVariant{AuxPowerCycleVariant::none};
 
     /**
      * @brief True after an aux request is accepted but before execution begins
