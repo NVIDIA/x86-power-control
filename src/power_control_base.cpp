@@ -4165,7 +4165,13 @@ void PowerControl::startSystemdUnit(const std::string& unitName)
     conn->async_method_call(
         [unitName](const boost::system::error_code& ec,
                    const sdbusplus::object_path& /* job */) {
-            if (ec)
+            // Platforms install only the units they need.
+            if (ec.value() == ENOENT)
+            {
+                lg2::debug("Systemd unit {UNIT} is not installed", "UNIT",
+                           unitName);
+            }
+            else if (ec)
             {
                 lg2::error("Failed to start systemd unit {UNIT}: {ERROR}",
                            "UNIT", unitName, "ERROR", ec.message());
