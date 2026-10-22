@@ -661,9 +661,12 @@ class PowerControl
      *
      * Invoked (deferred) from setPowerState() when an aux cycle is active and
      * the host reaches a stable on/off state. Decides the next step from that
-     * state.
+     * state. Platforms that retain a transitional state after a failed shutdown
+     * invoke this with shutdownFailed set after their state handler returns.
+     *
+     * @param shutdownFailed permit failure handling without a stable state
      */
-    virtual void advanceAuxPowerCycle();
+    virtual void advanceAuxPowerCycle(bool shutdownFailed = false);
 
     /**
      * @brief Assert the platform aux-power-cycle GPIO ("AuxPowerCycle")

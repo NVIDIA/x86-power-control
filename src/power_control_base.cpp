@@ -1423,14 +1423,17 @@ void PowerControl::beginAuxPowerCycle(AuxPowerCycleVariant variant,
     }
 }
 
-void PowerControl::advanceAuxPowerCycle()
+void PowerControl::advanceAuxPowerCycle(bool shutdownFailed)
 {
-    // Runs (deferred) after a shutdown attempt settles at a stable state.
+    // Runs after a shutdown attempt settles or explicitly reports failure.
+    // A platform may keep a failed shutdown transitional until power-off is
+    // confirmed, while forced aux/full cycles must still handle that failure.
     if (auxPowerCycleState == AuxPowerCycleState::inactive)
     {
         return; // nothing pending
     }
-    if (powerState != PowerState::on && powerState != PowerState::off)
+    if (powerState != PowerState::on && powerState != PowerState::off &&
+        !shutdownFailed)
     {
         return; // not settled (defensive against a stale post)
     }
@@ -1445,7 +1448,7 @@ void PowerControl::advanceAuxPowerCycle()
         return;
     }
 
-    // Host still on.
+    // Host still on, or shutdown failed without confirmed power-off.
     if (auxPowerCycleState == AuxPowerCycleState::graceful)
     {
         // Graceful shutdown left the host on: one forceful attempt.
@@ -1479,7 +1482,7 @@ void PowerControl::advanceAuxPowerCycle()
     else
     {
         lg2::error(
-            "Aux power cycle: host could not be powered off; aborting without cycling standby power. Host remains on.");
+            "Aux power cycle: host could not be powered off; aborting without cycling standby power. Power-off remains unconfirmed.");
         logResourceEvent(
             "ResourceErrorsDetected",
             {"Host0", "Aux power cycle aborted: host could not be powered off"},
@@ -1504,9 +1507,8 @@ bool PowerControl::assertAuxPowerCycle()
         return false;
     }
 
-    // Where to return if standby never cycles: the host's settled state. Off
-    // for AuxPowerCycle (only asserted after a successful power-off); On or Off
-    // for a forced cycle.
+    // Where to return if standby never cycles: Off after confirmed shutdown,
+    // or the previous On/pending-shutdown state after a forced cycle failure.
     auxPowerCycleReturnState = powerState;
 
     // Covers the host-already-off entry path, which reaches here without

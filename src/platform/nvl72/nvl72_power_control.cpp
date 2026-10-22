@@ -13,6 +13,7 @@
 #include <format>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -291,6 +292,95 @@ void NVL72PowerControl::initiatePDBPowerOff()
 // ============================================================================
 // Virtual overrides — extend VR defaults
 // ============================================================================
+
+std::string_view NVL72PowerControl::getHostState() const
+{
+    if (powerState == PowerState::waitForHPMPowerGoodDeAssert ||
+        powerState == PowerState::waitForPDBMainPowerOff ||
+        (powerState == PowerState::waitForAuxPowerCycle &&
+         (auxPowerCycleReturnState == PowerState::waitForHPMPowerGoodDeAssert ||
+          auxPowerCycleReturnState == PowerState::waitForPDBMainPowerOff)))
+    {
+        // A failed power-on may also pass through PDB teardown before retrying.
+        // Preserve the existing power-on indication for that operation.
+        if (powerState == PowerState::waitForPDBMainPowerOff &&
+            action == PowerAction::POWER_ON)
+        {
+            return "xyz.openbmc_project.State.Host.HostState.TransitioningToRunning";
+        }
+        return "xyz.openbmc_project.State.Host.HostState.TransitioningToOff";
+    }
+
+    return VRPowerControl::getHostState();
+}
+
+void NVL72PowerControl::completeShutdownAndTransitionToOff(bool success)
+{
+    if (success)
+    {
+        VRPowerControl::completeShutdownAndTransitionToOff(true);
+        return;
+    }
+
+    cancelTimer("PDB Main Power OK Watchdog Timer",
+                pdbMainPowerOkWatchdogTimer);
+    try
+    {
+        // The shared PDB interrupt path can miss an edge. Confirm both power
+        // domains by level before treating a missing event as a power fault.
+        if (isSystemPowerOff())
+        {
+            lg2::warning(
+                "PDB power-off watchdog expired, but HPM and PDB power-good are de-asserted. "
+                "Completing shutdown after a suspected missed GPIO edge.");
+            VRPowerControl::completeShutdownAndTransitionToOff(true);
+            return;
+        }
+    }
+    catch (const std::system_error& e)
+    {
+        // GPIO access can fail while a power domain is unavailable. Treat
+        // that as unconfirmed power-off and keep the shutdown pending.
+        lg2::error("Unable to confirm power-off GPIO levels: {ERROR}", "ERROR",
+                   e.what());
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Unable to confirm power-off GPIO levels: {ERROR}", "ERROR",
+                   e.what());
+        throw;
+    }
+    lg2::error(
+        "PDB Main Power Off Sequence Failed: power-good de-assertion was not confirmed. "
+        "Keeping shutdown pending and cancelling any automatic power-on.");
+    logResourceEvent(
+        "ResourceErrorsDetected",
+        {"Host0", "PDB Main Power OK watchdog expired (power off)"},
+        "xyz.openbmc_project.Logging.Entry.Level.Error");
+
+    // Keep the shutdown outputs asserted, but do not report a completed Off
+    // state or permit a new power-on while PDB power-off is unconfirmed.
+    // Convert a power cycle to shutdown only: a late falling edge must not
+    // restart the host after the operation has already timed out.
+    action = PowerAction::FORCE_OFF;
+    setGPIOsForHostStateOff();
+    setPowerState(PowerState::waitForPDBMainPowerOff);
+
+    // The aux orchestrator normally advances on a stable On/Off state. Report
+    // this failed attempt explicitly without publishing a false stable state.
+    // Defer until the current state handler returns, and ignore a stale failure
+    // if a late power-good edge completes shutdown first.
+    if (isAuxPowerCycleActive())
+    {
+        boost::asio::post(ioContext, [this] {
+            if (powerState == PowerState::waitForPDBMainPowerOff &&
+                isAuxPowerCycleActive())
+            {
+                advanceAuxPowerCycle(true);
+            }
+        });
+    }
+}
 
 void NVL72PowerControl::pdbMainPowerOkHandler(bool state)
 {
