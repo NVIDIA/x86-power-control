@@ -311,6 +311,32 @@ std::string_view NVL72PowerControl::getHostState() const
     return VRPowerControl::getHostState();
 }
 
+void NVL72PowerControl::handleWaitForPDBMainPowerOk(Event event)
+{
+    if (event == Event::pdbMainPowerOkWatchdogTimerExpired)
+    {
+        // WAR: https://nvbugspro.nvidia.com/bug/5877093
+        // Read the pin status before proceeding
+        auto pdbMainPowerOk = getSignal("PDBMainPowerOk");
+        if (!pdbMainPowerOk || !pdbMainPowerOk->gpioLine)
+        {
+            lg2::error("CRITICAL: PDBMainPowerOk not available");
+            return;
+        }
+        bool pdbMainPowerOkAsserted =
+            pdbMainPowerOk->gpioLine.get_value() == pdbMainPowerOk->polarity;
+        if (pdbMainPowerOkAsserted)
+        {
+            lg2::info(
+                "PDBMainPowerOk is asserted, we didn't catch the interrupt: BUG 5877093");
+            transitionToHPMPowerGoodAssertState();
+            return;
+        }
+    }
+
+    VRPowerControl::handleWaitForPDBMainPowerOk(event);
+}
+
 void NVL72PowerControl::completeShutdownAndTransitionToOff(bool success)
 {
     if (success)
