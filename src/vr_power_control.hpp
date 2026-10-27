@@ -230,17 +230,20 @@ class VRPowerControl : public PowerControl
     void abortGracefulWarmReboot();
 
     /**
-     * @brief Warm reboot CPU reset watchdog fault: no run-power teardown
+     * @brief Recover from a warm reboot CPU reset watchdog fault
      *
      * For FORCE_WARM_REBOOT / GRACEFUL_WARM_REBOOT when CpuResetWatchdogMs
-     * expires in waitForCPUResetAssert or waitForCPUResetDeAssert: cancel the
-     * watchdog timer, de-assert PRE_SYS_RST (Board 0/1), log loudly to journal
-     * and ResourceErrorsDetected, set action NONE and setPowerState::on. No HPM
-     * run-power teardown.
+     * expires: cancel the watchdog, log the fault and clear the action.
+     * For reset-assert faults, restore On GPIOs and state, releasing
+     * PRE_SYS_RST without removing run power. For reset-deassert faults,
+     * apply Off GPIO defaults and transition directly to Off without waiting
+     * for power-good deassertion.
      *
      * @param faultDetail Human-readable fault text for event log / journal
+     * @param targetState PowerState::on or PowerState::off for fault recovery
      */
-    void abortWarmRebootCpuResetWatchdogFault(std::string_view faultDetail);
+    void abortWarmRebootCpuResetWatchdogFault(std::string_view faultDetail,
+                                              PowerState targetState);
 
     /**
      * @brief Handle CPU Shutdown OK watchdog expiry during FORCE_OFF

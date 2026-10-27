@@ -987,23 +987,36 @@ void VRPowerControl::deassertPreSystemResets()
 }
 
 void VRPowerControl::abortWarmRebootCpuResetWatchdogFault(
-    std::string_view faultDetail)
+    std::string_view faultDetail, PowerState targetState)
 {
+    if (targetState != PowerState::on && targetState != PowerState::off)
+    {
+        lg2::error("Invalid target state for warm reboot fault recovery");
+        return;
+    }
+
     cancelTimer("CPU Reset Watchdog Timer", cpuResetWatchdogTimer);
 
     lg2::error(
-        "CRITICAL WARM REBOOT FAULT: {DETAIL}. De-asserting Pre System Reset only; "
-        "HPM run power is NOT removed. Returning host/chassis to On.",
-        "DETAIL", faultDetail);
-
-    deassertPreSystemResets();
+        "CRITICAL WARM REBOOT FAULT: {DETAIL}. Recovering host/chassis to {STATE}.",
+        "DETAIL", faultDetail, "STATE",
+        targetState == PowerState::on ? "On" : "Off");
 
     logResourceEvent("ResourceErrorsDetected",
                      {std::string("Host0"), std::string(faultDetail)},
                      "xyz.openbmc_project.Logging.Entry.Level.Error");
 
-    action = PowerAction::NONE;
-    setPowerState(PowerState::on);
+    if (targetState == PowerState::on)
+    {
+        deassertPreSystemResets();
+        action = PowerAction::NONE;
+        setGPIOsForHostStateOn();
+        setPowerState(PowerState::on);
+    }
+    else
+    {
+        transitionToOffState();
+    }
 }
 
 // Helper function: Transition to CPU Reset Assert wait state
@@ -1126,8 +1139,8 @@ void VRPowerControl::handleCPUResetWatchdogExpired()
         abortWarmRebootCpuResetWatchdogFault(
             "Warm reboot fault: CPU_RESET_L did not assert within "
             "CpuResetWatchdogMs (CPUs did not enter reset). "
-            "PRE_SYS_RST de-asserted; run power unchanged.");
-        setGPIOsForHostStateOn();
+            "PRE_SYS_RST de-asserted; run power unchanged.",
+            PowerState::on);
     }
     else
     {
@@ -1198,12 +1211,12 @@ void VRPowerControl::handleWaitForCPUResetDeAssert(Event event)
                 action == PowerAction::GRACEFUL_WARM_REBOOT)
             {
                 lg2::error(
-                    "Warm reboot fault: CPU_RESET_L did not de-assert within the timeout period. CPUs may still be in reset. Host Power State is stil On. Conducting cleanup: Setting GPIO states to match Host State On.");
+                    "Warm reboot fault: CPU_RESET_L did not de-assert within the timeout period. CPUs may still be in reset. Powering off host.");
                 abortWarmRebootCpuResetWatchdogFault(
                     "Warm reboot fault: CPU_RESET_L did not de-assert within "
                     "CpuResetWatchdogMs (CPUs may still be in reset). "
-                    "PRE_SYS_RST de-asserted; run power domain unchanged.");
-                setGPIOsForHostStateOff();
+                    "Applying host Off GPIO defaults and transitioning to Off.",
+                    PowerState::off);
             }
             else
             {
