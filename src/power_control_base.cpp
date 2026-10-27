@@ -1192,7 +1192,12 @@ void PowerControl::setPowerState(const PowerState state)
 
     // Update D-Bus chassis state (uses virtual dispatch)
     chassisIface->signal_property("CurrentPowerState");
-    chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
+    const uint64_t lastStateChangeTime = getCurrentTimeMs();
+    if (!suppressPowerStateSave)
+    {
+        appState.setLastStateChangeTime(lastStateChangeTime);
+    }
+    chassisIface->set_property("LastStateChangeTime", lastStateChangeTime);
 
     // While an aux power cycle is running, the transient on/off states between
     // shutdown attempts are not real power events, so suppress the
@@ -2186,7 +2191,12 @@ void PowerControl::initializeChassisInterface()
         "CurrentPowerState", std::string{},
         sdbusplus::vtable::property_::emits_change,
         [this](const auto&) { return std::string(getChassisState()); });
-    chassisIface->register_property("LastStateChangeTime", getCurrentTimeMs());
+    uint64_t lastStateChangeTime = appState.getLastStateChangeTime();
+    if (lastStateChangeTime == 0)
+    {
+        lastStateChangeTime = getCurrentTimeMs();
+        appState.setLastStateChangeTime(lastStateChangeTime);
+    }
 
     // NOTE: Do NOT call chassisIface->initialize() here!
     // Deferred to initializeHostStateInterface() so the chassis interface is
@@ -2574,6 +2584,8 @@ void PowerControl::initializeHostStateInterface()
     // ready before the host0 interfaces become visible to other services.
     if (chassisIface)
     {
+        chassisIface->register_property("LastStateChangeTime",
+                                        appState.getLastStateChangeTime());
         chassisIface->initialize();
         lg2::info("Chassis interface initialized");
     }
@@ -4325,6 +4337,7 @@ void PowerControl::initializePowerStateFromHardware(
         return;
     }
 
+    const auto savedState = appState.get(PersistentState::Params::PowerState);
     std::vector<bool> signalStates;
 
     // Read all power indicator signals
@@ -4392,10 +4405,16 @@ void PowerControl::initializePowerStateFromHardware(
         setGPIOsForHostStateOff();
     }
 
+    // Account for a power-state change while the BMC was offline.
+    if (savedState.empty() || savedState != getChassisState())
+    {
+        const auto now = getCurrentTimeMs();
+        appState.setLastStateChangeTime(now);
+    }
+
     // Update D-Bus interfaces to reflect actual hardware state
     hostIface->signal_property("CurrentHostState");
     chassisIface->signal_property("CurrentPowerState");
-    chassisIface->set_property("LastStateChangeTime", getCurrentTimeMs());
 }
 
 void PowerControl::setGPIOsForHostStateOn()
