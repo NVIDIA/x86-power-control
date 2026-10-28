@@ -1,0 +1,166 @@
+{
+    "gpio_configs": [
+        {
+            "Name": "PDBMainPowerEnable",
+            "LineName": "MAIN_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDBMainPowerOk",
+            "LineName": "MAIN_PWR_OK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "E1SPowerEnable",
+            "LineName": "E1S_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "BMCSSDReset",
+            "LineName": "BMC_SSD0_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "USBPowerEnable",
+            "LineName": "USB_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "SSDPowerDisable",
+            "LineName": "SSD0_PWRDIS-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerPG",
+            "LineName": "B0_M0_RUN_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerEnable",
+            "LineName": "B0_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board1RunPowerEnable",
+            "LineName": "B1_M0_RUN_POWER_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0PreSystemReset",
+            "LineName": "B0_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1PreSystemReset",
+            "LineName": "B1_M0_PRE_SYS_RST_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "CpuBootDone",
+            "LineName": "B0_M0_CPU_BOOT_COMPLETE_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "CpuResetIndicator",
+            "LineName": "CPU_RST_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownForce",
+            "LineName": "B0_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownForce",
+            "LineName": "B1_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownRequest",
+            "LineName": "B0_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownRequest",
+            "LineName": "B1_M0_SHDN_REQ_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownOk",
+            "LineName": "B0_M0_CPU_SHDN_OK_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board1CpuShutdownOk",
+            "LineName": "B1_M0_CPU_SHDN_OK_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "StbyPwrOk",
+            "LineName": "STBY_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "AuxPowerCycle",
+            "LineName": "PDB_TRAY_RST-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        }
+    ],
+    "resources": [
+        {
+            "Name": "Board0IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/11-0020"
+        },
+        {
+            "Name": "Board1IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/8-0020"
+        },
+        {
+            "Name": "PdbIoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/0-0020"
+        }
+    ],
+    "timing_configs": {
+        "ForcefulCpuShutdownOkWatchdogMs": 100,
+        "GracefulCpuShutdownOkWatchdogMs": 240000,
+        "CpuResetWatchdogMs": 2000,
+        "CpuBootDoneDeAssertDelayMs": 2000,
+        "HostRebootShutdownOkDelayMs": 5000,
+        "HPMPowerGoodWatchdogMs": 10000,
+        "PdbMainPowerOkWatchdogMs": 1000,
+        "PowerCycleDelayMs": 15000,
+        "ForceWarmRebootDelayMs": 1000,
+        "GracefulWarmRebootDelayMs": 1000,
+        "PowerOffSaveMs": 10000,
+        "AuxPowerCycleWatchdogMs": 5000,
+        "AuxPowerCycleJournalSyncTimeoutMs": 2000
+    },
+    "event_configs": {
+        "NMIWhenPoweredOff": true
+    },
+    "platform-type": "nvl72"
+}

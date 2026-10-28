@@ -1,0 +1,138 @@
+{
+    "gpio_configs": [
+        {
+            "Name": "PDBPSUPowerOn",
+            "LineName": "PDB_PS_ON_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "PDBPSUPowerOk",
+            "LineName": "PDB_PSU_PWOK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDB12V_HPM-AICEnable",
+            "LineName": "PDB_P12V_HPM_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDB12V_GPU1Enable",
+            "LineName": "PDB_P12V_GPU1_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDB12V_GPU2_Enable",
+            "LineName": "PDB_P12V_GPU2_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDBMainPowerOk",
+            "LineName": "PDB_MAIN_PWR_OK-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "USBPowerEnable",
+            "LineName": "USB_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerPG",
+            "LineName": "B0_M0_MODULE_PWR_GOOD-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerEnable",
+            "LineName": "B0_M0_RUN_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0PreSystemReset",
+            "LineName": "B0_M0_IOX_PRE_SYS_RST_N-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "CpuBootDone",
+            "LineName": "B0_M0_CPU_BOOT_COMPLETE_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "CpuResetIndicator",
+            "LineName": "CPU_RST_L-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownForce",
+            "LineName": "B0_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownRequest",
+            "LineName": "B0_M0_SHDN_REQ_L_3V3-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownOk",
+            "LineName": "B0_M0_CPU_SHDN_OK_L_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "StbyPwrOk",
+            "LineName": "STBY_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "AuxPowerCycle",
+            "LineName": "PDB_TRAY_RST-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        }
+    ],
+    "resources": [
+        {
+            "Name": "Board0IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/2-0020"
+        },
+        {
+            "Name": "PdbIoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/9-0024"
+        }
+    ],
+    "timing_configs": {
+        "ForcefulCpuShutdownOkWatchdogMs": 100,
+        "GracefulCpuShutdownOkWatchdogMs": 120000,
+        "CpuResetWatchdogMs": 2000,
+        "CpuBootDoneDeAssertDelayMs": 2000,
+        "HostRebootShutdownOkDelayMs": 5000,
+        "HPMPowerGoodWatchdogMs": 10000,
+        "PdbMainPowerOkWatchdogMs": 2000,
+        "PowerCycleDelayMs": 15000,
+        "ForceWarmRebootDelayMs": 1000,
+        "GracefulWarmRebootDelayMs": 1000,
+        "PowerOffSaveMs": 10000,
+        "PdbPSUPowerOkWatchdogMs": 2000,
+        "AuxPowerCycleWatchdogMs": 5000,
+        "AuxPowerCycleJournalSyncTimeoutMs": 2000
+    },
+    "event_configs": {
+        "NMIWhenPoweredOff": true
+    },
+    "platform-type": "c2"
+}
