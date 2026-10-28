@@ -122,6 +122,14 @@ executable(
     install_dir: get_option('bindir'),
 )
 
+python = import('python').find_installation('python3')
+test(
+    'nvl72-shutdown-state',
+    python,
+    args: files('test/nvl72_shutdown_state_test.py'),
+    env: {'CXX': cpp.cmd_array()[0]},
+)
+
 systemd = dependency('systemd')
 if systemd.found()
     if build_platform_power_cycle
