@@ -594,7 +594,8 @@ class PowerControl
      * @brief Queue an aux power cycle after applying platform admission policy
      *
      * Reserves the power-action lock before acknowledging the caller, then
-     * defers execution to avoid D-Bus reentrancy.
+     * defers execution for three seconds to give Redfish time to send its
+     * reply before standby power is cut, including when the host is off.
      *
      * @param variant Requested aux-cycle variant
      * @return true if the request was accepted and queued; false if rejected
@@ -1286,6 +1287,11 @@ class PowerControl
      * @brief Timer for power-off state save for power loss tracking
      */
     boost::asio::steady_timer powerStateSaveTimer;
+
+    /**
+     * @brief Grace period for the Redfish reply after accepting an aux cycle
+     */
+    boost::asio::steady_timer auxPowerCycleReplyDelayTimer;
 
     /**
      * @brief Watchdog for the aux power cycle
