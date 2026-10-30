@@ -2513,11 +2513,14 @@ void PowerControl::initializeOSInterface()
         return;
     }
 
-    // Default to Inactive state
-    osIface->register_property(
-        "OperatingSystemState",
-        std::string(
-            "xyz.openbmc_project.State.OperatingSystem.Status.OSStatus.Inactive"));
+    // Read from operatingSystemState, so a state set before initialize() is
+    // the one published.
+    osIface->register_property_r(
+        "OperatingSystemState", std::string{},
+        sdbusplus::vtable::property_::emits_change, [this](const auto&) {
+            return std::string(
+                getOperatingSystemStateStage(operatingSystemState));
+        });
 
     // NOTE: Do NOT call initialize() here - deferred to
     // initializeHostStateInterface()
@@ -4115,6 +4118,7 @@ void PowerControl::setOperatingSystemState(OperatingSystemStateStage stage)
         return;
     }
 
+    const bool changed = (operatingSystemState != stage);
     operatingSystemState = stage;
 #if IGNORE_SOFT_RESETS_DURING_POST
     // If POST complete has asserted set ignoreNextSoftReset to false to avoid
@@ -4124,8 +4128,10 @@ void PowerControl::setOperatingSystemState(OperatingSystemStateStage stage)
         ignoreNextSoftReset = false;
     }
 #endif
-    osIface->set_property("OperatingSystemState",
-                          std::string(getOperatingSystemStateStage(stage)));
+    if (changed)
+    {
+        osIface->signal_property("OperatingSystemState");
+    }
 
     lg2::info("Moving os state to {STATE} stage", "STATE",
               getOperatingSystemStateStage(stage));
