@@ -1,0 +1,107 @@
+{
+    "gpio_configs": [
+        {
+            "Name": "Board0RunPowerEnable",
+            "LineName": "B0_M0_RUN_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0RunPowerPG",
+            "LineName": "B0_M0_MODULE_PWR_GOOD-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "Board0PreSystemReset",
+            "LineName": "B0_M0_IOX_PRE_SYS_RST_N-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownForce",
+            "LineName": "B0_M0_SHDN_FORCE_L-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownRequest",
+            "LineName": "B0_M0_SHDN_REQ_L_3V3-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "Board0CpuShutdownOk",
+            "LineName": "B0_M0_CPU_SHDN_OK_L_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "CpuResetIndicator",
+            "LineName": "B0_M0_CPU_SYS_RST_N_3V3-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveLow"
+        },
+        {
+            "Name": "StbyPwrOk",
+            "LineName": "STBY_POWER_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "AuxPowerCycle",
+            "LineName": "PDB_TRAY_RST-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "HostReadyPowerEnable",
+            "LineName": "HOST_RDY_PWR_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDBMainPowerOk",
+            "LineName": "P54V_HSC_PG-I",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        },
+        {
+            "Name": "PDBMainPowerEnable",
+            "LineName": "P54V_HSC_EN-O",
+            "Type": "GPIO",
+            "Polarity": "ActiveHigh"
+        }
+    ],
+    "resources": [
+        {
+            "Name": "Board0IoxPath",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/2-0020"
+        },
+        {
+            "Name": "BaseboardIOX",
+            "Type": "IOXPath",
+            "Path": "/sys/bus/i2c/drivers/pca953x/5-0021"
+        }
+    ],
+    "timing_configs": {
+        "ForcefulCpuShutdownOkWatchdogMs": 100,
+        "GracefulCpuShutdownOkWatchdogMs": 120000,
+        "CpuResetWatchdogMs": 2000,
+        "CpuBootDoneDeAssertDelayMs": 2000,
+        "HostRebootShutdownOkDelayMs": 5000,
+        "HPMPowerGoodWatchdogMs": 10000,
+        "PowerCycleDelayMs": 15000,
+        "ForceWarmRebootDelayMs": 1000,
+        "GracefulWarmRebootDelayMs": 1000,
+        "PowerOffSaveMs": 10000,
+        "AuxPowerCycleWatchdogMs": 5000,
+        "AuxPowerCycleJournalSyncTimeoutMs": 2000,
+        "PdbMainPowerOkWatchdogMs": 1000
+    },
+    "event_configs": {
+        "NMIWhenPoweredOff": true
+    },
+    "platform-type": "vc-256"
+}
