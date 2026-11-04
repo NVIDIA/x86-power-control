@@ -37,11 +37,26 @@ struct __attribute__((__packed__)) GlacierVdmHeader
 struct __attribute__((__packed__)) BootCompleteV2
 {
     GlacierVdmHeader header{.commandCode = 0x02, .msgVersion = 0x02};
-    // SLOT_REPORTING_VALID (bit 2) clear, so BOOT_SLOT (bits 1:0) is 2b'11:
-    // the BMC does not report which slot the host booted from.
-    uint8_t bootSlot = 0x03;
+    // SLOT_REPORTING_VALID (bit 2) plus BOOT_SLOT (bits 1:0).
+    uint8_t bootSlot;
     uint8_t rsvd[2] = {0x00, 0x00};
 };
+
+/** Query Boot Status v1 (Glacier FW design doc 4.3.1.6). */
+struct __attribute__((__packed__)) QueryBootStatus
+{
+    GlacierVdmHeader header{.commandCode = 0x05, .msgVersion = 0x01};
+};
+
+constexpr std::size_t completionCodeOffset = sizeof(GlacierVdmHeader);
+constexpr std::size_t bootStatusSize = 8;
+constexpr std::size_t bootStatusOffset = completionCodeOffset + 1;
+constexpr std::size_t releaseSlotByteOffset = bootStatusOffset + 1;
+constexpr uint8_t releaseSlotMask = 0x03;
+constexpr uint8_t releaseSlot0 = 0x01;
+constexpr uint8_t releaseSlot1 = 0x02;
+constexpr uint8_t slotReportingValid = 0x04;
+constexpr uint8_t completionSuccess = 0x00;
 
 /**
  * Add External Timestamp (Glacier FW design doc 4.3.1.18).
@@ -147,6 +162,107 @@ void GNRPowerControl::sendVdm(std::span<const uint8_t> packet,
     });
 }
 
+void GNRPowerControl::cancelBootStatusQuery()
+{
+    // Any reply or retry already queued sees a stale generation and drops out.
+    ++bootGeneration;
+    bootStatusRetryTimer.cancel();
+}
+
+void GNRPowerControl::sendBootComplete()
+{
+    cancelBootStatusQuery();
+    queryBootStatus(1, bootGeneration);
+}
+
+void GNRPowerControl::queryBootStatus(unsigned attempt,
+                                      std::size_t generation)
+{
+    std::array<uint8_t, sizeof(QueryBootStatus)> queryPacket;
+    packVdm(QueryBootStatus{}, queryPacket);
+    sendVdm(queryPacket, "query-boot-status",
+            [this, attempt, generation](MctpResult result) {
+        // Same gate as the PostComplete handler: the host may have started
+        // leaving this boot (power off, reset) before the generation moves on
+        // in completePowerDown().
+        if (generation != bootGeneration || powerState != PowerState::on)
+        {
+            lg2::info(
+                "GNR: dropping query boot status reply, host left that boot ({STATE})",
+                "STATE", getPowerStateName());
+            return;
+        }
+
+        if (!result)
+        {
+            // No EID is a config problem, not a transient one.
+            if (!mctpEid || attempt >= maxBootStatusAttempts)
+            {
+                lg2::error(
+                    "GNR: query boot status failed after {N} attempt(s); boot complete not sent",
+                    "N", attempt);
+                return;
+            }
+            lg2::warning(
+                "GNR: query boot status attempt {N}/{MAX} failed, retrying in {S}s",
+                "N", attempt, "MAX", maxBootStatusAttempts, "S",
+                bootStatusRetryDelay.count());
+            bootStatusRetryTimer.expires_after(bootStatusRetryDelay);
+            bootStatusRetryTimer.async_wait(
+                [this, attempt,
+                 generation](const boost::system::error_code& ec) {
+                if (ec || generation != bootGeneration ||
+                    powerState != PowerState::on)
+                {
+                    return;
+                }
+                queryBootStatus(attempt + 1, generation);
+            });
+            return;
+        }
+
+        const auto response = *result;
+        if (response.size() < bootStatusOffset + bootStatusSize)
+        {
+            lg2::error(
+                "GNR: query boot status response too short ({LEN} bytes)",
+                "LEN", response.size());
+            return;
+        }
+        if (response[completionCodeOffset] != completionSuccess)
+        {
+            lg2::error("GNR: query boot status completion code {CODE}", "CODE",
+                       response[completionCodeOffset]);
+            return;
+        }
+
+        const uint8_t releaseSlot =
+            response[releaseSlotByteOffset] & releaseSlotMask;
+        uint8_t bootSlot;
+        if (releaseSlot == releaseSlot0)
+        {
+            bootSlot = 0;
+        }
+        else if (releaseSlot == releaseSlot1)
+        {
+            bootSlot = 1;
+        }
+        else
+        {
+            lg2::error(
+                "GNR: AP0_RELEASE_SLOT is invalid ({SLOT}); boot complete not sent",
+                "SLOT", releaseSlot);
+            return;
+        }
+
+        std::array<uint8_t, sizeof(BootCompleteV2)> bootCompletePacket;
+        packVdm(BootCompleteV2{.bootSlot = static_cast<uint8_t>(
+                                   slotReportingValid | bootSlot)},
+                bootCompletePacket);
+        sendVdm(bootCompletePacket, "boot-complete");
+    });
+}
+
 std::chrono::milliseconds GNRPowerControl::getTimeoutWithDefault(
     const std::string& key, std::chrono::milliseconds default_t)
 {
@@ -165,7 +281,7 @@ GNRPowerControl::GNRPowerControl(
     PersistentState& appState) :
     PowerControl(ioContext, conn, node, appState, configFilePath),
     gnrPowerOnTimer(ioContext), sbiosResetSettleTimer(ioContext),
-    g3SoftMinAssertTimer(ioContext)
+    g3SoftMinAssertTimer(ioContext), bootStatusRetryTimer(ioContext)
 {
     using namespace std::chrono_literals;
     // Only require PowerOk and PowerOut; G3Soft GPIOs are optional in JSON
@@ -184,6 +300,13 @@ GNRPowerControl::GNRPowerControl(
                 if (it == powerSignalMap.end())
                     return;
                 bool asserted = (state == it->second->polarity);
+                if (asserted && powerState != PowerState::on)
+                {
+                    lg2::info(
+                        "GNR: ignoring PostComplete assertion while host power state is {STATE}",
+                        "STATE", getPowerStateName());
+                    return;
+                }
                 setOperatingSystemState(
                     asserted ? OperatingSystemStateStage::Standby
                              : OperatingSystemStateStage::Inactive);
@@ -196,9 +319,12 @@ GNRPowerControl::GNRPowerControl(
                 // boot-complete notification.
                 if (asserted)
                 {
-                    std::array<uint8_t, sizeof(BootCompleteV2)> packet;
-                    packVdm(BootCompleteV2{}, packet);
-                    sendVdm(packet, "boot-complete");
+                    sendBootComplete();
+                }
+                else
+                {
+                    // That boot is over; don't keep querying on its behalf.
+                    cancelBootStatusQuery();
                 }
             },
             /*optional=*/true);
@@ -498,6 +624,7 @@ void GNRPowerControl::completePowerDown()
     // flow instead, so there is nothing to do to the hardware here.
     ignoreNextPowerOkDeAssert = false;
     sbiosResetSettleTimer.cancel();
+    cancelBootStatusQuery();
 }
 
 void GNRPowerControl::startPowerButtonDelay()
