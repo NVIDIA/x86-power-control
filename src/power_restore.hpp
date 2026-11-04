@@ -31,7 +31,6 @@ namespace power_control
  * This manager supposed to store runtime parameters that supposed to be
  * persistent over BMC reboot. It provides simple Get/Set interface and handle
  * default values, hardcoded in getDefault() method.
- * @note: currently only string parameters supported
  */
 using dbusPropertiesList =
     boost::container::flat_map<std::string,
@@ -43,7 +42,6 @@ using dbusPropertiesList =
  * This manager stores runtime parameters that are supposed to be
  * persistent over BMC reboots. It provides a simple Get/Set interface and
  * handles default values, hardcoded in getDefault() method.
- * @note: currently only string parameters supported
  */
 class PersistentState
 {
@@ -162,6 +160,22 @@ class PersistentState
         saveState();
     }
 
+    uint64_t getLastStateChangeTime() const
+    {
+        auto value = stateData.find("LastStateChangeTime");
+        if (value == stateData.end() || !value->is_number_unsigned())
+        {
+            return 0;
+        }
+        return value->get<uint64_t>();
+    }
+
+    void setLastStateChangeTime(uint64_t value)
+    {
+        stateData["LastStateChangeTime"] = value;
+        saveState();
+    }
+
   private:
     nlohmann::json stateData;
     const std::filesystem::path powerControlDir = "/var/lib/power-control";
@@ -198,7 +212,6 @@ class PersistentState
     {
         switch (parameter)
         {
-            // For now we only store PowerState
             case Params::PowerState:
                 return "";
         }
