@@ -104,6 +104,9 @@ class GNRPowerControl : public PowerControl
     /** Give the erot log parser a wall-clock anchor for its boot-relative
      * timestamps. */
     void sendTimestampVdm();
+    /** Sample the PostComplete line once at startup and set
+     * OperatingSystemState. */
+    void seedOperatingSystemState();
     /** Drop the SBIOS-reset backstop now that the power down is committed. */
     void completePowerDown();
     /** PexResetN released; settle for G3SoftPowerButtonDelayMs, then pulse. */

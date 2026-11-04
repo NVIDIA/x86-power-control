@@ -350,6 +350,8 @@ GNRPowerControl::GNRPowerControl(
     // so the initial published values are correct.
     initializePowerStateFromHardware({"PowerOk"}, true);
     initializeHostStateInterface();
+    // No PostComplete edge arrives after a BMC restart, so seed the OS state.
+    seedOperatingSystemState();
     // The host is already up, so its SBIOS reset is still ahead of us. Boards
     // without the G3Soft GPIOs have nothing to bracket, so they keep reacting
     // to the first de-assert.
@@ -372,6 +374,36 @@ GNRPowerControl::GNRPowerControl(
     {
         sendTimestampVdm();
     }
+}
+
+void GNRPowerControl::seedOperatingSystemState()
+{
+    auto it = powerSignalMap.find("PostComplete");
+    if (it == powerSignalMap.end())
+    {
+        return;
+    }
+    auto& config = *it->second;
+    if (!config.gpioHandler || !config.gpioLine ||
+        !config.gpioLine.is_requested())
+    {
+        lg2::warning("GNR: PostComplete unavailable, OS state not seeded");
+        return;
+    }
+    int state = readGPIOValue(config);
+    if (state < 0)
+    {
+        lg2::warning("GNR: PostComplete unavailable, OS state not seeded");
+        return;
+    }
+
+    bool standby = state == config.polarity && powerState == PowerState::on;
+    auto stage = standby ? OperatingSystemStateStage::Standby
+                         : OperatingSystemStateStage::Inactive;
+    const char* stageName = standby ? "Standby" : "Inactive";
+    setOperatingSystemState(stage);
+    lg2::info("GNR: seeded OS state {STAGE} from PostComplete level {LEVEL}",
+              "STAGE", stageName, "LEVEL", state);
 }
 
 void GNRPowerControl::validateTimerConfigs() {}
