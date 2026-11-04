@@ -11,6 +11,7 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -168,6 +169,20 @@ class GNRPowerControl : public PowerControl
      */
     void sendVdm(std::span<const uint8_t> packet, const std::string& what,
                  std::function<void(MctpResult)> onComplete = {});
+    /** Query AP0_RELEASE_SLOT and report that slot with Boot Complete V2.
+     * Starts a new boot generation, superseding any query still in flight. */
+    void sendBootComplete();
+    /**
+     * @brief Send Query Boot Status for one boot, retrying transport failures
+     *
+     * A transport failure (timeout, socket error) is retried after
+     * bootStatusRetryDelay, up to maxBootStatusAttempts in total, as long as
+     * generation is still the current boot. Protocol failures (short reply,
+     * bad completion code, invalid release slot) are not retried.
+     */
+    void queryBootStatus(unsigned attempt, std::size_t generation);
+    /** Abandon any pending boot status query or retry for the current boot. */
+    void cancelBootStatusQuery();
 
     std::chrono::milliseconds getTimeoutWithDefault(
         const std::string& key, std::chrono::milliseconds default_t);
@@ -194,6 +209,13 @@ class GNRPowerControl : public PowerControl
     boost::asio::steady_timer g3SoftMinAssertTimer;
     /** Destination EID for erot VDMs; required when G3Soft is configured. */
     std::optional<uint8_t> mctpEid;
+    /** Bumped whenever a boot starts or ends, so a stale query reply or
+     * retry never reports Boot Complete for a different boot. */
+    std::size_t bootGeneration{0};
+    /** Back-off between Query Boot Status attempts. */
+    boost::asio::steady_timer bootStatusRetryTimer;
+    static constexpr unsigned maxBootStatusAttempts = 3;
+    static constexpr std::chrono::seconds bootStatusRetryDelay{2};
 };
 
 } // namespace power_control
