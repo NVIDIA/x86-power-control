@@ -11,6 +11,12 @@ namespace power_control
 {
 using Event = PowerControl::Event;
 
+namespace
+{
+constexpr auto cpuBootDoneService = "cpu-boot-done.service";
+constexpr auto cpuBootUndoneService = "cpu-boot-undone.service";
+} // namespace
+
 VC256PowerControl::VC256PowerControl(
     boost::asio::io_context& ioContext,
     std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -31,6 +37,11 @@ VC256PowerControl::VC256PowerControl(
     addRequiredSignal("StbyPwrOk", 0, GPIODirection::IN,
                       [this](bool state) { this->stbyPwrOkHandler(state); });
 
+    // Deliver CPU Boot Done edges directly to the FSM, without the
+    // phosphor-gpio-monitor/systemd/D-Bus relay delay.
+    addRequiredSignal("CpuBootDone", 0, GPIODirection::IN,
+                      [this](bool state) { this->cpuBootDoneHandler(state); });
+
     // HostReadyPowerEnable is VC-256-specific, registered here.
     addRequiredSignal("HostReadyPowerEnable", 0, GPIODirection::OUT);
 
@@ -48,13 +59,53 @@ VC256PowerControl::VC256PowerControl(
     setDefaultValues();
 
     initializePowerStateFromHardware(powerIndicators, true);
-    registerCpuBootDoneSetterMethod();
+
+    // Match the former ExecuteAtStart behavior without injecting an artificial
+    // edge into reboot-versus-shutdown classification.
+    auto cpuBootDoneSignal = getSignal("CpuBootDone");
+    if (cpuBootDoneSignal && cpuBootDoneSignal->gpioLine)
+    {
+        updateCpuBootDoneFromGpio(cpuBootDoneSignal->gpioLine.get_value(),
+                                  false);
+    }
+
     initializeHostStateInterface();
 
     // Seed the standby guard from hardware. Runs last so the power state and
     // host state interface are already established before a latched loss can
     // force PowerState::off.
     refreshStandbyLostFromHardware();
+}
+
+void VC256PowerControl::cpuBootDoneHandler(bool state)
+{
+    updateCpuBootDoneFromGpio(state, true);
+}
+
+void VC256PowerControl::updateCpuBootDoneFromGpio(bool state,
+                                                  bool notifyStateMachine)
+{
+    auto config = getSignal("CpuBootDone");
+    if (!config)
+    {
+        return;
+    }
+
+    const bool asserted = (state == config->polarity);
+    lg2::info(
+        "CpuBootDone GPIO event: raw value={VALUE}, logical state={STATE}",
+        "VALUE", static_cast<int>(state), "STATE",
+        asserted ? "ASSERTED" : "DE-ASSERTED");
+
+    // Update D-Bus and notify the FSM before non-critical systemd work.
+    if (!updateCpuBootDoneState(asserted ? 1 : 0, notifyStateMachine))
+    {
+        return;
+    }
+
+    setOperatingSystemState(asserted ? OperatingSystemStateStage::Standby
+                                     : OperatingSystemStateStage::Inactive);
+    startSystemdUnit(asserted ? cpuBootDoneService : cpuBootUndoneService);
 }
 
 // ============================================================================
