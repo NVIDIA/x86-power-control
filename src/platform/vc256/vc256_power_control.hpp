@@ -56,6 +56,15 @@ class VC256PowerControl : public VRPowerControl
     void validateTimerConfigs() override;
 
   private:
+    /** Handle a CPU Boot Done GPIO edge. */
+    void cpuBootDoneHandler(bool state);
+
+    /**
+     * Update CPU Boot Done from its raw GPIO level. Initial discovery does not
+     * notify the FSM; subsequent edges notify it before platform actions.
+     */
+    void updateCpuBootDoneFromGpio(bool state, bool notifyStateMachine);
+
     void stbyPwrOkHandler(bool state);
     void markStandbyLost();
 
