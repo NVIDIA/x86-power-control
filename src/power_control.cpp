@@ -255,6 +255,7 @@ static std::unique_ptr<PowerControl> createPowerControl(
 } // namespace power_control
 
 int main(int argc, char* argv[])
+try
 {
     using namespace power_control;
     static boost::asio::io_context io;
@@ -314,4 +315,9 @@ int main(int argc, char* argv[])
     io.run();
 
     return 0;
+}
+catch (const std::exception& e)
+{
+    lg2::error("Unhandled exception in main: {ERROR}", "ERROR", e.what());
+    std::terminate();
 }
