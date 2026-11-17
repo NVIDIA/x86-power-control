@@ -5,6 +5,8 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace power_control
@@ -13,6 +15,7 @@ using Event = PowerControl::Event;
 
 namespace
 {
+constexpr auto cpuBootDoneMarker = "/run/bmc-state/CPU_BOOT_DONE-I";
 constexpr auto cpuBootDoneService = "cpu-boot-done.service";
 constexpr auto cpuBootUndoneService = "cpu-boot-undone.service";
 } // namespace
@@ -97,7 +100,7 @@ void VC256PowerControl::updateCpuBootDoneFromGpio(bool state,
         "VALUE", static_cast<int>(state), "STATE",
         asserted ? "ASSERTED" : "DE-ASSERTED");
 
-    // Update D-Bus and notify the FSM before non-critical systemd work.
+    // Update D-Bus and notify the FSM before filesystem and systemd work.
     if (!updateCpuBootDoneState(asserted ? 1 : 0, notifyStateMachine))
     {
         return;
@@ -105,7 +108,41 @@ void VC256PowerControl::updateCpuBootDoneFromGpio(bool state,
 
     setOperatingSystemState(asserted ? OperatingSystemStateStage::Standby
                                      : OperatingSystemStateStage::Inactive);
+    updateCpuBootDoneMarker(asserted);
     startSystemdUnit(asserted ? cpuBootDoneService : cpuBootUndoneService);
+}
+
+void VC256PowerControl::updateCpuBootDoneMarker(bool asserted)
+{
+    // ipmid still uses this marker to enforce host restrictions after POST.
+    const std::filesystem::path marker(cpuBootDoneMarker);
+    std::error_code ec;
+
+    if (asserted)
+    {
+        std::filesystem::create_directories(marker.parent_path(), ec);
+        if (ec)
+        {
+            lg2::error("Failed to create CPU Boot Done state directory: {ERR}",
+                       "ERR", ec.message());
+            return;
+        }
+
+        std::ofstream markerFile(marker);
+        if (!markerFile)
+        {
+            lg2::error("Failed to create CPU Boot Done marker {PATH}", "PATH",
+                       marker.string());
+        }
+        return;
+    }
+
+    std::filesystem::remove(marker, ec);
+    if (ec)
+    {
+        lg2::error("Failed to remove CPU Boot Done marker {PATH}: {ERR}",
+                   "PATH", marker.string(), "ERR", ec.message());
+    }
 }
 
 // ============================================================================
