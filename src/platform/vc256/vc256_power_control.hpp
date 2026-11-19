@@ -65,6 +65,9 @@ class VC256PowerControl : public VRPowerControl
      */
     void updateCpuBootDoneFromGpio(bool state, bool notifyStateMachine);
 
+    /** Synchronize the legacy POST marker consumed by ipmid. */
+    void updateCpuBootDoneMarker(bool asserted);
+
     void stbyPwrOkHandler(bool state);
     void markStandbyLost();
 
